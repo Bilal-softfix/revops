@@ -3,8 +3,14 @@
 ## Toolchain
 - **Node 22** via [fnm](https://github.com/Schniz/fnm) (`.nvmrc` pins 22). Enable auto-switching in your shell profile: `fnm env --use-on-cd | Out-String | Invoke-Expression` (PowerShell) or `eval "$(fnm env --use-on-cd)"` (bash/zsh).
 - **pnpm** via corepack, enabled **under Node 22**: `fnm use 22; corepack enable`. The `packageManager` field pins pnpm 10.34.9. A pnpm shim installed under another Node (e.g. a system Node 24 in `C:\Program Files\nodejs`) runs pnpm on that Node; `pnpm i` then warns "Unsupported engine".
+- **Engine pin:** `.node-version` / `.nvmrc` = 22, `engines.node` = `>=22.12.0 <23` (22.12 is the first with unflagged `require(esm)`, which apps/api needs), and `.npmrc` `engine-strict=true`. Any pnpm command on a non-22 Node fails instead of silently running.
 - **Python 3.12** via [uv](https://docs.astral.sh/uv/) only. Don't rely on a system Python; `apps/voice-agent/.python-version` makes `uv` provision 3.12.
 - First run: copy `.env.example` → `.env` (repo root) and `apps/api/.env.example` → `apps/api/.env`, fill them in, then `pnpm i && pnpm run doctor && pnpm dev` (api :4000, web :3000, worker, voice-agent hello-world).
+
+## CI (GitHub Actions, `.github/workflows/ci.yml`)
+- `checks (ubuntu-latest)`: typecheck, lint, unit, build, `pnpm audit --prod` (warn only). `checks (windows-latest)`: typecheck, unit, build.
+- `integration (ubuntu-latest)`: Postgres 16 + pgvector and Redis 7 as service containers (Docker exists only in CI). `scripts/ci/setup-db.sql` mirrors the Neon setup below, then `pnpm run doctor` and `pnpm test:integration` run.
+- Each job times out after 15 min; a new push cancels the in-flight run for the same branch/PR. pnpm store and uv caches are restored per run.
 
 ## Services
 | Need | Dev choice | Env var |

@@ -43,8 +43,11 @@ describe('maskUrl', () => {
 });
 
 describe('checkNodeVersion', () => {
-  it('passes on Node 22', () => expect(checkNodeVersion('22.23.4').status).toBe('pass'));
-  it.each(['24.18.0', 'v20.11.0'])('fails on %s', (v) => {
+  it.each(['22.23.4', 'v22.12.0'])('passes on %s', (v) => {
+    expect(checkNodeVersion(v).status).toBe('pass');
+  });
+  // 22.11 lacks unflagged require(esm); 24 is the system Node we must never use silently.
+  it.each(['24.18.0', 'v20.11.0', '22.11.0', '23.0.0'])('fails on %s', (v) => {
     expect(checkNodeVersion(v).status).toBe('fail');
   });
 });

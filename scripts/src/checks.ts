@@ -11,6 +11,8 @@ export interface CheckResult {
 }
 
 export const REQUIRED_NODE_MAJOR = 22;
+/** 22.12 unflagged require(esm), which apps/api relies on to load the ESM workspace packages. */
+export const MIN_NODE_MINOR = 12;
 export const MIN_POSTGRES_VERSION_NUM = 160_000;
 export const REQUIRED_EXTENSIONS = ['vector', 'citext', 'pg_trgm'] as const;
 export const MIN_REDIS_MAJOR = 7;
@@ -28,13 +30,15 @@ export function maskUrl(raw: string): string {
 }
 
 export function checkNodeVersion(version: string): CheckResult {
-  const major = Number(version.replace(/^v/, '').split('.')[0]);
-  return major === REQUIRED_NODE_MAJOR
-    ? { name: 'Node.js', status: 'pass', detail: `v${version.replace(/^v/, '')}` }
+  const clean = version.replace(/^v/, '');
+  const [major, minor] = clean.split('.').map(Number);
+  const ok = major === REQUIRED_NODE_MAJOR && (minor ?? 0) >= MIN_NODE_MINOR;
+  return ok
+    ? { name: 'Node.js', status: 'pass', detail: `v${clean}` }
     : {
         name: 'Node.js',
         status: 'fail',
-        detail: `v${version.replace(/^v/, '')} — need ${REQUIRED_NODE_MAJOR}.x (run \`fnm use\`)`,
+        detail: `v${clean} — need ${REQUIRED_NODE_MAJOR}.x ≥ ${REQUIRED_NODE_MAJOR}.${MIN_NODE_MINOR} (run \`fnm use\`)`,
       };
 }
 
