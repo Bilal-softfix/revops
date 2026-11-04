@@ -50,6 +50,21 @@ async function withSql<T>(url: URL, fn: (sql: postgres.Sql) => Promise<T>): Prom
   }
 }
 
+/**
+ * True if `url` logs in; false only on a wrong password (28P01) or unknown role (28000).
+ * Anything else (network, TLS) is rethrown so it is never mistaken for a bad password.
+ */
+export async function canLogin(url: URL): Promise<boolean> {
+  try {
+    await withSql(url, (sql) => sql`select 1`);
+    return true;
+  } catch (error) {
+    const code = (error as { code?: unknown }).code;
+    if (code === '28P01' || code === '28000') return false;
+    throw error;
+  }
+}
+
 export async function runBootstrap(options: BootstrapOptions): Promise<BootstrapResult> {
   const log = options.log ?? (() => undefined);
   const databases = options.databases.map((db) => assertIdentifier('database', db));

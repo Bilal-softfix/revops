@@ -17,6 +17,7 @@ import {
   type PostgresFacts,
   checkEnv,
   checkNodeVersion,
+  REDIS_NOT_CONFIGURED,
   checkRoleSeparation,
   checkTestDbIsolation,
   checkUv,
@@ -148,7 +149,7 @@ async function checkOwnerDatabase(
 }
 
 async function checkRedis(url: string | undefined): Promise<CheckResult[]> {
-  if (!url) return [{ name: 'Redis', status: 'fail', detail: 'skipped — REDIS_URL not set' }];
+  if (!url) return [REDIS_NOT_CONFIGURED];
   const redis = new Redis(url, {
     lazyConnect: true,
     connectTimeout: CONNECT_TIMEOUT_SEC * 1000,

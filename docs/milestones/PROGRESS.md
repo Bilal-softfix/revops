@@ -39,6 +39,9 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - 2026-11-04 · M0-T2: `test:integration` turbo task exists but no package defines it yet; M0-T3 adds the first integration tests (single worker, `--concurrency=1`).
 - 2026-11-04 · M0 prep: `db:bootstrap` reads `NEON_BOOTSTRAP_URL` (owner role) from the root `.env`, always does admin work on the direct endpoint, creates `app_user` last (so a failure never loses a generated password), and never prints the password of a pre-existing role. Added `--reset-app-password` (not requested) as the only recovery path without a SQL editor.
 - 2026-11-04 · M0 prep: CI `revops_owner` now has CREATEDB + CREATEROLE, mirroring `neondb_owner`, so the bootstrap integration test runs against the CI Postgres. Locally it only runs with `RUN_BOOTSTRAP_INTEGRATION=1`.
+- 2026-11-04 · M0 prep: `db:bootstrap --write-env` writes the 4 DATABASE_* keys into root `.env` and `apps/api/.env` and removes `NEON_BOOTSTRAP_URL`. Later runs fall back to `DATABASE_URL_OWNER` as the admin URL. For an existing `app_user` it reuses the password already in those files only after a successful login (auth errors 28P01/28000 = "doesn't work"; network errors are rethrown, never treated as a wrong password).
+- 2026-11-04 · M0: `REDIS_URL` is optional until M0-T6 (schema `.optional()`, doctor ⚠ instead of ✖, `.env.example` blank). T3–T5 must not need Redis. **T6 makes it required again.**
+- 2026-11-04 · Repo: `.claude/settings.json` allows `git push origin milestone/*` and read-only `gh pr`/`gh run` commands; pushes to `main`, force/delete/mirror pushes and `gh pr merge` stay denied.
 - 2026-11-04 · M0-T3: Cross-tenant reads (tenant switcher, invite lookup, outbox relay) go through narrow `SECURITY DEFINER` functions rather than a BYPASSRLS role.
 
 ## Blocked on external
@@ -47,7 +50,9 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - [ ] Telephony provider KYC + numbers
 - [ ] Legal review (DPDP, consent texts)
 - [ ] Segment decision + design partners
-- [ ] Neon project + `pnpm run db:bootstrap` (creates revops_dev, revops_test, app_user, extensions) and Redis Cloud (noeviction) — needed before M0-T3 integration tests
+- [ ] Neon: root `.env` `NEON_BOOTSTRAP_URL` still holds the `.env.example` placeholder (`ep-example`) — Dev to paste the real neondb_owner string, then `pnpm run db:bootstrap --write-env` (needed before M0-T3 integration tests)
+- [ ] Redis Cloud (noeviction) — needed before M0-T6
+- [ ] `gh auth login` (once) so Claude can push milestone branches, open the draft PR and watch CI
 
 ## Tech debt
 _(non-blocking review findings)_

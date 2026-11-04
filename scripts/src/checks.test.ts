@@ -4,6 +4,7 @@ import {
   type PostgresFacts,
   checkEnv,
   checkNodeVersion,
+  REDIS_NOT_CONFIGURED,
   checkRoleSeparation,
   checkTestDbIsolation,
   checkUv,
@@ -62,7 +63,17 @@ describe('checkEnv', () => {
     const result = checkEnv('env: api', apiEnvSchema, {});
     expect(result.status).toBe('fail');
     expect(result.detail).toMatch(/DATABASE_URL/);
-    expect(result.detail).toMatch(/REDIS_URL/);
+  });
+});
+
+describe('REDIS_NOT_CONFIGURED', () => {
+  it('is a warning, so doctor stays green without Redis until M0-T6', () => {
+    expect(REDIS_NOT_CONFIGURED.status).toBe('warn');
+    expect(summarize([REDIS_NOT_CONFIGURED]).ok).toBe(true);
+  });
+  it('api/worker env validate without REDIS_URL', () => {
+    const env = { DATABASE_URL: 'postgresql://app_user:p@h/revops_dev' };
+    expect(checkEnv('env: api', apiEnvSchema, env).status).toBe('pass');
   });
 });
 

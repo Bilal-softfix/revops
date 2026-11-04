@@ -44,7 +44,7 @@ describe('.env.example files', () => {
 
   it('contain only placeholder secrets', () => {
     for (const [key, value] of Object.entries(apiExample)) {
-      if (!/URL$/.test(key)) continue;
+      if (!/URL$/.test(key) || !value) continue; // blank = optional and unset (e.g. REDIS_URL)
       expect(new URL(value ?? '').password, key).toMatch(/^(change-me)?$/);
     }
   });

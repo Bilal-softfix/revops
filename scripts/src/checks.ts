@@ -157,6 +157,13 @@ export function checkRoleSeparation(appRole: string, ownerRole: string): CheckRe
       };
 }
 
+/** REDIS_URL is optional until M0-T6: unset is a warning, not a failure. */
+export const REDIS_NOT_CONFIGURED: CheckResult = {
+  name: 'Redis',
+  status: 'warn',
+  detail: 'REDIS_URL not set — optional until M0-T6 (queues/outbox relay), required after',
+};
+
 /** Parses `key:value` lines from a Redis INFO reply. */
 export function parseRedisInfo(info: string): Map<string, string> {
   const fields = new Map<string, string>();

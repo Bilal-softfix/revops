@@ -14,7 +14,11 @@ const requiredUrl = (protocol: RegExp, invalid: string) =>
   );
 
 const postgresUrl = requiredUrl(/^postgres(ql)?$/, 'must be a postgres:// URL');
-const redisUrl = requiredUrl(/^rediss?$/, 'must be a redis:// or rediss:// URL');
+// Optional until M0-T6 (BullMQ/outbox relay) is the first real Redis consumer; make it required then.
+const optionalRedisUrl = z.preprocess(
+  blankAsUndefined,
+  z.url({ protocol: /^rediss?$/, error: 'must be a redis:// or rediss:// URL' }).optional(),
+);
 const port = z.coerce.number().int().min(1).max(65_535);
 
 export const nodeEnvSchema = z.enum(['development', 'test', 'production']);
@@ -49,7 +53,7 @@ export const neonBootstrapEnvSchema = z.object({
 });
 
 export const redisEnvSchema = z.object({
-  REDIS_URL: redisUrl,
+  REDIS_URL: optionalRedisUrl,
 });
 
 export const apiEnvSchema = commonEnvSchema

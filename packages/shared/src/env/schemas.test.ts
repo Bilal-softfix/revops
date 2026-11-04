@@ -65,9 +65,13 @@ describe('apiEnvSchema', () => {
   });
 
   it('reports missing required vars by name as "is required"', () => {
-    expect(() => parseEnv(apiEnvSchema, {})).toThrow(
-      /DATABASE_URL: is required[\s\S]*REDIS_URL: is required/,
-    );
+    expect(() => parseEnv(apiEnvSchema, {})).toThrow(/DATABASE_URL: is required/);
+  });
+
+  it('treats REDIS_URL as optional until M0-T6 (missing or blank is fine)', () => {
+    const { DATABASE_URL } = validApiEnv;
+    expect(parseEnv(apiEnvSchema, { DATABASE_URL }).REDIS_URL).toBeUndefined();
+    expect(parseEnv(apiEnvSchema, { DATABASE_URL, REDIS_URL: '' }).REDIS_URL).toBeUndefined();
   });
 
   it('treats a blank required var as missing', () => {
