@@ -15,6 +15,7 @@
     "test:integration": "turbo run test:integration --concurrency=1",
     "test:e2e": "turbo run test:e2e",
     "doctor": "pnpm --filter @revops/scripts run doctor",
+    "db:bootstrap": "pnpm --filter @revops/scripts run db:bootstrap",
     "format": "prettier --write ."
   },
   "devDependencies": {

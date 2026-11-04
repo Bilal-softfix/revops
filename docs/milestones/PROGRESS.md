@@ -7,6 +7,7 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04. Next: M0-T3 (needs Neon 
 ## Done
 - [x] M0-T1 Monorepo scaffold (2026-11-04)
 - [x] M0-T2 CI (2026-11-04) — workflow validated with actionlint locally; first real GitHub run happens on Dev's push
+- [x] M0 prep: `pnpm run db:bootstrap` — scripted Neon setup (DBs, extensions, app_user, env lines), since the Neon SQL editor isn't usable (2026-11-04)
 
 ## In progress
 - [ ] M0-T3 DB layer + tenancy core (needs Neon + Redis Cloud provisioned per docs/05-local-dev-setup.md)
@@ -36,6 +37,8 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - 2026-11-04 · M0-T2: CI = `checks` matrix (ubuntu: typecheck/lint/unit/build/audit; windows: typecheck/unit/build) + a separate ubuntu `integration` job, because service containers only run on Linux runners. Triggers: pull_request, push to main, manual.
 - 2026-11-04 · M0-T2: CI integration DB mirrors Neon: non-superuser owner `revops_owner`, `app_user`, `revops_dev` + `revops_test`, extensions created by the container superuser. The doctor runs in CI against real Postgres/Redis.
 - 2026-11-04 · M0-T2: `test:integration` turbo task exists but no package defines it yet; M0-T3 adds the first integration tests (single worker, `--concurrency=1`).
+- 2026-11-04 · M0 prep: `db:bootstrap` reads `NEON_BOOTSTRAP_URL` (owner role) from the root `.env`, always does admin work on the direct endpoint, creates `app_user` last (so a failure never loses a generated password), and never prints the password of a pre-existing role. Added `--reset-app-password` (not requested) as the only recovery path without a SQL editor.
+- 2026-11-04 · M0 prep: CI `revops_owner` now has CREATEDB + CREATEROLE, mirroring `neondb_owner`, so the bootstrap integration test runs against the CI Postgres. Locally it only runs with `RUN_BOOTSTRAP_INTEGRATION=1`.
 - 2026-11-04 · M0-T3: Cross-tenant reads (tenant switcher, invite lookup, outbox relay) go through narrow `SECURITY DEFINER` functions rather than a BYPASSRLS role.
 
 ## Blocked on external
@@ -44,7 +47,7 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - [ ] Telephony provider KYC + numbers
 - [ ] Legal review (DPDP, consent texts)
 - [ ] Segment decision + design partners
-- [ ] Neon (revops_dev, revops_test, app_user, extensions) + Redis Cloud (noeviction) provisioning — needed before M0-T3 integration tests
+- [ ] Neon project + `pnpm run db:bootstrap` (creates revops_dev, revops_test, app_user, extensions) and Redis Cloud (noeviction) — needed before M0-T3 integration tests
 
 ## Tech debt
 _(non-blocking review findings)_
@@ -52,4 +55,5 @@ _(non-blocking review findings)_
 - drizzle-kit 0.31 pulls deprecated `@esbuild-kit/*` (transitive). Goes away with drizzle-kit 1.0 (currently RC).
 - Dev to do: in GitHub branch protection for `main`, mark `checks (ubuntu-latest)`, `checks (windows-latest)` and `integration (ubuntu-latest)` as required checks.
 - Docker images in CI are tag-pinned (`pgvector/pgvector:pg16`, `redis:7`), not digest-pinned; pin digests in M8 if reproducibility matters.
+- `db:bootstrap` sends the app_user password to Postgres as a plain-text literal over TLS (Neon checks password entropy, so a pre-hashed SCRAM verifier may be rejected). Revisit if server-side statement logging is ever enabled.
 - Turbo `envMode: loose` + `test` uncached: simple and correct for now; tighten env declarations if CI time matters.

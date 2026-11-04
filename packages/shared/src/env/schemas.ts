@@ -43,6 +43,11 @@ export const testDatabaseEnvSchema = z.object({
   DATABASE_URL_TEST_OWNER: postgresUrl,
 });
 
+/** One-off `pnpm run db:bootstrap`: the Neon owner role (needs CREATEDB + CREATEROLE). */
+export const neonBootstrapEnvSchema = z.object({
+  NEON_BOOTSTRAP_URL: postgresUrl,
+});
+
 export const redisEnvSchema = z.object({
   REDIS_URL: redisUrl,
 });
