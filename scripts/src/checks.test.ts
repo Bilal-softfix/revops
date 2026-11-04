@@ -5,6 +5,7 @@ import {
   checkEnv,
   checkNodeVersion,
   REDIS_NOT_CONFIGURED,
+  checkDuplicateEnvKeys,
   checkRoleSeparation,
   checkTestDbIsolation,
   checkUv,
@@ -63,6 +64,18 @@ describe('checkEnv', () => {
     const result = checkEnv('env: api', apiEnvSchema, {});
     expect(result.status).toBe('fail');
     expect(result.detail).toMatch(/DATABASE_URL/);
+  });
+});
+
+describe('checkDuplicateEnvKeys', () => {
+  it('passes when every key is defined once', () => {
+    expect(checkDuplicateEnvKeys('.env', 'A=1\nB=2\n').status).toBe('pass');
+  });
+  it('warns with key names and line numbers, never values', () => {
+    const result = checkDuplicateEnvKeys('.env', 'A=real-secret\n# x\nB=2\nA=placeholder\n');
+    expect(result.status).toBe('warn');
+    expect(result.detail).toContain('A (lines 1, 4)');
+    expect(result.detail).not.toMatch(/real-secret|placeholder/);
   });
 });
 

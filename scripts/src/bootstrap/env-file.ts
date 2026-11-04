@@ -24,6 +24,16 @@ export function readEnvValue(content: string, key: string): string | undefined {
   return found;
 }
 
+/** Keys defined more than once → their 1-based line numbers (the last one wins when loaded). */
+export function duplicateKeys(content: string): Map<string, number[]> {
+  const seen = new Map<string, number[]>();
+  content.split(/\r?\n/).forEach((line, i) => {
+    const key = LINE.exec(line)?.[1];
+    if (key !== undefined) seen.set(key, [...(seen.get(key) ?? []), i + 1]);
+  });
+  return new Map([...seen].filter(([, lines]) => lines.length > 1));
+}
+
 export interface EnvEdit {
   content: string;
   changes: Map<string, EnvChange>;

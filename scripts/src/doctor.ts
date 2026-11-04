@@ -1,7 +1,8 @@
 // `pnpm run doctor` — validates env vars and pings the cloud dev services (Neon Postgres, Redis Cloud).
 // Exit code 1 if any check fails; warnings don't fail. Never prints secrets or raw URLs.
 import { spawnSync } from 'node:child_process';
-import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { Redis } from 'ioredis';
 import postgres from 'postgres';
 import {
@@ -18,6 +19,7 @@ import {
   checkEnv,
   checkNodeVersion,
   REDIS_NOT_CONFIGURED,
+  checkDuplicateEnvKeys,
   checkRoleSeparation,
   checkTestDbIsolation,
   checkUv,
@@ -204,6 +206,9 @@ async function main(): Promise<void> {
     checkEnv('env: worker', workerEnvSchema, env),
     checkEnv('env: migrations', migrationEnvSchema, env),
     checkEnv('env: tests', testDatabaseEnvSchema, env),
+    ...loaded.map((path) =>
+      checkDuplicateEnvKeys(relative(root, path), readFileSync(path, 'utf8')),
+    ),
   ];
 
   if (env.DATABASE_URL && env.DATABASE_URL_TEST) {

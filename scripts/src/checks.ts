@@ -1,6 +1,7 @@
 // Pure check logic for `pnpm run doctor`. No I/O here — doctor.ts gathers facts and feeds them in.
 import type { z } from 'zod';
 import { formatEnvIssues } from '@revops/shared/env';
+import { duplicateKeys } from './bootstrap/env-file.js';
 
 export type CheckStatus = 'pass' | 'warn' | 'fail';
 
@@ -154,6 +155,23 @@ export function checkRoleSeparation(appRole: string, ownerRole: string): CheckRe
         name: 'DB role separation',
         status: 'fail',
         detail: `DATABASE_URL and DATABASE_URL_OWNER both use ${appRole}`,
+      };
+}
+
+/**
+ * A key defined twice in one .env file silently takes the LAST value (e.g. a pasted real URL above
+ * the copied .env.example placeholder). Reports key names and line numbers only, never values.
+ */
+export function checkDuplicateEnvKeys(file: string, content: string): CheckResult {
+  const dupes = [...duplicateKeys(content)].map(
+    ([key, lines]) => `${key} (lines ${lines.join(', ')})`,
+  );
+  return dupes.length === 0
+    ? { name: `${file}: duplicate keys`, status: 'pass', detail: 'none' }
+    : {
+        name: `${file}: duplicate keys`,
+        status: 'warn',
+        detail: `${dupes.join('; ')} — the last line wins; delete the others`,
       };
 }
 

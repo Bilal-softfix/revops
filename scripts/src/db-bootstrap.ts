@@ -14,7 +14,7 @@ import {
   neonBootstrapEnvSchema,
   parseEnv,
 } from '@revops/shared/env';
-import { maskUrl } from './checks.js';
+import { checkDuplicateEnvKeys, maskUrl } from './checks.js';
 import { editEnv, readEnvValue } from './bootstrap/env-file.js';
 import { buildEnvLines, deriveHosts, withTarget } from './bootstrap/neon-urls.js';
 import { canLogin, runBootstrap } from './bootstrap/run-bootstrap.js';
@@ -65,6 +65,8 @@ async function main(): Promise<void> {
   const root = findRepoRoot();
   const envFiles = [join(root, '.env'), join(root, 'apps', 'api', '.env')];
   loadEnvFiles([envFiles[0] ?? '']);
+  const dupes = checkDuplicateEnvKeys('.env', readIfExists(envFiles[0] ?? ''));
+  if (dupes.status !== 'pass') console.log(`⚠ ${dupes.name}: ${dupes.detail}`);
   const { adminUrl, source } = adminUrlFromEnv();
   console.log(`admin connection: ${source} → ${maskUrl(adminUrl)}`);
 
