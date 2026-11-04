@@ -21,7 +21,7 @@ AI Revenue Operations Platform for Indian lead-driven SMBs: lead capture → hum
 - Observability: pino structured logs, OpenTelemetry traces, Prometheus metrics.
 
 ## Commands
-- `pnpm i` · `pnpm dev` (all apps) · `pnpm doctor` (checks env vars + DB/Redis connectivity)
+- `pnpm i` · `pnpm dev` (all apps) · `pnpm run doctor` (checks env vars + DB/Redis connectivity; plain `pnpm doctor` is a pnpm built-in)
 - `pnpm typecheck` · `pnpm lint` · `pnpm test` · `pnpm test:e2e` · `pnpm build`
 - `pnpm db:generate` (new migration) · `pnpm db:migrate` · `pnpm db:seed`
 - Voice agent: `cd apps/voice-agent && uv run pytest && uv run ruff check . && uv run mypy .`

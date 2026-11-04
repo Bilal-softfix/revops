@@ -1,0 +1,14 @@
+pnpm-lock.yaml
+uv.lock
+dist/
+.next/
+.turbo/
+coverage/
+playwright-report/
+test-results/
+
+# hand-written kit docs: keep diffs minimal
+docs/
+.claude/
+README.md
+CLAUDE.md

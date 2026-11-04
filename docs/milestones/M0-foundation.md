@@ -8,8 +8,8 @@ A running monorepo where a user can sign up, create a tenant, invite teammates w
 Any CRM feature, billing, OTP login, SSO.
 
 ## Tasks
-**M0-T1 Monorepo scaffold** — pnpm + Turborepo; apps/web, apps/api (http + worker entrypoints), apps/voice-agent (uv project, hello-world), packages/{db,shared,config}; strict tsconfig; eslint (incl. import boundaries between api modules), prettier; Vitest; `.env.example` per app; **no Docker** — `pnpm doctor` script (Node) that validates env vars and pings Postgres (incl. `vector` extension) and Redis (warns if `maxmemory-policy` is not `noeviction`); cross-platform scripts only.
-- AC: with `.env` filled per `docs/05-local-dev-setup.md`, `pnpm i && pnpm doctor && pnpm dev` starts everything on Windows/macOS/Linux; `pnpm typecheck lint test build` pass.
+**M0-T1 Monorepo scaffold** — pnpm + Turborepo; apps/web, apps/api (http + worker entrypoints), apps/voice-agent (uv project, hello-world), packages/{db,shared,config}; strict tsconfig; eslint (incl. import boundaries between api modules), prettier; Vitest; `.env.example` per app; **no Docker** — `pnpm run doctor` script (Node) that validates env vars and pings Postgres (incl. `vector` extension) and Redis (warns if `maxmemory-policy` is not `noeviction`); cross-platform scripts only.
+- AC: with `.env` filled per `docs/05-local-dev-setup.md`, `pnpm i && pnpm run doctor && pnpm dev` starts everything on Windows/macOS/Linux; `pnpm typecheck lint test build` pass.
 
 **M0-T2 CI** — GitHub Actions: install (cache), typecheck, lint, unit, integration (Postgres 16 + pgvector and Redis as GitHub service containers — Docker exists only in CI), build, voice-agent ruff/mypy/pytest, `pnpm audit --prod` (warn).
 - AC: PR shows all checks; failing test fails the build.

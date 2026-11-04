@@ -1,0 +1,11 @@
+{
+  "name": "@revops/voice-agent",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "uv run python -m voice_agent.main",
+    "typecheck": "uv run mypy",
+    "lint": "uv run ruff check . && uv run ruff format --check .",
+    "test": "uv run pytest"
+  }
+}

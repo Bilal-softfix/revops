@@ -1,0 +1,8 @@
+{
+  "extends": "@revops/config/tsconfig/nest.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["src", "test", "*.ts", "*.mts"],
+  "exclude": ["test/fixtures"]
+}
