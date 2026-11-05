@@ -79,6 +79,40 @@ export class IdentityRepository {
     return row?.user_id ?? null;
   }
 
+  /** Owner + password hash of a live verify token of a live unverified account. Doesn't consume. */
+  async peekVerifyToken(
+    tokenHash: string,
+  ): Promise<{ userId: string; passwordHash: string | null } | undefined> {
+    const [row] = await this.database.db.execute<{ user_id: string; password_hash: string | null }>(
+      sql`select * from auth_peek_verify_token(${tokenHash})`,
+    );
+    return row ? { userId: row.user_id, passwordHash: row.password_hash } : undefined;
+  }
+
+  /** Deletes the unverified (pending or expired) account for `email`, with its tenant. */
+  async discardUnverifiedByEmail(email: string): Promise<boolean> {
+    const [row] = await this.database.db.execute<{ ok: boolean }>(
+      sql`select auth_discard_unverified_by_email(${email}) as ok`,
+    );
+    return row?.ok ?? false;
+  }
+
+  /** Deletes the unverified account a live verify token belongs to ("this wasn't me"). */
+  async discardUnverifiedByToken(tokenHash: string): Promise<boolean> {
+    const [row] = await this.database.db.execute<{ ok: boolean }>(
+      sql`select auth_discard_unverified_by_token(${tokenHash}) as ok`,
+    );
+    return row?.ok ?? false;
+  }
+
+  /** Deletes every unverified account past the 48 h cutoff; returns how many. */
+  async purgeExpiredUnverified(): Promise<number> {
+    const [row] = await this.database.db.execute<{ n: number }>(
+      sql`select auth_purge_expired_unverified() as n`,
+    );
+    return row?.n ?? 0;
+  }
+
   // --- in-context writes/reads (caller opens withContext) ---
 
   async insertUser(

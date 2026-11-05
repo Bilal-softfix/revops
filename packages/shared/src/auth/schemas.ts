@@ -28,8 +28,19 @@ export const loginRequestSchema = z.object({
 });
 export type LoginRequest = z.infer<typeof loginRequestSchema>;
 
-export const verifyEmailRequestSchema = z.object({ token: tokenSchema });
+/**
+ * Verification needs the account password too: whoever signed up must also own the inbox, so an
+ * account pre-registered with someone else's email can't be activated by that person's click.
+ */
+export const verifyEmailRequestSchema = z.object({
+  token: tokenSchema,
+  password: z.string().min(1).max(PASSWORD_MAX_LENGTH),
+});
 export type VerifyEmailRequest = z.infer<typeof verifyEmailRequestSchema>;
+
+/** "This wasn't me / start over": discards the unverified account the link belongs to. */
+export const cancelSignupRequestSchema = z.object({ token: tokenSchema });
+export type CancelSignupRequest = z.infer<typeof cancelSignupRequestSchema>;
 
 export const emailOnlyRequestSchema = z.object({ email: emailSchema });
 export type EmailOnlyRequest = z.infer<typeof emailOnlyRequestSchema>;
@@ -56,10 +67,11 @@ export const authTenantSchema = z.object({
 });
 export type AuthTenant = z.infer<typeof authTenantSchema>;
 
-export const signupResponseSchema = z.object({
-  user: authUserSchema,
-  tenant: authTenantSchema,
-});
+/**
+ * Always the same 202 body, whatever the email's state (new, verified, pending, expired): the
+ * outcome is only ever communicated by email, so signup can't be used to probe for accounts.
+ */
+export const signupResponseSchema = z.object({ status: z.literal('check_email') });
 export type SignupResponse = z.infer<typeof signupResponseSchema>;
 
 /** GET /v1/auth/me and POST /v1/auth/login. Send csrfToken as `x-csrf-token` on unsafe requests. */
@@ -78,7 +90,7 @@ export const AUTH_ERROR_CODES = [
   'validation_failed',
   'invalid_credentials',
   'email_not_verified',
-  'email_taken',
+  'verification_failed',
   'invalid_token',
   'rate_limited',
   'unauthenticated',

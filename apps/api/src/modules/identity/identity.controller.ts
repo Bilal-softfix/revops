@@ -1,5 +1,6 @@
 import { Body, Controller, Get, HttpCode, Inject, Post, Req, Res, UseGuards } from '@nestjs/common';
 import {
+  type CancelSignupRequest,
   type EmailOnlyRequest,
   type LoginRequest,
   type ResetPasswordRequest,
@@ -7,6 +8,7 @@ import {
   type SignupRequest,
   type SignupResponse,
   type VerifyEmailRequest,
+  cancelSignupRequestSchema,
   emailOnlyRequestSchema,
   loginRequestSchema,
   resetPasswordRequestSchema,
@@ -37,8 +39,9 @@ export class IdentityController {
     return { httpOnly: true, secure: this.env.COOKIE_SECURE, sameSite: 'lax', path: '/' };
   }
 
+  /** Always 202 { status: 'check_email' }; the outcome only ever arrives by email. */
   @Post('signup')
-  @HttpCode(201)
+  @HttpCode(202)
   signup(
     @Body(new ZodBodyPipe(signupRequestSchema)) body: SignupRequest,
     @Req() req: Request,
@@ -48,8 +51,18 @@ export class IdentityController {
 
   @Post('verify-email')
   @HttpCode(204)
-  verifyEmail(@Body(new ZodBodyPipe(verifyEmailRequestSchema)) body: VerifyEmailRequest) {
-    return this.identity.verifyEmail(body);
+  verifyEmail(
+    @Body(new ZodBodyPipe(verifyEmailRequestSchema)) body: VerifyEmailRequest,
+    @Req() req: Request,
+  ) {
+    return this.identity.verifyEmail(body, meta(req));
+  }
+
+  /** "This wasn't me / start over": deletes the unverified account (and tenant) the link belongs to. */
+  @Post('verify-email/cancel')
+  @HttpCode(204)
+  cancelSignup(@Body(new ZodBodyPipe(cancelSignupRequestSchema)) body: CancelSignupRequest) {
+    return this.identity.cancelSignup(body);
   }
 
   @Post('resend-verification')

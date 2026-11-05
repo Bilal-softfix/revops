@@ -57,7 +57,10 @@ Modular monolith in NestJS + one Python voice worker. Modules talk via service i
 - Not forcing RLS on these tables lets the owner-owned **SECURITY DEFINER** functions read them for the few context-free auth steps. Each function has a fixed `search_path = pg_catalog, public, pg_temp`, returns only the fields its caller needs, and has EXECUTE for `app_user` only:
   - `auth_find_user_by_email` returns id, password_hash and email_verified_at;
   - `auth_session_lookup` returns a live session by token hash;
-  - `auth_consume_token` atomically marks a one-time emailed token used.
+  - `auth_consume_token` atomically marks a one-time emailed token used;
+  - `auth_peek_verify_token` returns the owner and password hash of a live verify link, without consuming it;
+  - `auth_discard_unverified_by_email` / `_by_token` and `auth_purge_expired_unverified` delete unverified accounts with the tenants only they belong to. They go through the internal `auth_discard_unverified_user`, which `app_user` can't call directly. Because tenants/memberships are FORCE RLS, it deletes each tenant inside that tenant's own context.
+  Unverified accounts expire **48 h** after signup (`auth_unverified_cutoff()`, the one place this is defined). After that the lookups treat them as non-existent.
   `app_user` is never an owner, so it stays fully bound by these policies.
 - **User-only context** (`app.user_id` set, no tenant): a read-only `self_select` policy on `memberships`/`tenants` shows the user its own memberships and the tenants it belongs to. This is used at login and by the tenant switcher (M0-T5). With a tenant set, only `tenant_isolation` applies.
 - New SECURITY DEFINER functions and new user-scoped tables are pinned by `packages/db/test/rls-catalog.int.test.ts`. Every table in `public` must be classified there.
@@ -66,13 +69,19 @@ Modular monolith in NestJS + one Python voice worker. Modules talk via service i
 ## Auth (M0-T4, ADR-006)
 - **Session:** the `__Host-sid` cookie holds an opaque 32-byte token (httpOnly, Secure, SameSite=Lax, Path=/; the `__Host-` prefix stops sibling subdomains from planting a session). The DB stores only its sha256. Absolute lifetime is 30 days (`expires_at`, checked in SQL); the idle timeout is 7 days, checked against `last_seen_at`, which is updated at most every 5 minutes. The active membership and role are re-checked on every request, so a removed member loses tenant access immediately.
 - **CSRF:** `x-csrf-token` = HMAC-SHA256(session token, "csrf.v1"), returned by `/v1/auth/login` and `/v1/auth/me`. It is required on unsafe methods of authenticated routes. Only JSON bodies are parsed (no urlencoded/text parsers), so a cross-site HTML form can't submit to the API.
-- **Signup** runs in one transaction: user, tenant, owner membership, audit log, `user.signed_up.v1` outbox event and verification token. No session is created until the email is verified; an unverified login gets 403 `email_not_verified`, and only with the correct password.
+- **Signup** always answers `202 {"status":"check_email"}` right after validation and the per-IP limit. Everything that depends on the email's state runs as a background task (BullMQ from M0-T6), so neither the body nor the timing reveals whether an account exists:
+  - **verified account:** a "you already have an account" email, nothing created;
+  - **unverified, pending or expired:** that account and its tenant are discarded and replaced (new password, tenant and link);
+  - **new:** one transaction creates the user, tenant, owner membership, audit log, `user.signed_up.v1` outbox event and verification token.
+- **Verify email** needs the link **and the account password** (`{token, password}`), so an account pre-registered with someone else's email can't be activated by the inbox owner's click. A bad, used or expired link, an expired account and a wrong password all give `400 verification_failed` after exactly one argon2 verify. Attempts count toward 5 per account per 15 minutes, plus a per-IP limit.
+- **"This wasn't me" / start over:** `POST /v1/auth/verify-email/cancel {token}` deletes the unverified account and its tenant.
+- No session is created until the email is verified. An unverified login gets 403 `email_not_verified`, and only with the correct password.
 - **Rate limits:**
   - Login: 5 attempts per (IP, email) per 15 minutes, reserved atomically *before* the password check and cleared on success, plus 50 per IP. Over the limit: 429 with `Retry-After`.
   - Signup: 10 per IP per hour.
   - Verify/reset emails: 3 per (IP, email) and 20 per IP per hour.
   - In-memory until M0-T6 (Redis). Unknown emails get a dummy argon2 verify, so timing doesn't reveal which accounts exist.
-- **Resend verification and forgot password** always return 202, sending the email after the response so timing doesn't reveal accounts. A reset sets the new password, marks the email verified, revokes all sessions and expires the user's other reset links. Links are single-use and expire after 24 hours (verify) or 1 hour (reset).
+- **Resend verification and forgot password** always return 202. The lookup, token and email all run in the background. A reset sets the new password, marks the email verified, revokes all sessions and expires the user's other reset links. Links are single-use and expire after 24 hours (verify) or 1 hour (reset).
 - **Errors:** RFC 7807 `application/problem+json` with a stable `code` (`AUTH_ERROR_CODES` in `@revops/shared`).
 
 ## RBAC (MVP)

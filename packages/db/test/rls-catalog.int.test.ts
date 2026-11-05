@@ -22,7 +22,17 @@ const EXTRA_TENANT_POLICIES: Record<string, string[]> = {
   memberships: ['self_select:SELECT'],
   tenants: ['self_select:SELECT'],
 };
-const DEFINER_FUNCTIONS = ['auth_consume_token', 'auth_find_user_by_email', 'auth_session_lookup'];
+/** SECURITY DEFINER functions → whether app_user may call them directly. */
+const DEFINER_FUNCTIONS: Record<string, boolean> = {
+  auth_consume_token: true,
+  auth_discard_unverified_by_email: true,
+  auth_discard_unverified_by_token: true,
+  auth_discard_unverified_user: false, // internal: only via the wrappers above
+  auth_find_user_by_email: true,
+  auth_peek_verify_token: true,
+  auth_purge_expired_unverified: true,
+  auth_session_lookup: true,
+};
 
 interface TableRls {
   table: string;
@@ -106,7 +116,7 @@ describe('RLS catalog meta-test', () => {
     }
   });
 
-  it('SECURITY DEFINER functions: only the known ones, fixed search_path, EXECUTE for app_user only', async () => {
+  it('SECURITY DEFINER functions: only the known ones, fixed search_path, EXECUTE only as intended', async () => {
     const fns = await owner<
       { name: string; config: string[] | null; publicExec: boolean; appExec: boolean }[]
     >`
@@ -116,13 +126,13 @@ describe('RLS catalog meta-test', () => {
       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
       where n.nspname = 'public' and p.prosecdef
       order by 1`;
-    expect(fns.map((f) => f.name)).toEqual(DEFINER_FUNCTIONS);
+    expect(fns.map((f) => f.name)).toEqual(Object.keys(DEFINER_FUNCTIONS).sort());
     for (const f of fns) {
       expect(f.config, f.name).toEqual(['search_path=pg_catalog, public, pg_temp']);
       expect({ name: f.name, publicExec: f.publicExec, appExec: f.appExec }).toEqual({
         name: f.name,
         publicExec: false,
-        appExec: true,
+        appExec: DEFINER_FUNCTIONS[f.name],
       });
     }
   });

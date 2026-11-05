@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import {
+  type CancelSignupRequest,
   type EmailOnlyRequest,
   type LoginRequest,
   type ResetPasswordRequest,
@@ -13,18 +14,19 @@ import {
 } from '@revops/shared';
 import type { ApiEnv } from '@revops/shared/env';
 import { API_ENV } from '../../config/env';
+import { BackgroundTasks } from '../../platform/background-tasks';
 import { Clock } from '../../platform/clock';
 import { Database } from '../../platform/database/database';
 import { RateLimiter } from '../../platform/rate-limit/rate-limiter';
-import { type EmailMessage, EmailProvider, maskEmail } from '../../providers/email';
-import { resetPasswordMessage, verifyEmailMessage } from './emails';
+import { EmailProvider } from '../../providers/email';
+import { accountExistsMessage, resetPasswordMessage, verifyEmailMessage } from './emails';
 import {
   emailNotVerified,
-  emailTaken,
   invalidCredentials,
   invalidToken,
   rateLimited,
   unauthenticated,
+  verificationFailed,
 } from './errors';
 import { IdentityRepository } from './identity.repository';
 import { PasswordService } from './password.service';
@@ -45,7 +47,10 @@ export const LOGIN_WINDOW_MS = 15 * MINUTE;
 /** Per-IP ceilings across all emails (credential stuffing, argon2 CPU, junk signups). */
 export const LOGIN_PER_IP = 50;
 export const SIGNUPS_PER_IP_PER_HOUR = 10;
-/** Verification/reset emails per (IP, email) and per IP, per hour; extra requests are dropped silently. */
+/** Verify-email password attempts per account per 15 minutes (plus a per-IP ceiling). */
+export const VERIFY_MAX_ATTEMPTS = 5;
+const VERIFY_PER_IP = 50;
+/** Auth emails per (IP, email) and per IP, per hour; extra requests are dropped silently. */
 const EMAILS_PER_ADDRESS_PER_HOUR = 3;
 const EMAILS_PER_IP_PER_HOUR = 20;
 const SIGNUP_ATTEMPTS = 3; // retries on a (24-bit) tenant slug collision
@@ -63,10 +68,10 @@ function uniqueViolation(error: unknown): string | undefined {
   return typeof pg.constraint_name === 'string' ? pg.constraint_name : '';
 }
 
+const CHECK_EMAIL: SignupResponse = { status: 'check_email' };
+
 @Injectable()
 export class IdentityService {
-  private readonly logger = new Logger('Identity');
-
   constructor(
     @Inject(API_ENV) private readonly env: ApiEnv,
     private readonly database: Database,
@@ -75,12 +80,16 @@ export class IdentityService {
     private readonly sessions: SessionService,
     private readonly email: EmailProvider,
     private readonly rateLimiter: RateLimiter,
+    private readonly background: BackgroundTasks,
     private readonly clock: Clock,
   ) {}
 
   /**
-   * One transaction: user + tenant + owner membership + audit log + `user.signed_up.v1` outbox event
-   * + verification token. The email goes out after commit; no session until the email is verified.
+   * Always the same 202 right after validation and the per-IP limit; everything that depends on
+   * the email's state runs in the background, so neither the body nor the timing reveals it:
+   * - verified account → "you already have an account" email, nothing created;
+   * - unverified (pending or expired) → that pending account is discarded and replaced;
+   * - new → user + tenant + owner membership + audit + `user.signed_up.v1` + verify token, one tx.
    */
   async signup(input: SignupRequest, meta: RequestMeta): Promise<SignupResponse> {
     const retryAfter = await this.rateLimiter.consume(
@@ -89,29 +98,45 @@ export class IdentityService {
       HOUR,
     );
     if (retryAfter > 0) throw rateLimited(retryAfter);
-    if (await this.repository.findUserByEmail(input.email)) throw emailTaken();
+    this.background.run('identity.signup', () => this.processSignup(input, meta));
+    return CHECK_EMAIL;
+  }
+
+  private async processSignup(input: SignupRequest, meta: RequestMeta): Promise<void> {
+    if (!(await this.allowEmail('signup', input.email, meta))) return;
+    const existing = await this.repository.findUserByEmail(input.email);
+    if (existing?.emailVerifiedAt) {
+      await this.email.send(accountExistsMessage(input.email, this.env.APP_URL));
+      return;
+    }
+    // Pending or expired unverified account for this email: replace it (new password, tenant and
+    // links; the old ones stop working).
+    await this.repository.discardUnverifiedByEmail(input.email);
 
     const passwordHash = await this.passwords.hash(input.password);
     for (let attempt = 1; ; attempt++) {
       try {
-        return await this.createAccount(input, passwordHash, meta);
+        const verifyToken = await this.createAccount(input, passwordHash, meta);
+        await this.email.send(verifyEmailMessage(input.email, this.env.APP_URL, verifyToken));
+        return;
       } catch (error) {
         const constraint = uniqueViolation(error);
-        if (constraint === 'users_email_unique') throw emailTaken(); // lost a concurrent-signup race
+        // A concurrent signup for the same email won the race; it sent its own email.
+        if (constraint === 'users_email_unique') return;
         if (constraint === 'tenants_slug_unique' && attempt < SIGNUP_ATTEMPTS) continue;
         throw error;
       }
     }
   }
 
+  /** Returns the verification token to email. */
   private async createAccount(
     input: SignupRequest,
     passwordHash: string,
     meta: RequestMeta,
-  ): Promise<SignupResponse> {
+  ): Promise<string> {
     const userId = randomUUID();
     const tenantId = randomUUID();
-    const slug = tenantSlug(input.tenantName);
     const verifyToken = newToken();
     const now = this.clock.now();
 
@@ -122,7 +147,11 @@ export class IdentityService {
         name: input.name,
         passwordHash,
       });
-      await this.repository.insertTenant(tx, { id: tenantId, name: input.tenantName, slug });
+      await this.repository.insertTenant(tx, {
+        id: tenantId,
+        name: input.tenantName,
+        slug: tenantSlug(input.tenantName),
+      });
       await this.repository.insertMembership(tx, { tenantId, userId, role: 'owner' });
       await this.repository.insertAudit(tx, {
         tenantId,
@@ -147,29 +176,64 @@ export class IdentityService {
         expiresAt: new Date(now.getTime() + EMAIL_VERIFY_TTL_MS),
       });
     });
-
-    this.sendInBackground(verifyEmailMessage(input.email, this.env.APP_URL, verifyToken));
-    return {
-      user: { id: userId, email: input.email, name: input.name, emailVerified: false },
-      tenant: { id: tenantId, name: input.tenantName, slug, role: 'owner' },
-    };
+    return verifyToken;
   }
 
-  async verifyEmail(input: VerifyEmailRequest): Promise<void> {
-    const userId = await this.repository.consumeToken(hashToken(input.token), 'email_verify');
-    if (!userId) throw invalidToken();
-    await this.database.withContext({ userId }, (tx) =>
-      this.repository.markEmailVerified(tx, userId, this.clock.now()),
+  /**
+   * Token + the account password. Unknown/used/expired token, an expired account and a wrong
+   * password all give the same `verification_failed` after exactly one argon2 verify, and every
+   * attempt counts toward the per-account and per-IP limits.
+   */
+  async verifyEmail(input: VerifyEmailRequest, meta: RequestMeta): Promise<void> {
+    const tokenHash = hashToken(input.token);
+    const pending = await this.repository.peekVerifyToken(tokenHash);
+    const retryAfter = Math.max(
+      await this.rateLimiter.consume(
+        `verify-ip:${meta.ip ?? 'unknown'}`,
+        VERIFY_PER_IP,
+        LOGIN_WINDOW_MS,
+      ),
+      pending
+        ? await this.rateLimiter.consume(
+            `verify-user:${pending.userId}`,
+            VERIFY_MAX_ATTEMPTS,
+            LOGIN_WINDOW_MS,
+          )
+        : 0,
     );
+    if (retryAfter > 0) throw rateLimited(retryAfter);
+
+    const ok = pending?.passwordHash
+      ? await this.passwords.verify(pending.passwordHash, input.password)
+      : await this.passwords.verifyDummy(input.password);
+    if (!pending || !ok) throw verificationFailed();
+
+    // Atomic single use: a concurrent verify with the same link loses here.
+    const userId = await this.repository.consumeToken(tokenHash, 'email_verify');
+    if (userId !== pending.userId) throw verificationFailed();
+    await this.database.withContext({ userId }, async (tx) => {
+      await this.repository.markEmailVerified(tx, userId, this.clock.now());
+      await this.repository.expireUnusedTokens(tx, userId, 'email_verify', this.clock.now());
+    });
+    await this.rateLimiter.reset(`verify-user:${userId}`);
   }
 
-  /** Always succeeds (202): never reveals whether an address has an account. */
-  async resendVerification(input: EmailOnlyRequest, meta: RequestMeta): Promise<void> {
-    if (!(await this.allowEmail('verify', input.email, meta))) return;
-    const user = await this.repository.findUserByEmail(input.email);
-    if (!user || user.emailVerifiedAt) return;
-    const token = await this.issueToken(user.id, 'email_verify', EMAIL_VERIFY_TTL_MS);
-    this.sendInBackground(verifyEmailMessage(input.email, this.env.APP_URL, token));
+  /** "This wasn't me / start over": the link discards its unverified account and tenant. */
+  async cancelSignup(input: CancelSignupRequest): Promise<void> {
+    if (!(await this.repository.discardUnverifiedByToken(hashToken(input.token)))) {
+      throw invalidToken();
+    }
+  }
+
+  /** Always 202; the lookup and email happen in the background (no account-state signal). */
+  resendVerification(input: EmailOnlyRequest, meta: RequestMeta): void {
+    this.background.run('identity.resend-verification', async () => {
+      if (!(await this.allowEmail('verify', input.email, meta))) return;
+      const user = await this.repository.findUserByEmail(input.email);
+      if (!user || user.emailVerifiedAt) return;
+      const token = await this.issueToken(user.id, 'email_verify', EMAIL_VERIFY_TTL_MS);
+      await this.email.send(verifyEmailMessage(input.email, this.env.APP_URL, token));
+    });
   }
 
   async login(
@@ -185,6 +249,7 @@ export class IdentityService {
     );
     if (retryAfter > 0) throw rateLimited(retryAfter);
 
+    // Expired unverified accounts are filtered out in SQL, i.e. treated as non-existent.
     const user = await this.repository.findUserByEmail(input.email);
     const ok = user?.passwordHash
       ? await this.passwords.verify(user.passwordHash, input.password)
@@ -263,18 +328,20 @@ export class IdentityService {
     );
   }
 
-  /** Always succeeds (202): never reveals whether an address has an account. */
-  async forgotPassword(input: EmailOnlyRequest, meta: RequestMeta): Promise<void> {
-    if (!(await this.allowEmail('reset', input.email, meta))) return;
-    const user = await this.repository.findUserByEmail(input.email);
-    if (!user) return;
-    const token = await this.issueToken(user.id, 'password_reset', PASSWORD_RESET_TTL_MS);
-    this.sendInBackground(resetPasswordMessage(input.email, this.env.APP_URL, token));
+  /** Always 202; the lookup and email happen in the background (no account-state signal). */
+  forgotPassword(input: EmailOnlyRequest, meta: RequestMeta): void {
+    this.background.run('identity.forgot-password', async () => {
+      if (!(await this.allowEmail('reset', input.email, meta))) return;
+      const user = await this.repository.findUserByEmail(input.email);
+      if (!user) return;
+      const token = await this.issueToken(user.id, 'password_reset', PASSWORD_RESET_TTL_MS);
+      await this.email.send(resetPasswordMessage(input.email, this.env.APP_URL, token));
+    });
   }
 
   /**
-   * New password + all sessions revoked + other reset links invalidated. The emailed link proves
-   * the address, so an unverified email becomes verified.
+   * New password + every session of the user revoked + other reset links invalidated. The emailed
+   * link proves the address, so an unverified email becomes verified.
    */
   async resetPassword(input: ResetPasswordRequest): Promise<void> {
     const userId = await this.repository.consumeToken(hashToken(input.token), 'password_reset');
@@ -309,29 +376,18 @@ export class IdentityService {
 
   /**
    * Per (IP, email) so one IP can't use up a victim's allowance for everyone, plus a per-IP ceiling.
-   * Over the limit the request still returns 202; the email just isn't sent.
+   * Over the limit nothing is sent (the request already returned 202).
    */
   private async allowEmail(
-    kind: 'verify' | 'reset',
+    kind: 'signup' | 'verify' | 'reset',
     email: string,
     meta: RequestMeta,
   ): Promise<boolean> {
     const ip = meta.ip ?? 'unknown';
     const [perAddress, perIp] = await Promise.all([
-      this.rateLimiter.consume(`${kind}:${ip}:${email}`, EMAILS_PER_ADDRESS_PER_HOUR, HOUR),
-      this.rateLimiter.consume(`${kind}-ip:${ip}`, EMAILS_PER_IP_PER_HOUR, HOUR),
+      this.rateLimiter.consume(`email-${kind}:${ip}:${email}`, EMAILS_PER_ADDRESS_PER_HOUR, HOUR),
+      this.rateLimiter.consume(`email-${kind}-ip:${ip}`, EMAILS_PER_IP_PER_HOUR, HOUR),
     ]);
     return perAddress === 0 && perIp === 0;
-  }
-
-  /**
-   * Sends after the response, so 202 answers take the same time whether or not an account exists,
-   * and email failures never fail the request (the user can ask again). Moves to the outbox in M0-T6.
-   */
-  private sendInBackground(message: EmailMessage): void {
-    this.email.send(message).catch((error: unknown) => {
-      const reason = error instanceof Error ? error.message : String(error);
-      this.logger.error(`email to ${maskEmail(message.to)} failed: ${reason}`);
-    });
   }
 }

@@ -15,8 +15,11 @@ export const emailNotVerified = () =>
   error('email_not_verified', 403, 'Verify your email before signing in', {
     detail: 'Use the link we emailed you, or request a new one.',
   });
-export const emailTaken = () =>
-  error('email_taken', 409, 'An account with this email already exists');
+/** Verify-email: one answer for a bad/used/expired link, an expired account, or a wrong password. */
+export const verificationFailed = () =>
+  error('verification_failed', 400, 'This link or password is not valid', {
+    detail: 'Check the password you signed up with, or sign up again to get a new link.',
+  });
 export const invalidToken = () =>
   error('invalid_token', 400, 'This link is invalid or has expired');
 export const rateLimited = (retryAfterSec: number) =>

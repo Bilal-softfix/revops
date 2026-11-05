@@ -4,7 +4,7 @@ All tables: `id uuid pk default gen_random_uuid()`, `created_at`, `updated_at ti
 
 ## Identity & tenancy
 - **tenants** — name, slug, timezone (default Asia/Kolkata), locale, industry_template, parent_tenant_id (nullable, future agency), settings jsonb, status
-- **users** (global, no tenant_id; RLS: self + members of the current tenant) — email (unique, citext), name, phone_e164, password_hash (argon2id, nullable until set), email_verified_at
+- **users** (global, no tenant_id; RLS: self + members of the current tenant; unverified accounts expire 48 h after created_at and are purged with their sole-owned tenants) — email (unique, citext), name, phone_e164, password_hash (argon2id, nullable until set), email_verified_at
 - **memberships** — tenant_id, user_id, role, status (invited/active/disabled); unique(tenant_id,user_id)
 - **sessions** (global, user-scoped RLS) — user_id, token_hash (sha256, unique), active_tenant_id, ip, user_agent, created_at, last_seen_at, expires_at (created + 30d), revoked_at
 - **auth_tokens** (global, user-scoped RLS) — user_id, purpose (email_verify/password_reset), token_hash (unique), expires_at, used_at (single use via `auth_consume_token`)

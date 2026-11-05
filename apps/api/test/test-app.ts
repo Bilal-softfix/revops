@@ -5,10 +5,12 @@ import { Test } from '@nestjs/testing';
 import { loadTestDatabaseEnv } from '@revops/db/testing';
 import { CSRF_HEADER, type SessionResponse } from '@revops/shared';
 import { apiEnvSchema, parseEnv } from '@revops/shared/env';
+import postgres from 'postgres';
 import request from 'supertest';
 import { APP_OPTIONS, configureApp } from '../src/app-setup';
 import { AppModule } from '../src/app.module';
 import { sessionCookieName } from '../src/modules/identity/session.service';
+import { BackgroundTasks, QueuedBackgroundTasks } from '../src/platform/background-tasks';
 import { Clock, FakeClock } from '../src/platform/clock';
 import { EmailProvider, FakeEmailProvider } from '../src/providers/email';
 
@@ -21,10 +23,13 @@ export interface TestApp {
   /** Starts at real "now" so DB-side checks (expires_at > now()) agree with the app's clock. */
   clock: FakeClock;
   email: FakeEmailProvider;
+  /** Background work (signup processing, emails) waits here until `drain()`. */
+  background: QueuedBackgroundTasks;
+  drain: () => Promise<void>;
   close: () => Promise<void>;
 }
 
-/** The real AppModule on the test DB, with the fake email driver and a controllable clock. */
+/** The real AppModule on the test DB, with fake email, a controllable clock and queued tasks. */
 export async function createTestApp(): Promise<TestApp> {
   const { appUrl } = loadTestDatabaseEnv();
   const env = parseEnv(apiEnvSchema, {
@@ -35,9 +40,12 @@ export async function createTestApp(): Promise<TestApp> {
     COOKIE_SECURE: 'true',
   });
   const clock = new FakeClock(new Date());
+  const background = new QueuedBackgroundTasks();
   const moduleRef = await Test.createTestingModule({ imports: [AppModule.register(env)] })
     .overrideProvider(Clock)
     .useValue(clock)
+    .overrideProvider(BackgroundTasks)
+    .useValue(background)
     .compile();
   const app = moduleRef.createNestApplication({ ...APP_OPTIONS, logger: false });
   configureApp(app);
@@ -47,13 +55,15 @@ export async function createTestApp(): Promise<TestApp> {
     server: app.getHttpServer() as Server,
     clock,
     email: app.get<EmailProvider, FakeEmailProvider>(EmailProvider),
+    background,
+    drain: () => background.drain(),
     close: () => app.close(),
   };
 }
 
 export const uniqueEmail = (label = 'user') => `${label}-${randomUUID()}@example.test`;
 
-/** `sid=<token>` from a Set-Cookie response (the cookie is Secure, so supertest agents won't resend it). */
+/** `__Host-sid=<token>` from a Set-Cookie response (Secure, so supertest agents won't resend it). */
 export function sessionCookie(res: request.Response): string {
   const raw = ([] as string[]).concat(res.headers['set-cookie'] ?? []);
   const cookie = raw.find((c) => c.startsWith(`${SESSION_COOKIE}=`));
@@ -61,19 +71,29 @@ export function sessionCookie(res: request.Response): string {
   return cookie.split(';')[0] ?? '';
 }
 
-export async function signup(t: TestApp, email: string, password = PASSWORD) {
+/** POST /signup (always 202) and run the background processing. */
+export async function signup(
+  t: TestApp,
+  email: string,
+  password = PASSWORD,
+  tenantName = 'Asha Realty',
+): Promise<request.Response> {
   const res = await request(t.server)
     .post('/v1/auth/signup')
-    .send({ name: 'Asha', email, password, tenantName: 'Asha Realty' })
-    .expect(201);
-  return res.body as { user: { id: string }; tenant: { id: string } };
+    .send({ name: 'Asha', email, password, tenantName })
+    .expect(202);
+  await t.drain();
+  return res;
 }
 
+export const verify = (t: TestApp, token: string | undefined, password = PASSWORD) =>
+  request(t.server).post('/v1/auth/verify-email').send({ token, password });
+
+/** Signup + verify (with the password) and return the logged-in session (user/tenant ids). */
 export async function signupVerified(t: TestApp, email: string, password = PASSWORD) {
-  const body = await signup(t, email, password);
-  const token = t.email.lastTokenTo(email);
-  await request(t.server).post('/v1/auth/verify-email').send({ token }).expect(204);
-  return body;
+  await signup(t, email, password);
+  await verify(t, t.email.lastTokenTo(email), password).expect(204);
+  return (await login(t, email, password)).body;
 }
 
 export interface LoggedIn {
@@ -92,3 +112,22 @@ export const withSession = (req: request.Test, session: LoggedIn, csrf = true) =
   csrf
     ? req.set('Cookie', session.cookie).set(CSRF_HEADER, session.csrf)
     : req.set('Cookie', session.cookie);
+
+/**
+ * Owner connection to the TEST database, for setting up states the API can't produce (e.g.
+ * backdating an account past the 48 h cutoff). users isn't FORCE RLS, so the owner sees all rows.
+ */
+export async function asTestOwner<T>(fn: (sql: postgres.Sql) => Promise<T>): Promise<T> {
+  const sql = postgres(loadTestDatabaseEnv().ownerUrl, { max: 1, onnotice: () => undefined });
+  try {
+    return await fn(sql);
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
+}
+
+/** Ages an unverified signup past the 48 h cutoff. */
+export const expireSignup = (email: string) =>
+  asTestOwner(
+    (sql) => sql`update users set created_at = now() - interval '49 hours' where email = ${email}`,
+  );

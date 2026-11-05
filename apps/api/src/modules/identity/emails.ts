@@ -11,10 +11,29 @@ export function verifyEmailMessage(to: string, appUrl: string, token: string): E
     text: [
       'Welcome to RevOps!',
       '',
-      'Confirm your email address to finish setting up your account:',
+      'Confirm your email address to finish setting up your account (you’ll need the password',
+      'you signed up with):',
       link.toString(),
       '',
-      'The link expires in 24 hours. If you didn’t sign up, ignore this email.',
+      'The link expires in 24 hours. If you didn’t sign up, open the link and choose',
+      '“This wasn’t me” — the account will be deleted.',
+    ].join('\n'),
+  };
+}
+
+/** Signup with an email that already has a verified account: nothing is created. */
+export function accountExistsMessage(to: string, appUrl: string): EmailMessage {
+  return {
+    to,
+    subject: 'You already have a RevOps account',
+    text: [
+      'Someone (hopefully you) tried to sign up to RevOps with this email address,',
+      'but you already have an account. Nothing was changed.',
+      '',
+      `Sign in: ${new URL('/login', appUrl).toString()}`,
+      `Forgot your password? ${new URL('/forgot-password', appUrl).toString()}`,
+      '',
+      'If this wasn’t you, you can ignore this email.',
     ].join('\n'),
   };
 }
