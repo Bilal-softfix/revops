@@ -17,8 +17,8 @@ import {
 } from './checks.js';
 
 const goodFacts: PostgresFacts = {
-  versionNum: 160_004,
-  version: '16.4',
+  versionNum: 180_006,
+  version: '18.6',
   role: 'app_user',
   isSuperuser: false,
   bypassRls: false,
@@ -114,15 +114,15 @@ describe('checkTestDbIsolation', () => {
 });
 
 describe('evaluateAppPostgres', () => {
-  it('passes for a plain app_user with all extensions on PG16', () => {
+  it('passes for a plain app_user with all extensions on PG18', () => {
     expect(evaluateAppPostgres('DB', goodFacts).every((r) => r.status === 'pass')).toBe(true);
   });
 
-  it('fails below PostgreSQL 16', () => {
+  it('fails below PostgreSQL 18 (ADR-010)', () => {
     const results = evaluateAppPostgres('DB', {
       ...goodFacts,
-      versionNum: 150_008,
-      version: '15.8',
+      versionNum: 160_004,
+      version: '16.4',
     });
     expect(statusOf(results, 'version')).toBe('fail');
   });

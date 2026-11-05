@@ -1,5 +1,5 @@
 import { verify } from '@node-rs/argon2';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createDb } from '../src/client.js';
 import { memberships, users } from '../src/schema/index.js';
@@ -32,9 +32,20 @@ describe('seedDemo (as app_user, through RLS)', () => {
   });
 
   it('stores an argon2id hash of SEED_PASSWORD and marks users verified', async () => {
-    const [owner] = await app.db.select().from(users).limit(1);
-    expect(owner?.passwordHash).toMatch(/^\$argon2id\$/);
-    expect(await verify(owner?.passwordHash ?? '', PASSWORD)).toBe(true);
-    expect(owner?.emailVerifiedAt).toBeInstanceOf(Date);
+    // app_user can't select password_hash; login-style lookup goes through the definer function.
+    const [owner] = await app.db.execute<{ password_hash: string; email_verified_at: unknown }>(
+      sql`select * from auth_find_user_by_email('owner@demo.revops.test')`,
+    );
+    expect(owner?.password_hash).toMatch(/^\$argon2id\$/);
+    expect(await verify(owner?.password_hash ?? '', PASSWORD)).toBe(true);
+    expect(owner?.email_verified_at).not.toBeNull();
+    // ...and the users row is visible to members of the demo tenant (users RLS).
+    const visible = await withTenant(app.db, DEMO_TENANT_ID, (tx) =>
+      tx
+        .select({ email: users.email })
+        .from(users)
+        .where(eq(users.email, 'owner@demo.revops.test')),
+    );
+    expect(visible).toHaveLength(1);
   });
 });

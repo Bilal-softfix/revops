@@ -1,12 +1,12 @@
-import { randomUUID } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type Tx, createDb } from '../src/client.js';
 import { TENANT_SETTING } from '../src/rls.js';
-import { memberships, users } from '../src/schema/index.js';
+import { memberships } from '../src/schema/index.js';
 import { loadTestDatabaseEnv } from '../src/testing/index.js';
 import { withTenant } from '../src/with-tenant.js';
 import { createTenant } from './tenant-tables.js';
+import { insertUser } from './users.js';
 
 // DATABASE_URL_TEST is Neon's pooled endpoint (PgBouncer, transaction mode) like DATABASE_URL.
 // withTenant must use a transaction-local set_config so the tenant context never survives into the
@@ -33,11 +33,8 @@ beforeAll(async () => {
   [tenantA, tenantB] = [await createTenant(single.db, 'A'), await createTenant(single.db, 'B')];
   for (const tenantId of [tenantA, tenantB]) {
     await withTenant(single.db, tenantId, async (tx) => {
-      const [user] = await tx
-        .insert(users)
-        .values({ email: `${randomUUID()}@ctx.test`, name: 'U' })
-        .returning({ id: users.id });
-      await tx.insert(memberships).values({ tenantId, userId: user?.id ?? '', role: 'agent' });
+      const userId = await insertUser(tx);
+      await tx.insert(memberships).values({ tenantId, userId, role: 'agent' });
     });
   }
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { EnvValidationError, parseEnv } from './load.js';
-import { apiEnvSchema, testDatabaseEnvSchema } from './schemas.js';
+import { apiEnvSchema, productionEnvProblems, testDatabaseEnvSchema } from './schemas.js';
 
 const validApiEnv = {
   DATABASE_URL: 'postgresql://app_user:pw@localhost:5432/revops_dev',
@@ -92,5 +92,37 @@ describe('testDatabaseEnvSchema', () => {
     expect(() =>
       parseEnv(testDatabaseEnvSchema, { DATABASE_URL_TEST: 'postgres://u:p@h/revops_test' }),
     ).toThrow(/DATABASE_URL_TEST_OWNER/);
+  });
+});
+
+describe('productionEnvProblems', () => {
+  const prod = (patch: Record<string, string>) =>
+    productionEnvProblems(
+      parseEnv(apiEnvSchema, {
+        ...validApiEnv,
+        NODE_ENV: 'production',
+        EMAIL_DRIVER: 'console',
+        APP_URL: 'https://app.revops.in',
+        ...patch,
+      }),
+    );
+
+  it('ignores non-production environments', () => {
+    expect(productionEnvProblems(parseEnv(apiEnvSchema, validApiEnv))).toEqual([]);
+  });
+
+  it('rejects the console/fake email drivers (they would log or drop live reset links)', () => {
+    expect(prod({})).toEqual([expect.stringMatching(/^EMAIL_DRIVER: /)]);
+    expect(prod({ EMAIL_DRIVER: 'fake' })).toEqual([expect.stringMatching(/^EMAIL_DRIVER: /)]);
+  });
+
+  it('rejects http or localhost APP_URL and insecure cookies, independently of the driver', () => {
+    const problems = prod({ APP_URL: 'http://localhost:3000', COOKIE_SECURE: 'false' });
+    expect(problems).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^APP_URL: /),
+        expect.stringMatching(/^COOKIE_SECURE: /),
+      ]),
+    );
   });
 });

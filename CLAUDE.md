@@ -13,7 +13,7 @@ AI Revenue Operations Platform for Indian lead-driven SMBs: lead capture → hum
 - `apps/web` — Next.js (App Router), React, Tailwind, shadcn/ui, TanStack Query, React Hook Form + Zod
 - `apps/api` — NestJS. Two entrypoints: `main.ts` (HTTP) and `worker.ts` (BullMQ consumers, outbox relay, schedulers)
 - `apps/voice-agent` — Python 3.12, LiveKit Agents, uv for deps, ruff + mypy + pytest
-- `packages/db` — Drizzle ORM + drizzle-kit migrations, PostgreSQL 16 with RLS and pgvector
+- `packages/db` — Drizzle ORM + drizzle-kit migrations, PostgreSQL 18 (ADR-010) with RLS and pgvector
 - `packages/shared` — Zod schemas, DTO types, event contracts, enums (single source of truth for web + api)
 - `packages/config` — eslint, tsconfig, prettier presets
 - Redis 7 (BullMQ, rate limits, cache). Object storage behind a `StorageProvider` adapter: `LocalDiskStorage` in dev, S3 (ap-south-1) in prod.

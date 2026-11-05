@@ -9,13 +9,13 @@
 
 ## CI (GitHub Actions, `.github/workflows/ci.yml`)
 - `checks (ubuntu-latest)`: typecheck, lint, unit, build, `pnpm audit --prod` (warn only). `checks (windows-latest)`: typecheck, unit, build.
-- `integration (ubuntu-latest)`: Postgres 16 + pgvector and Redis 7 as service containers (Docker exists only in CI). `scripts/ci/setup-db.sql` mirrors the Neon setup below, then `pnpm run doctor` and `pnpm test:integration` run.
+- `integration (ubuntu-latest)`: Postgres 18 + pgvector (`pgvector/pgvector:0.8.6-pg18`, ADR-010) and Redis 7 as service containers (Docker exists only in CI). `scripts/ci/setup-db.sql` mirrors the Neon setup below, then `pnpm run doctor` and `pnpm test:integration` run.
 - Each job times out after 15 min; a new push cancels the in-flight run for the same branch/PR. pnpm store and uv caches are restored per run.
 
 ## Services
 | Need | Dev choice | Env var |
 |---|---|---|
-| PostgreSQL 16 + pgvector | Neon project, nearest Asia region; two databases: `revops_dev`, `revops_test` | `DATABASE_URL`, `DATABASE_URL_TEST`, `DATABASE_URL_OWNER` (migrations), `DATABASE_URL_TEST_OWNER` (test migrations) |
+| PostgreSQL 18 + pgvector | Neon project (Postgres 18), nearest Asia region; two databases: `revops_dev`, `revops_test` | `DATABASE_URL`, `DATABASE_URL_TEST`, `DATABASE_URL_OWNER` (migrations), `DATABASE_URL_TEST_OWNER` (test migrations) |
 | Redis | Redis Cloud free database, eviction policy set to `noeviction` (BullMQ requirement) | `REDIS_URL` |
 | Object storage | Local disk `./.data/storage` (gitignored) | `STORAGE_DRIVER=local` |
 | Email | Console provider (prints to terminal) | `EMAIL_DRIVER=console` |
@@ -49,6 +49,12 @@ Manual equivalent, if you ever have SQL access: in each DB `CREATE EXTENSION IF 
   - Vitest globalSetup migrates the test DB;
   - every test file starts from truncated tables;
   - files run one at a time.
+
+## Trying auth locally (M0-T4)
+- `apps/api/.env` holds API-only vars (see `apps/api/.env.example`): `APP_URL` (web origin used in email links), `EMAIL_DRIVER=console`, `EMAIL_FROM`, `COOKIE_SECURE=true`.
+- `pnpm dev`, then `POST http://localhost:4000/v1/auth/signup`. The console email provider prints the verify link to the API terminal, with the recipient masked. `POST /v1/auth/verify-email {"token": …}`, then `POST /v1/auth/login`.
+- Send JSON only (`content-type: application/json`). On unsafe authenticated calls such as logout, send the `csrfToken` from the login/me response as `x-csrf-token`.
+- The login rate limiter is in-memory until M0-T6 (Redis), so restarting the API clears it.
 
 ## Redis Cloud setup
 Not needed until M0-T6 (BullMQ, outbox relay): until then `REDIS_URL` may be blank and `pnpm run doctor` only warns. Set it up before T6:

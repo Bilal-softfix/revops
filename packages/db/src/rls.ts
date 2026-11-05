@@ -3,10 +3,12 @@
 // table to the leak suite (test/tenant-tables.ts) — the catalog meta-test fails until you do.
 
 export const TENANT_SETTING = 'app.tenant_id';
+export const USER_SETTING = 'app.user_id';
 export const APP_ROLE = 'app_user';
 
 /** `''` after a transaction-local set_config ends on a pooled connection → NULL → no rows. */
 export const CURRENT_TENANT_SQL = `nullif(current_setting('${TENANT_SETTING}', true), '')::uuid`;
+export const CURRENT_USER_SQL = `nullif(current_setting('${USER_SETTING}', true), '')::uuid`;
 
 const IDENTIFIER = /^[a-z_][a-z0-9_]{0,62}$/;
 

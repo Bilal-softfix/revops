@@ -16,7 +16,7 @@ Modular monolith in NestJS + one Python voice worker. Modules talk via service i
 │  worker.ts: outbox relay → BullMQ queues → consumers, schedulers  │
 └──────┬──────────────┬─────────────────┬───────────────────────────┘
        │              │                 │
-  PostgreSQL 16     Redis 7       Storage adapter (local disk dev / S3 prod)
+  PostgreSQL 18     Redis 7       Storage adapter (local disk dev / S3 prod)
   (RLS, pgvector)   (BullMQ)
        ▲
        │ internal API (service token)
@@ -48,11 +48,32 @@ Modular monolith in NestJS + one Python voice worker. Modules talk via service i
 - Shared DB, shared schema, `tenant_id` on every tenant table.
 - Postgres RLS: `ALTER TABLE ... ENABLE ROW LEVEL SECURITY; FORCE ROW LEVEL SECURITY;` policy `tenant_id = current_setting('app.tenant_id')::uuid`.
 - App connects as a non-owner role (`app_user`); migrations run as owner.
-- `withTenant(db, tenantId, fn)` (`@revops/db`) opens a transaction and runs `select set_config('app.tenant_id', $1, true)`, the transaction-local equivalent of `SET LOCAL`. Never use a session-level `SET`: `DATABASE_URL` is Neon's PgBouncer endpoint in transaction mode, so session state would leak to other clients' transactions. Jobs carry `tenantId` in their payload and use the same helper.
+- `withContext(db, { tenantId, userId }, fn)` (`@revops/db`) opens a transaction and runs `set_config('app.tenant_id', …, true)` and `set_config('app.user_id', …, true)`, the transaction-local equivalent of `SET LOCAL`. Unset values are written as `''`. `withTenant(db, tenantId, fn)` is the tenant-only shorthand. Never use a session-level `SET`: `DATABASE_URL` is Neon's PgBouncer endpoint in transaction mode, so session state would leak to other clients' transactions. Jobs carry `tenantId` in their payload and use the same helper.
 - Policies compare against `nullif(current_setting('app.tenant_id', true), '')::uuid`. After a transaction-local value ends, a pooled connection reads the setting back as `''`; `nullif` turns that into NULL, so a query outside `withTenant` sees no rows instead of hitting a uuid cast error.
 - New tenant table: generate the RLS SQL with `tenantRlsSql()` (`packages/db/src/rls.ts`) into a custom migration (`pnpm db:generate --custom --name=<table>_rls`), then register the table in `packages/db/test/tenant-tables.ts`. The catalog meta-test fails until both are done. App grants are explicit per table; there are no default privileges.
-- `users` is global (no `tenant_id`, no RLS), because login looks a user up by email before any tenant context exists.
+- **User-scoped tables** (`users`, `sessions`, `auth_tokens`; global, no `tenant_id`) have RLS **enabled but not forced**, with policies on `app.user_id`:
+  - `users`: visible if it is the user itself or a member of the current tenant; insert and update self only; no delete.
+  - `sessions` and `auth_tokens`: only the acting user's rows.
+- Not forcing RLS on these tables lets the owner-owned **SECURITY DEFINER** functions read them for the few context-free auth steps. Each function has a fixed `search_path = pg_catalog, public, pg_temp`, returns only the fields its caller needs, and has EXECUTE for `app_user` only:
+  - `auth_find_user_by_email` returns id, password_hash and email_verified_at;
+  - `auth_session_lookup` returns a live session by token hash;
+  - `auth_consume_token` atomically marks a one-time emailed token used.
+  `app_user` is never an owner, so it stays fully bound by these policies.
+- **User-only context** (`app.user_id` set, no tenant): a read-only `self_select` policy on `memberships`/`tenants` shows the user its own memberships and the tenants it belongs to. This is used at login and by the tenant switcher (M0-T5). With a tenant set, only `tenant_isolation` applies.
+- New SECURITY DEFINER functions and new user-scoped tables are pinned by `packages/db/test/rls-catalog.int.test.ts`. Every table in `public` must be classified there.
 - Data model allows a future `agency` tenant managing child tenants (`parent_tenant_id`), no agency UI in MVP.
+
+## Auth (M0-T4, ADR-006)
+- **Session:** the `__Host-sid` cookie holds an opaque 32-byte token (httpOnly, Secure, SameSite=Lax, Path=/; the `__Host-` prefix stops sibling subdomains from planting a session). The DB stores only its sha256. Absolute lifetime is 30 days (`expires_at`, checked in SQL); the idle timeout is 7 days, checked against `last_seen_at`, which is updated at most every 5 minutes. The active membership and role are re-checked on every request, so a removed member loses tenant access immediately.
+- **CSRF:** `x-csrf-token` = HMAC-SHA256(session token, "csrf.v1"), returned by `/v1/auth/login` and `/v1/auth/me`. It is required on unsafe methods of authenticated routes. Only JSON bodies are parsed (no urlencoded/text parsers), so a cross-site HTML form can't submit to the API.
+- **Signup** runs in one transaction: user, tenant, owner membership, audit log, `user.signed_up.v1` outbox event and verification token. No session is created until the email is verified; an unverified login gets 403 `email_not_verified`, and only with the correct password.
+- **Rate limits:**
+  - Login: 5 attempts per (IP, email) per 15 minutes, reserved atomically *before* the password check and cleared on success, plus 50 per IP. Over the limit: 429 with `Retry-After`.
+  - Signup: 10 per IP per hour.
+  - Verify/reset emails: 3 per (IP, email) and 20 per IP per hour.
+  - In-memory until M0-T6 (Redis). Unknown emails get a dummy argon2 verify, so timing doesn't reveal which accounts exist.
+- **Resend verification and forgot password** always return 202, sending the email after the response so timing doesn't reveal accounts. A reset sets the new password, marks the email verified, revokes all sessions and expires the user's other reset links. Links are single-use and expire after 24 hours (verify) or 1 hour (reset).
+- **Errors:** RFC 7807 `application/problem+json` with a stable `code` (`AUTH_ERROR_CODES` in `@revops/shared`).
 
 ## RBAC (MVP)
 | Role | Can |

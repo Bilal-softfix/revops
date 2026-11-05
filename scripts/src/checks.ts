@@ -14,7 +14,8 @@ export interface CheckResult {
 export const REQUIRED_NODE_MAJOR = 22;
 /** 22.12 unflagged require(esm), which apps/api relies on to load the ESM workspace packages. */
 export const MIN_NODE_MINOR = 12;
-export const MIN_POSTGRES_VERSION_NUM = 160_000;
+/** ADR-010: PostgreSQL 18 everywhere (Neon dev/test, CI). */
+export const MIN_POSTGRES_VERSION_NUM = 180_000;
 export const REQUIRED_EXTENSIONS = ['vector', 'citext', 'pg_trgm'] as const;
 export const MIN_REDIS_MAJOR = 7;
 
@@ -144,7 +145,11 @@ export function evaluatePostgresVersion(
 ): CheckResult {
   return facts.versionNum >= MIN_POSTGRES_VERSION_NUM
     ? { name: `${label}: version`, status: 'pass', detail: `PostgreSQL ${facts.version}` }
-    : { name: `${label}: version`, status: 'fail', detail: `PostgreSQL ${facts.version} < 16` };
+    : {
+        name: `${label}: version`,
+        status: 'fail',
+        detail: `PostgreSQL ${facts.version} < 18 (ADR-010)`,
+      };
 }
 
 /** Owner and app connections must be different roles, otherwise RLS is bypassed in the app. */

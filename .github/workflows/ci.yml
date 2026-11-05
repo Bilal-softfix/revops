@@ -1,6 +1,6 @@
 # CI — see M0-T2 in docs/milestones/M0-foundation.md.
 # checks:      matrix. ubuntu runs typecheck, lint, unit, build, audit; windows runs typecheck, unit, build.
-# integration: ubuntu only (service containers are Linux-only): Postgres 16 + pgvector, Redis 7.
+# integration: ubuntu only (service containers are Linux-only): Postgres 18 + pgvector (ADR-010), Redis 7.
 # Actions are pinned to commit SHAs (tag in the trailing comment).
 name: CI
 
@@ -77,7 +77,7 @@ jobs:
     timeout-minutes: 15
     services:
       postgres:
-        image: pgvector/pgvector:pg16
+        image: pgvector/pgvector:0.8.6-pg18
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres

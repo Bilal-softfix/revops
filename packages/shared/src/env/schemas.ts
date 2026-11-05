@@ -64,12 +64,46 @@ export const redisEnvSchema = z.object({
   REDIS_URL: optionalRedisUrl,
 });
 
+const booleanFlag = z.enum(['true', 'false']).transform((value) => value === 'true');
+
 export const apiEnvSchema = commonEnvSchema
   .extend(databaseEnvSchema.shape)
   .extend(redisEnvSchema.shape)
   .extend({
     API_PORT: z.preprocess(blankAsUndefined, port.default(4000)),
+    /** Web app origin, used to build links in emails (verify email, reset password). */
+    APP_URL: z.preprocess(
+      blankAsUndefined,
+      z.url({ protocol: /^https?$/ }).default('http://localhost:3000'),
+    ),
+    /** `console` prints emails to the terminal (dev); `fake` keeps them in memory (tests). */
+    EMAIL_DRIVER: z.preprocess(blankAsUndefined, z.enum(['console', 'fake']).default('console')),
+    EMAIL_FROM: z.preprocess(
+      blankAsUndefined,
+      z.string().default('RevOps <no-reply@revops.local>'),
+    ),
+    /** Secure cookies. Browsers treat http://localhost as secure, so keep true in dev too. */
+    COOKIE_SECURE: z.preprocess(blankAsUndefined, booleanFlag.default(true)),
   });
+
+/**
+ * Settings that are fine in dev but unsafe in production: the console email driver writes live
+ * verify/reset links (account-takeover tokens) to logs, and a non-https or localhost APP_URL puts
+ * broken or downgradable links in emails. Returns `VAR: problem` messages; empty = OK.
+ */
+export function productionEnvProblems(env: ApiEnv): string[] {
+  if (env.NODE_ENV !== 'production') return [];
+  const problems: string[] = [];
+  if (env.EMAIL_DRIVER === 'console' || env.EMAIL_DRIVER === 'fake') {
+    problems.push(`EMAIL_DRIVER: "${env.EMAIL_DRIVER}" is not allowed in production`);
+  }
+  const appUrl = new URL(env.APP_URL);
+  if (appUrl.protocol !== 'https:' || ['localhost', '127.0.0.1'].includes(appUrl.hostname)) {
+    problems.push('APP_URL: must be a public https:// URL in production');
+  }
+  if (!env.COOKIE_SECURE) problems.push('COOKIE_SECURE: must be true in production');
+  return problems;
+}
 
 export const workerEnvSchema = commonEnvSchema
   .extend(databaseEnvSchema.shape)

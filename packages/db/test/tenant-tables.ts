@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { Db } from '../src/client.js';
-import { auditLogs, memberships, outboxEvents, tenants, users } from '../src/schema/index.js';
+import { auditLogs, memberships, outboxEvents, tenants } from '../src/schema/index.js';
 import { withTenant } from '../src/with-tenant.js';
 import type { TenantTableFixture } from './leak-check.js';
+import { insertUser } from './users.js';
 
 /**
  * Every tenant-owned table, with how to make a row. The catalog meta-test fails if a table with
@@ -23,13 +24,10 @@ export const TENANT_TABLES: readonly TenantTableFixture[] = [
     tenantColumn: 'tenant_id',
     privileges: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
     insert: async (tx, tenantId) => {
-      const [user] = await tx
-        .insert(users)
-        .values({ email: `${randomUUID()}@leak.test`, name: 'U' })
-        .returning({ id: users.id });
+      const userId = await insertUser(tx);
       const [row] = await tx
         .insert(memberships)
-        .values({ tenantId, userId: user?.id ?? '', role: 'agent' })
+        .values({ tenantId, userId, role: 'agent' })
         .returning({ id: memberships.id });
       return row?.id ?? '';
     },

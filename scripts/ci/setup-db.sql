@@ -1,5 +1,5 @@
 -- CI only: mirrors the Neon setup in docs/05-local-dev-setup.md on a throwaway
--- pgvector/pgvector:pg16 service container. Run as the container superuser via psql.
+-- pgvector/pgvector:0.8.6-pg18 service container. Run as the container superuser via psql.
 -- Passwords here are CI-only placeholders for a container that lives for one job.
 
 -- On stock Postgres `vector` is not a trusted extension, so a non-superuser owner can't create it

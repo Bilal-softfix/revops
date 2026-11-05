@@ -4,3 +4,4 @@ export * from './users.js';
 export * from './memberships.js';
 export * from './audit-logs.js';
 export * from './outbox-events.js';
+export * from './auth.js';
