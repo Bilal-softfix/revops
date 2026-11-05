@@ -48,7 +48,10 @@ Modular monolith in NestJS + one Python voice worker. Modules talk via service i
 - Shared DB, shared schema, `tenant_id` on every tenant table.
 - Postgres RLS: `ALTER TABLE ... ENABLE ROW LEVEL SECURITY; FORCE ROW LEVEL SECURITY;` policy `tenant_id = current_setting('app.tenant_id')::uuid`.
 - App connects as a non-owner role (`app_user`); migrations run as owner.
-- `withTenant(tenantId, fn)` opens a transaction and `SET LOCAL app.tenant_id`. Jobs carry `tenantId` in payload and use the same helper.
+- `withTenant(db, tenantId, fn)` (`@revops/db`) opens a transaction and runs `select set_config('app.tenant_id', $1, true)`, the transaction-local equivalent of `SET LOCAL`. Never use a session-level `SET`: `DATABASE_URL` is Neon's PgBouncer endpoint in transaction mode, so session state would leak to other clients' transactions. Jobs carry `tenantId` in their payload and use the same helper.
+- Policies compare against `nullif(current_setting('app.tenant_id', true), '')::uuid`. After a transaction-local value ends, a pooled connection reads the setting back as `''`; `nullif` turns that into NULL, so a query outside `withTenant` sees no rows instead of hitting a uuid cast error.
+- New tenant table: generate the RLS SQL with `tenantRlsSql()` (`packages/db/src/rls.ts`) into a custom migration (`pnpm db:generate --custom --name=<table>_rls`), then register the table in `packages/db/test/tenant-tables.ts`. The catalog meta-test fails until both are done. App grants are explicit per table; there are no default privileges.
+- `users` is global (no `tenant_id`, no RLS), because login looks a user up by email before any tenant context exists.
 - Data model allows a future `agency` tenant managing child tenants (`parent_tenant_id`), no agency UI in MVP.
 
 ## RBAC (MVP)

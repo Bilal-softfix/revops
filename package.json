@@ -16,6 +16,9 @@
     "test:e2e": "turbo run test:e2e",
     "doctor": "turbo run build --filter=@revops/scripts^... --output-logs=errors-only && pnpm --filter @revops/scripts run doctor",
     "db:bootstrap": "turbo run build --filter=@revops/scripts^... --output-logs=errors-only && pnpm --filter @revops/scripts run db:bootstrap",
+    "db:generate": "turbo run build --filter=@revops/db^... --output-logs=errors-only && pnpm --filter @revops/db run db:generate",
+    "db:migrate": "turbo run build --filter=@revops/db^... --output-logs=errors-only && pnpm --filter @revops/db run db:migrate",
+    "db:seed": "turbo run build --filter=@revops/db^... --output-logs=errors-only && pnpm --filter @revops/db run db:seed",
     "format": "prettier --write ."
   },
   "devDependencies": {

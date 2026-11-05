@@ -4,10 +4,10 @@ All tables: `id uuid pk default gen_random_uuid()`, `created_at`, `updated_at ti
 
 ## Identity & tenancy
 - **tenants** — name, slug, timezone (default Asia/Kolkata), locale, industry_template, parent_tenant_id (nullable, future agency), settings jsonb, status
-- **users** — email (unique, citext), name, phone, password_hash (argon2id), email_verified_at
+- **users** (global, no tenant_id/RLS) — email (unique, citext), name, phone_e164, password_hash (argon2id, nullable until set), email_verified_at
 - **memberships** — tenant_id, user_id, role, status (invited/active/disabled); unique(tenant_id,user_id)
 - **business_hours** — tenant_id, weekday, open_time, close_time; **holidays** — tenant_id, date
-- **audit_logs** — tenant_id, actor_type (user/ai/system), actor_id, action, entity, entity_id, before/after jsonb, ip
+- **audit_logs** (append-only: app_user has SELECT + INSERT only; created_at, no updated_at) — tenant_id, actor_type (user/ai/system), actor_id, action, entity, entity_id (text), before/after jsonb, ip inet
 
 ## CRM
 - **contacts** — name, phone_e164, alt_phones text[], email, city, custom_fields jsonb, consent jsonb (whatsapp/sms/call/recording with timestamps + source), deleted_at. Index: unique(tenant_id, phone_e164) where deleted_at is null; (tenant_id, email)
@@ -42,4 +42,4 @@ All tables: `id uuid pk default gen_random_uuid()`, `created_at`, `updated_at ti
 - **tenant_limits** — type, monthly_cap, alert_threshold_pct
 - **integration_accounts** — provider (meta/google_ads), external_account_id, encrypted_tokens bytea, scopes, status, expires_at, last_sync_at
 - **ad_insights_daily** — integration_account_id, level (campaign/adset/ad), external_id, name, date, spend_paise, impressions, clicks (M7)
-- **outbox_events** — see architecture
+- **outbox_events** (created/occurred_at only) — tenant_id, type (versioned, e.g. `lead.created.v1`), aggregate_id, payload jsonb, occurred_at, published_at; partial index on unpublished rows. See architecture

@@ -40,6 +40,16 @@ The script connects to the direct endpoint for admin work (`CREATE DATABASE` mus
 
 Manual equivalent, if you ever have SQL access: in each DB `CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS citext; CREATE EXTENSION IF NOT EXISTS pg_trgm;` and once `CREATE ROLE app_user LOGIN PASSWORD '<strong-password>';`.
 
+## Migrations, seed and integration tests
+- `pnpm db:migrate` applies `packages/db/migrations` to the dev DB as the owner over `DATABASE_URL_OWNER` (direct endpoint). `pnpm db:migrate --test` does the same for the test DB.
+- `pnpm db:generate --name=<change>` creates a migration from `packages/db/src/schema`; add `--custom` for hand-written SQL such as RLS. Migrations are forward-only, and a merged migration is never edited.
+- `pnpm db:seed`: set `SEED_PASSWORD` (at least 12 characters) in `.env` first. It creates the demo tenant plus `owner|admin|manager|agent@demo.revops.test` as `app_user`, through RLS. It is idempotent and refuses to run with `NODE_ENV=production`.
+- `pnpm test:integration` runs against `DATABASE_URL_TEST`:
+  - a guard refuses any database whose name doesn't end in `_test`, or that is the dev database;
+  - Vitest globalSetup migrates the test DB;
+  - every test file starts from truncated tables;
+  - files run one at a time.
+
 ## Redis Cloud setup
 Not needed until M0-T6 (BullMQ, outbox relay): until then `REDIS_URL` may be blank and `pnpm run doctor` only warns. Set it up before T6:
 Create free database → Configuration → set eviction policy to **noeviction** → copy public endpoint + password into `REDIS_URL=rediss://default:<password>@<host>:<port>` (use `redis://` if TLS is not enabled on the free plan).

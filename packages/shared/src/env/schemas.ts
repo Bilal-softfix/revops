@@ -47,6 +47,14 @@ export const testDatabaseEnvSchema = z.object({
   DATABASE_URL_TEST_OWNER: postgresUrl,
 });
 
+/** `pnpm db:seed`: password for the demo users (dev data only — the seed refuses production). */
+export const seedEnvSchema = z.object({
+  SEED_PASSWORD: z.preprocess(
+    blankAsUndefined,
+    z.string({ error: 'is required' }).min(12, 'must be at least 12 characters'),
+  ),
+});
+
 /** One-off `pnpm run db:bootstrap`: the Neon owner role (needs CREATEDB + CREATEROLE). */
 export const neonBootstrapEnvSchema = z.object({
   NEON_BOOTSTRAP_URL: postgresUrl,

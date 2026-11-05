@@ -6,6 +6,7 @@ import {
   findRepoRoot,
   migrationEnvSchema,
   neonBootstrapEnvSchema,
+  seedEnvSchema,
   testDatabaseEnvSchema,
   workerEnvSchema,
 } from '@revops/shared/env';
@@ -25,6 +26,7 @@ const schemas = {
   migrations: migrationEnvSchema,
   tests: testDatabaseEnvSchema,
   bootstrap: neonBootstrapEnvSchema,
+  seed: seedEnvSchema,
 };
 
 describe('.env.example files', () => {
