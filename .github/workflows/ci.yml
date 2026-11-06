@@ -1,0 +1,136 @@
+# CI — see M0-T2 in docs/milestones/M0-foundation.md.
+# checks:      matrix. ubuntu runs typecheck, lint, unit, build, audit; windows runs typecheck, unit, build.
+# integration: ubuntu only (service containers are Linux-only): Postgres 18 + pgvector (ADR-010), Redis 7.
+# Actions are pinned to commit SHAs (tag in the trailing comment).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One run per branch: a new push cancels the in-flight run for the same branch/PR.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  TURBO_TELEMETRY_DISABLED: '1'
+  FORCE_COLOR: '1'
+
+jobs:
+  checks:
+    name: checks (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # pnpm version comes from "packageManager" in package.json.
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      # voice-agent's typecheck/lint/test run through turbo via `uv run`.
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.13.7'
+          enable-cache: true
+          cache-python: true
+          cache-dependency-glob: apps/voice-agent/uv.lock
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        if: runner.os == 'Linux'
+        run: pnpm lint
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      - name: Audit production deps (warn only)
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        run: pnpm audit --prod
+
+  integration:
+    name: integration (ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.6-pg18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    # Throwaway CI containers — these credentials exist only for this job (scripts/ci/setup-db.sql).
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://app_user:ci_app_pw@localhost:5432/revops_dev
+      DATABASE_URL_OWNER: postgresql://revops_owner:ci_owner_pw@localhost:5432/revops_dev
+      DATABASE_URL_TEST: postgresql://app_user:ci_app_pw@localhost:5432/revops_test
+      DATABASE_URL_TEST_OWNER: postgresql://revops_owner:ci_owner_pw@localhost:5432/revops_test
+      REDIS_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      # The doctor checks for uv as part of the dev toolchain.
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.13.7'
+          enable-cache: true
+          cache-python: true
+          cache-dependency-glob: apps/voice-agent/uv.lock
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Create roles, databases and extensions
+        env:
+          PGHOST: localhost
+          PGUSER: postgres
+          PGPASSWORD: postgres
+        run: psql -v ON_ERROR_STOP=1 -f scripts/ci/setup-db.sql
+
+      # Same checks as on a dev machine: non-owner app role, extensions, test-DB isolation, noeviction.
+      - name: Doctor
+        run: pnpm run doctor
+
+      - name: Integration tests
+        run: pnpm test:integration

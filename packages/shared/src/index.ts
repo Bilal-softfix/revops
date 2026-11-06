@@ -1,3 +1,5 @@
 // Browser-safe contracts shared by web + api (Zod schemas, DTOs, events, enums).
 // Node-only helpers live in subpath exports such as `@revops/shared/env`.
-export {};
+export * from './auth/schemas.js';
+export * from './events/identity.js';
+export * from './tenancy/enums.js';

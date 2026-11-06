@@ -1,6 +1,7 @@
 // Pure check logic for `pnpm run doctor`. No I/O here — doctor.ts gathers facts and feeds them in.
 import type { z } from 'zod';
 import { formatEnvIssues } from '@revops/shared/env';
+import { duplicateKeys } from './bootstrap/env-file.js';
 
 export type CheckStatus = 'pass' | 'warn' | 'fail';
 
@@ -11,7 +12,10 @@ export interface CheckResult {
 }
 
 export const REQUIRED_NODE_MAJOR = 22;
-export const MIN_POSTGRES_VERSION_NUM = 160_000;
+/** 22.12 unflagged require(esm), which apps/api relies on to load the ESM workspace packages. */
+export const MIN_NODE_MINOR = 12;
+/** ADR-010: PostgreSQL 18 everywhere (Neon dev/test, CI). */
+export const MIN_POSTGRES_VERSION_NUM = 180_000;
 export const REQUIRED_EXTENSIONS = ['vector', 'citext', 'pg_trgm'] as const;
 export const MIN_REDIS_MAJOR = 7;
 
@@ -28,13 +32,15 @@ export function maskUrl(raw: string): string {
 }
 
 export function checkNodeVersion(version: string): CheckResult {
-  const major = Number(version.replace(/^v/, '').split('.')[0]);
-  return major === REQUIRED_NODE_MAJOR
-    ? { name: 'Node.js', status: 'pass', detail: `v${version.replace(/^v/, '')}` }
+  const clean = version.replace(/^v/, '');
+  const [major, minor] = clean.split('.').map(Number);
+  const ok = major === REQUIRED_NODE_MAJOR && (minor ?? 0) >= MIN_NODE_MINOR;
+  return ok
+    ? { name: 'Node.js', status: 'pass', detail: `v${clean}` }
     : {
         name: 'Node.js',
         status: 'fail',
-        detail: `v${version.replace(/^v/, '')} — need ${REQUIRED_NODE_MAJOR}.x (run \`fnm use\`)`,
+        detail: `v${clean} — need ${REQUIRED_NODE_MAJOR}.x ≥ ${REQUIRED_NODE_MAJOR}.${MIN_NODE_MINOR} (run \`fnm use\`)`,
       };
 }
 
@@ -139,7 +145,11 @@ export function evaluatePostgresVersion(
 ): CheckResult {
   return facts.versionNum >= MIN_POSTGRES_VERSION_NUM
     ? { name: `${label}: version`, status: 'pass', detail: `PostgreSQL ${facts.version}` }
-    : { name: `${label}: version`, status: 'fail', detail: `PostgreSQL ${facts.version} < 16` };
+    : {
+        name: `${label}: version`,
+        status: 'fail',
+        detail: `PostgreSQL ${facts.version} < 18 (ADR-010)`,
+      };
 }
 
 /** Owner and app connections must be different roles, otherwise RLS is bypassed in the app. */
@@ -152,6 +162,30 @@ export function checkRoleSeparation(appRole: string, ownerRole: string): CheckRe
         detail: `DATABASE_URL and DATABASE_URL_OWNER both use ${appRole}`,
       };
 }
+
+/**
+ * A key defined twice in one .env file silently takes the LAST value (e.g. a pasted real URL above
+ * the copied .env.example placeholder). Reports key names and line numbers only, never values.
+ */
+export function checkDuplicateEnvKeys(file: string, content: string): CheckResult {
+  const dupes = [...duplicateKeys(content)].map(
+    ([key, lines]) => `${key} (lines ${lines.join(', ')})`,
+  );
+  return dupes.length === 0
+    ? { name: `${file}: duplicate keys`, status: 'pass', detail: 'none' }
+    : {
+        name: `${file}: duplicate keys`,
+        status: 'warn',
+        detail: `${dupes.join('; ')} — the last line wins; delete the others`,
+      };
+}
+
+/** REDIS_URL is optional until M0-T6: unset is a warning, not a failure. */
+export const REDIS_NOT_CONFIGURED: CheckResult = {
+  name: 'Redis',
+  status: 'warn',
+  detail: 'REDIS_URL not set — optional until M0-T6 (queues/outbox relay), required after',
+};
 
 /** Parses `key:value` lines from a Redis INFO reply. */
 export function parseRedisInfo(info: string): Map<string, string> {

@@ -3,18 +3,26 @@ import type { LogLevel } from '@nestjs/common';
 import {
   type ApiEnv,
   type WorkerEnv,
+  EnvValidationError,
   apiEnvSchema,
   loadAppEnv,
   parseEnv,
+  productionEnvProblems,
   workerEnvSchema,
 } from '@revops/shared/env';
+
+/** DI token for the validated ApiEnv (provided by PlatformModule). */
+export const API_ENV = Symbol('API_ENV');
 
 // Compiled to dist/config or run from src/config — either way apps/api is two levels up.
 const APP_DIR = join(__dirname, '..', '..');
 
 export function loadApiEnv(): ApiEnv {
   loadAppEnv(APP_DIR);
-  return parseEnv(apiEnvSchema);
+  const env = parseEnv(apiEnvSchema);
+  const problems = productionEnvProblems(env);
+  if (problems.length > 0) throw new EnvValidationError(problems);
+  return env;
 }
 
 export function loadWorkerEnv(): WorkerEnv {

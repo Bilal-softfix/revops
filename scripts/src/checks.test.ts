@@ -4,6 +4,8 @@ import {
   type PostgresFacts,
   checkEnv,
   checkNodeVersion,
+  REDIS_NOT_CONFIGURED,
+  checkDuplicateEnvKeys,
   checkRoleSeparation,
   checkTestDbIsolation,
   checkUv,
@@ -15,8 +17,8 @@ import {
 } from './checks.js';
 
 const goodFacts: PostgresFacts = {
-  versionNum: 160_004,
-  version: '16.4',
+  versionNum: 180_006,
+  version: '18.6',
   role: 'app_user',
   isSuperuser: false,
   bypassRls: false,
@@ -43,8 +45,11 @@ describe('maskUrl', () => {
 });
 
 describe('checkNodeVersion', () => {
-  it('passes on Node 22', () => expect(checkNodeVersion('22.23.4').status).toBe('pass'));
-  it.each(['24.18.0', 'v20.11.0'])('fails on %s', (v) => {
+  it.each(['22.23.4', 'v22.12.0'])('passes on %s', (v) => {
+    expect(checkNodeVersion(v).status).toBe('pass');
+  });
+  // 22.11 lacks unflagged require(esm); 24 is the system Node we must never use silently.
+  it.each(['24.18.0', 'v20.11.0', '22.11.0', '23.0.0'])('fails on %s', (v) => {
     expect(checkNodeVersion(v).status).toBe('fail');
   });
 });
@@ -59,7 +64,29 @@ describe('checkEnv', () => {
     const result = checkEnv('env: api', apiEnvSchema, {});
     expect(result.status).toBe('fail');
     expect(result.detail).toMatch(/DATABASE_URL/);
-    expect(result.detail).toMatch(/REDIS_URL/);
+  });
+});
+
+describe('checkDuplicateEnvKeys', () => {
+  it('passes when every key is defined once', () => {
+    expect(checkDuplicateEnvKeys('.env', 'A=1\nB=2\n').status).toBe('pass');
+  });
+  it('warns with key names and line numbers, never values', () => {
+    const result = checkDuplicateEnvKeys('.env', 'A=real-secret\n# x\nB=2\nA=placeholder\n');
+    expect(result.status).toBe('warn');
+    expect(result.detail).toContain('A (lines 1, 4)');
+    expect(result.detail).not.toMatch(/real-secret|placeholder/);
+  });
+});
+
+describe('REDIS_NOT_CONFIGURED', () => {
+  it('is a warning, so doctor stays green without Redis until M0-T6', () => {
+    expect(REDIS_NOT_CONFIGURED.status).toBe('warn');
+    expect(summarize([REDIS_NOT_CONFIGURED]).ok).toBe(true);
+  });
+  it('api/worker env validate without REDIS_URL', () => {
+    const env = { DATABASE_URL: 'postgresql://app_user:p@h/revops_dev' };
+    expect(checkEnv('env: api', apiEnvSchema, env).status).toBe('pass');
   });
 });
 
@@ -87,15 +114,15 @@ describe('checkTestDbIsolation', () => {
 });
 
 describe('evaluateAppPostgres', () => {
-  it('passes for a plain app_user with all extensions on PG16', () => {
+  it('passes for a plain app_user with all extensions on PG18', () => {
     expect(evaluateAppPostgres('DB', goodFacts).every((r) => r.status === 'pass')).toBe(true);
   });
 
-  it('fails below PostgreSQL 16', () => {
+  it('fails below PostgreSQL 18 (ADR-010)', () => {
     const results = evaluateAppPostgres('DB', {
       ...goodFacts,
-      versionNum: 150_008,
-      version: '15.8',
+      versionNum: 160_004,
+      version: '16.4',
     });
     expect(statusOf(results, 'version')).toBe('fail');
   });
