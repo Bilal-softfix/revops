@@ -74,46 +74,7 @@ describe('auth_session_lookup', () => {
   });
 });
 
-describe('auth_consume_token', () => {
-  const insertToken = async (patch: Partial<typeof authTokens.$inferInsert> = {}) => {
-    const token = newToken();
-    await withContext(app.db, { userId }, (tx) =>
-      tx.insert(authTokens).values({
-        userId,
-        purpose: 'password_reset',
-        tokenHash: sha256(token),
-        expiresAt: inOneDay(),
-        ...patch,
-      }),
-    );
-    return token;
-  };
-  const consume = async (token: string, purpose = 'password_reset') => {
-    const [row] = await app.db.execute<{ user_id: string | null }>(
-      sql`select auth_consume_token(${sha256(token)}, ${purpose}::auth_token_purpose) as user_id`,
-    );
-    return row?.user_id ?? null;
-  };
-
-  it('returns the user id once, then null (single use)', async () => {
-    const token = await insertToken();
-    expect(await consume(token)).toBe(userId);
-    expect(await consume(token)).toBeNull();
-  });
-
-  it('is single-use under concurrent consumption', async () => {
-    const token = await insertToken();
-    const results = await Promise.all(Array.from({ length: 4 }, () => consume(token)));
-    expect(results.filter((r) => r === userId)).toHaveLength(1);
-  });
-
-  it('rejects expired tokens and tokens of another purpose', async () => {
-    expect(await consume(await insertToken({ expiresAt: new Date(Date.now() - 1000) }))).toBeNull();
-    expect(await consume(await insertToken(), 'email_verify')).toBeNull();
-  });
-});
-
-describe('unverified accounts (migration 0005)', () => {
+describe('unverified accounts, verify and reset (migrations 0005, 0006)', () => {
   const HOUR = 3_600_000;
   const DENIED = '42501';
 
@@ -194,15 +155,21 @@ describe('unverified accounts (migration 0005)', () => {
 
   it('keeps a tenant that has other members', async () => {
     const pending = await account({ ageHours: 1 });
-    await withContext(app.db, { tenantId: pending.tenantId }, async (tx) => {
-      const other = await insertUser(tx);
+    const other = await withContext(app.db, { tenantId: pending.tenantId }, async (tx) => {
+      const id = await insertUser(tx);
       await tx
         .insert(memberships)
-        .values({ tenantId: pending.tenantId, userId: other, role: 'admin' });
+        .values({ tenantId: pending.tenantId, userId: id, role: 'admin' });
+      return id;
     });
     await app.db.execute(sql`select auth_discard_unverified_by_email(${pending.email})`);
     expect(await findByEmail(pending.email)).toEqual([]);
     expect(await tenantExists(pending.tenantId)).toBe(true);
+    // ...and the other member keeps their membership; only the discarded user's is gone.
+    const remaining = await withContext(app.db, { tenantId: pending.tenantId }, (tx) =>
+      tx.select({ userId: memberships.userId }).from(memberships),
+    );
+    expect(remaining).toEqual([{ userId: other }]);
   });
 
   it('auth_discard_unverified_by_token works only with a live verify token', async () => {
@@ -244,13 +211,122 @@ describe('unverified accounts (migration 0005)', () => {
     });
   });
 
-  it('restores the caller’s context after discarding', async () => {
-    const pending = await account({ ageHours: 1 });
-    const someTenant = randomUUID();
-    const [row] = await withContext(app.db, { tenantId: someTenant }, async (tx) => {
-      await tx.execute(sql`select auth_discard_unverified_by_email(${pending.email})`);
-      return tx.execute<{ t: string }>(sql`select current_setting('app.tenant_id', true) as t`);
+  it('restores the caller’s context (tenant and user, set or unset), whether or not it discarded', async () => {
+    const read = (tx: Parameters<Parameters<typeof withContext>[2]>[0]) =>
+      tx.execute<{ t: string | null; u: string | null }>(
+        sql`select nullif(current_setting('app.tenant_id', true), '') as t,
+                   nullif(current_setting('app.user_id', true), '') as u`,
+      );
+    for (const ctx of [{ tenantId: randomUUID(), userId: randomUUID() }, {}]) {
+      for (const discards of [true, false]) {
+        const target = discards ? (await account({ ageHours: 1 })).email : 'nobody@x.test';
+        const [row] = await withContext(app.db, ctx, async (tx) => {
+          await tx.execute(sql`select auth_discard_unverified_by_email(${target})`);
+          return read(tx);
+        });
+        expect(row).toEqual({ t: ctx.tenantId ?? null, u: ctx.userId ?? null });
+      }
+    }
+  });
+
+  describe('auth_verify_email (atomic)', () => {
+    const verifyFn = async (token: string, id: string) =>
+      (
+        await app.db.execute<{ ok: boolean }>(
+          sql`select auth_verify_email(${sha256(token)}, ${id}::uuid) as ok`,
+        )
+      )[0]?.ok;
+
+    it('verifies the owner of a live link once, and spends all of its verify links', async () => {
+      const pending = await account({ ageHours: 1 });
+      expect(await verifyFn(pending.token, pending.id)).toBe(true);
+      expect(await verifyFn(pending.token, pending.id)).toBe(false);
+      const [row] = await app.db.execute<{ email_verified_at: unknown }>(
+        sql`select email_verified_at from auth_find_user_by_email(${pending.email})`,
+      );
+      expect(row?.email_verified_at).not.toBeNull();
     });
-    expect(row?.t).toBe(someTenant);
+
+    it('rejects a link presented for another user, and expired accounts', async () => {
+      const [a, b] = [await account({ ageHours: 1 }), await account({ ageHours: 1 })];
+      expect(await verifyFn(a.token, b.id)).toBe(false);
+      const expired = await account({ ageHours: 49 });
+      expect(await verifyFn(expired.token, expired.id)).toBe(false);
+    });
+
+    it('racing a discard: never "verified" for an account that was deleted', async () => {
+      for (let i = 0; i < 6; i++) {
+        const pending = await account({ ageHours: 1 });
+        const [verified] = await Promise.all([
+          verifyFn(pending.token, pending.id),
+          app.db.execute(sql`select auth_discard_unverified_by_email(${pending.email})`),
+        ]);
+        const exists = (await findByEmail(pending.email)).length === 1;
+        // Either verify won (account kept, verified) or discard won (account gone, verify false).
+        expect({ verified, exists }).toEqual(
+          verified ? { verified: true, exists: true } : { verified: false, exists: false },
+        );
+        expect(await tenantExists(pending.tenantId)).toBe(exists);
+      }
+    });
+  });
+
+  describe('auth_reset_password (atomic)', () => {
+    async function withResetLink(opts: { ageHours?: number; verified?: boolean } = {}) {
+      const acc = await account({ ageHours: opts.ageHours ?? 1, verified: opts.verified ?? true });
+      const token = newToken();
+      await withContext(app.db, { userId: acc.id }, async (tx) => {
+        await tx.insert(authTokens).values({
+          userId: acc.id,
+          purpose: 'password_reset',
+          tokenHash: sha256(token),
+          expiresAt: inOneDay(),
+        });
+        for (let i = 0; i < 2; i++) {
+          await tx
+            .insert(sessions)
+            .values({ userId: acc.id, tokenHash: sha256(newToken()), expiresAt: inOneDay() });
+        }
+      });
+      return { ...acc, resetToken: token };
+    }
+    const reset = async (token: string, hash = '$argon2id$new') =>
+      (
+        await app.db.execute<{ user_id: string | null }>(
+          sql`select auth_reset_password(${sha256(token)}, ${hash}) as user_id`,
+        )
+      )[0]?.user_id ?? null;
+
+    it('sets the password, revokes every session and spends every link — in one call', async () => {
+      const acc = await withResetLink();
+      expect(await reset(acc.resetToken)).toBe(acc.id);
+      const [user] = await app.db.execute<{ password_hash: string }>(
+        sql`select password_hash from auth_find_user_by_email(${acc.email})`,
+      );
+      expect(user?.password_hash).toBe('$argon2id$new');
+      const state = await withContext(app.db, { userId: acc.id }, async (tx) => ({
+        liveSessions: (await tx.select().from(sessions)).filter((r) => !r.revokedAt).length,
+        liveLinks: (await tx.select().from(authTokens)).filter((r) => !r.usedAt).length,
+      }));
+      expect(state).toEqual({ liveSessions: 0, liveLinks: 0 });
+    });
+
+    it('is single-use, also under concurrent calls', async () => {
+      const acc = await withResetLink();
+      const results = await Promise.allSettled(
+        Array.from({ length: 4 }, () => reset(acc.resetToken)),
+      );
+      const winners = results.filter((r) => r.status === 'fulfilled' && r.value === acc.id);
+      expect(winners).toHaveLength(1);
+      expect(await reset(acc.resetToken)).toBeNull();
+    });
+
+    it('rejects unknown links, verify links, and expired unverified accounts', async () => {
+      expect(await reset(newToken())).toBeNull();
+      const pending = await account({ ageHours: 1 });
+      expect(await reset(pending.token)).toBeNull(); // an email_verify link
+      const expired = await withResetLink({ ageHours: 49, verified: false });
+      expect(await reset(expired.resetToken)).toBeNull();
+    });
   });
 });

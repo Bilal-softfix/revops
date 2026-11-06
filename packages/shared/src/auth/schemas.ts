@@ -89,7 +89,6 @@ export const CSRF_HEADER = 'x-csrf-token';
 export const AUTH_ERROR_CODES = [
   'validation_failed',
   'invalid_credentials',
-  'email_not_verified',
   'verification_failed',
   'invalid_token',
   'rate_limited',

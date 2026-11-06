@@ -1,4 +1,5 @@
 import { Injectable, Logger, type OnApplicationShutdown } from '@nestjs/common';
+import { safeErrorSummary } from './errors/safe-error';
 
 /**
  * Work that must not run on the request path, so a response can't reveal (by content or timing)
@@ -19,9 +20,7 @@ export class InProcessBackgroundTasks extends BackgroundTasks implements OnAppli
     const promise = Promise.resolve()
       .then(task)
       .catch((error: unknown) => {
-        this.logger.error(
-          `${name} failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        this.logger.error(`${name} failed: ${safeErrorSummary(error)}`);
       })
       .finally(() => this.inFlight.delete(promise));
     this.inFlight.add(promise);

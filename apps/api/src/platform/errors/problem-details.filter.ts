@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { DomainError } from './domain-error';
+import { safeErrorSummary } from './safe-error';
 
 export interface ProblemDetails {
   type: string;
@@ -72,8 +73,8 @@ export class ProblemDetailsFilter implements ExceptionFilter {
     const res = host.switchToHttp().getResponse<Response>();
     const { problem, headers } = toProblem(error);
     if (problem.status >= 500) {
-      // Message + stack only: never log request bodies (passwords, tokens).
-      this.logger.error(error instanceof Error ? (error.stack ?? error.message) : String(error));
+      // Never the message (may carry SQL params) or request bodies (passwords, tokens).
+      this.logger.error(safeErrorSummary(error));
     }
     res.status(problem.status).set(headers).type('application/problem+json').json(problem);
   }

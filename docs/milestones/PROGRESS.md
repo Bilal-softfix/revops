@@ -64,6 +64,13 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - 2026-11-05 · M0-T4 follow-up: all account-state work for signup, resend and forgot runs as a `BackgroundTasks` task after the 202. It is in-process for now (lost on crash, which is acceptable for dev). T6 moves it to BullMQ. Tests use a queued implementation to prove nothing state-dependent runs before the response.
 - 2026-11-05 · M0-T4 follow-up: "Replace" means delete and recreate: the pending account gets a new user id and tenant, and the audit/outbox rows of the discarded tenant are deleted with it (it was never activated).
 - 2026-11-05 · M0-T4 follow-up: verify-email now also expires the user's other unused verify links.
+- 2026-11-06 · M0-T4 security review of the follow-up (security-auditor), all fixed in migration 0006 + API:
+  - Race: a discard could delete a just-verified account. The discard now locks the user row and re-checks "unverified" under that lock, then locks each tenant. Verify and reset are each one atomic definer call (`auth_verify_email`, `auth_reset_password`), and `auth_consume_token` is dropped. Purge runs per account, each in its own subtransaction.
+  - Oracle: signup + login revealed whether a verified account existed. **Unverified login now returns the same 401 `invalid_credentials` as a wrong password** (and re-sends the verify email in the background); `email_not_verified` is removed. This changes the M0 assumption "unverified email → 403": an unverified email still blocks login, it just isn't distinguishable.
+  - Replace abuse: at most 3 replaces per email per day (any IP), discards are logged with a masked email + IP, and forgot-password on an unverified account sends a verify ("this wasn't me") email instead of a reset link.
+  - Logs: 500s and background-task failures log `safeErrorSummary` (class, SQLSTATE, stack), never `.message`, because drizzle puts query params (emails, password hashes) in the message.
+  - `verify-email/cancel` is rate-limited per IP (20 per 15 min) and logged. The dummy argon2 hash is precomputed at startup.
+  - Invariant documented in 0006: an unverified user has only its signup owner membership (invites create verified users in T5).
 - 2026-11-05 · M0-T4: Minimal RFC 7807 filter + body-parser error mapping added now (needed for auth errors); T6 adds request ids, pino and logging. Emails are sent after the response (fire-and-forget); T6 moves them to the outbox.
 - 2026-11-05 · M0-T4: Audit logs: `user.signed_up`, `auth.login`, `auth.logout` (in the active tenant). Password reset has no tenant, so it isn't audited yet.
 - 2026-11-05 · M0-T4: API is `AppModule.register(env)`; env is validated once and injected (`API_ENV`). API refuses to start in production with EMAIL_DRIVER console/fake, a non-https/localhost APP_URL, or COOKIE_SECURE=false.
@@ -85,7 +92,8 @@ _(non-blocking review findings)_
 - M0-T6: move the rate limiter to Redis (INCR + PEXPIRE NX, TTL so keys expire); the in-memory map only evicts a key when it is touched again.
 - M0-T6: move `BackgroundTasks` (signup, resend, forgot, emails) onto BullMQ so that work is durable and retried. In-process tasks are lost if the API crashes mid-task.
 - M0-T6: schedule `UnverifiedAccountCleanupJob` (hourly repeatable job in the worker).
-- M0-T7: the verify page must ask for the password and offer "This wasn't me" (`/v1/auth/verify-email/cancel`).
+- M0-T7: the verify page must ask for the password and offer "This wasn't me" (`/v1/auth/verify-email/cancel`) as an explicit button, never auto-submitted on load (mail link scanners). The login error copy should say "wrong email or password, or your email isn't verified yet — check your inbox".
+- M0-T6: discarding an unverified account deletes its tenant's outbox rows, including `user.signed_up.v1`. Once the relay ships, consider a compensating `user.discarded.v1` (also needed for DPDP deletion propagation).
 - M0-T5: tenant switcher must only set `sessions.active_tenant_id` to an active membership; consider a sessions WITH CHECK enforcing it in SQL.
 - Slug-collision retry in signup has no test (random 24-bit suffix can't be forced to collide without a seam).
 - ESLint 9 is marked deprecated on npm. Blocked on ESLint 10: eslint-config-next 16.4.5 pulls eslint-plugin-react / -import / -jsx-a11y whose peer ranges stop at ESLint 9. Revisit when they support 10.

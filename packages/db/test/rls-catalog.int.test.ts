@@ -24,14 +24,15 @@ const EXTRA_TENANT_POLICIES: Record<string, string[]> = {
 };
 /** SECURITY DEFINER functions → whether app_user may call them directly. */
 const DEFINER_FUNCTIONS: Record<string, boolean> = {
-  auth_consume_token: true,
   auth_discard_unverified_by_email: true,
   auth_discard_unverified_by_token: true,
   auth_discard_unverified_user: false, // internal: only via the wrappers above
   auth_find_user_by_email: true,
   auth_peek_verify_token: true,
   auth_purge_expired_unverified: true,
+  auth_reset_password: true,
   auth_session_lookup: true,
+  auth_verify_email: true,
 };
 
 interface TableRls {

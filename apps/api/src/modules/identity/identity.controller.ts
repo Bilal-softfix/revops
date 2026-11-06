@@ -61,8 +61,11 @@ export class IdentityController {
   /** "This wasn't me / start over": deletes the unverified account (and tenant) the link belongs to. */
   @Post('verify-email/cancel')
   @HttpCode(204)
-  cancelSignup(@Body(new ZodBodyPipe(cancelSignupRequestSchema)) body: CancelSignupRequest) {
-    return this.identity.cancelSignup(body);
+  cancelSignup(
+    @Body(new ZodBodyPipe(cancelSignupRequestSchema)) body: CancelSignupRequest,
+    @Req() req: Request,
+  ) {
+    return this.identity.cancelSignup(body, meta(req));
   }
 
   @Post('resend-verification')

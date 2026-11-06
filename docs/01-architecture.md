@@ -75,7 +75,11 @@ Modular monolith in NestJS + one Python voice worker. Modules talk via service i
   - **new:** one transaction creates the user, tenant, owner membership, audit log, `user.signed_up.v1` outbox event and verification token.
 - **Verify email** needs the link **and the account password** (`{token, password}`), so an account pre-registered with someone else's email can't be activated by the inbox owner's click. A bad, used or expired link, an expired account and a wrong password all give `400 verification_failed` after exactly one argon2 verify. Attempts count toward 5 per account per 15 minutes, plus a per-IP limit.
 - **"This wasn't me" / start over:** `POST /v1/auth/verify-email/cancel {token}` deletes the unverified account and its tenant.
-- No session is created until the email is verified. An unverified login gets 403 `email_not_verified`, and only with the correct password.
+- No session is created until the email is verified. An unverified account's login gets the **same 401 `invalid_credentials`** as a wrong password, so signup + login can't probe for verified accounts. With the right password, a fresh verification email goes out in the background.
+- **Replace limit:** a pending signup can be replaced at most 3 times per email per day, from any IP.
+- **Unverified accounts:** forgot-password sends a verify ("this wasn't me") email instead of a reset link, so the inbox owner never inherits someone else's pre-registered account.
+- **Atomic verify and reset:** each is one transaction (`auth_verify_email`, `auth_reset_password`). The discard function locks the user row, then each tenant row, so concurrent verify / replace / purge / invite-accept can't interleave.
+- **Error logs** (500s, background tasks) go through `safeErrorSummary`: class, SQLSTATE and stack only. Never the message, because drizzle puts query params in it.
 - **Rate limits:**
   - Login: 5 attempts per (IP, email) per 15 minutes, reserved atomically *before* the password check and cleared on success, plus 50 per IP. Over the limit: 429 with `Retry-After`.
   - Signup: 10 per IP per hour.

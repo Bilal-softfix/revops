@@ -17,6 +17,11 @@ import {
 import type { ActorType, AuthTenant, Role } from '@revops/shared';
 import { Database } from '../../platform/database/database';
 
+function pgCode(error: unknown): unknown {
+  const e = error as { code?: unknown; cause?: { code?: unknown } };
+  return e.code ?? e.cause?.code;
+}
+
 export type AuthTokenPurpose = 'email_verify' | 'password_reset';
 
 export interface LoginLookup {
@@ -71,12 +76,32 @@ export class IdentityRepository {
       : undefined;
   }
 
-  /** Marks a valid token used and returns its user id (single use, atomic). */
-  async consumeToken(tokenHash: string, purpose: AuthTokenPurpose): Promise<string | null> {
-    const [row] = await this.database.db.execute<{ user_id: string | null }>(
-      sql`select auth_consume_token(${tokenHash}, ${purpose}::auth_token_purpose) as user_id`,
+  /**
+   * Verifies the user's email if `tokenHash` is a live verify link of theirs and the account is
+   * still unverified and unexpired — one transaction (no race with a concurrent discard).
+   */
+  async verifyEmail(tokenHash: string, userId: string): Promise<boolean> {
+    const [row] = await this.database.db.execute<{ ok: boolean }>(
+      sql`select auth_verify_email(${tokenHash}, ${userId}::uuid) as ok`,
     );
-    return row?.user_id ?? null;
+    return row?.ok ?? false;
+  }
+
+  /**
+   * Consumes a reset link and, in the same transaction, sets the password, marks the email
+   * verified, revokes every session and spends every other link. Returns the user id, or null if
+   * the link isn't live (incl. losing a race for it).
+   */
+  async resetPassword(tokenHash: string, passwordHash: string): Promise<string | null> {
+    try {
+      const [row] = await this.database.db.execute<{ user_id: string | null }>(
+        sql`select auth_reset_password(${tokenHash}, ${passwordHash}) as user_id`,
+      );
+      return row?.user_id ?? null;
+    } catch (error) {
+      if (pgCode(error) === 'P0001') return null; // link spent by a concurrent reset
+      throw error;
+    }
   }
 
   /** Owner + password hash of a live verify token of a live unverified account. Doesn't consume. */
@@ -138,38 +163,6 @@ export class IdentityRepository {
     token: { userId: string; purpose: AuthTokenPurpose; tokenHash: string; expiresAt: Date },
   ): Promise<void> {
     await tx.insert(authTokens).values(token);
-  }
-
-  /** Invalidates the user's other unused tokens of `purpose` (e.g. after a successful reset). */
-  async expireUnusedTokens(
-    tx: Tx,
-    userId: string,
-    purpose: AuthTokenPurpose,
-    now: Date,
-  ): Promise<void> {
-    await tx
-      .update(authTokens)
-      .set({ usedAt: now })
-      .where(
-        and(
-          eq(authTokens.userId, userId),
-          eq(authTokens.purpose, purpose),
-          isNull(authTokens.usedAt),
-        ),
-      );
-  }
-
-  async markEmailVerified(tx: Tx, userId: string, now: Date): Promise<void> {
-    await tx
-      .update(users)
-      .set({
-        emailVerifiedAt: sql`coalesce(${users.emailVerifiedAt}, ${now.toISOString()}::timestamptz)`,
-      })
-      .where(eq(users.id, userId));
-  }
-
-  async setPassword(tx: Tx, userId: string, passwordHash: string): Promise<void> {
-    await tx.update(users).set({ passwordHash }).where(eq(users.id, userId));
   }
 
   async getUser(tx: Tx, userId: string) {
@@ -254,15 +247,6 @@ export class IdentityRepository {
       .update(sessions)
       .set({ revokedAt: now })
       .where(and(eq(sessions.id, sessionId), isNull(sessions.revokedAt)));
-  }
-
-  async revokeAllSessions(tx: Tx, userId: string, now: Date): Promise<number> {
-    const rows = await tx
-      .update(sessions)
-      .set({ revokedAt: now })
-      .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)))
-      .returning({ id: sessions.id });
-    return rows.length;
   }
 
   async insertAudit(

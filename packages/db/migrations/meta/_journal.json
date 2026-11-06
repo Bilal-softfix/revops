@@ -43,6 +43,13 @@
       "when": 1793877084973,
       "tag": "0005_unverified_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793879152276,
+      "tag": "0006_auth_atomic_verify_reset",
+      "breakpoints": true
     }
   ]
 }

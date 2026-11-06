@@ -11,10 +11,6 @@ const error = (
 // One generic message for unknown email and wrong password (no account enumeration on login).
 export const invalidCredentials = () =>
   error('invalid_credentials', 401, 'Invalid email or password');
-export const emailNotVerified = () =>
-  error('email_not_verified', 403, 'Verify your email before signing in', {
-    detail: 'Use the link we emailed you, or request a new one.',
-  });
 /** Verify-email: one answer for a bad/used/expired link, an expired account, or a wrong password. */
 export const verificationFailed = () =>
   error('verification_failed', 400, 'This link or password is not valid', {

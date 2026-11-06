@@ -101,11 +101,18 @@ describe('M0-T4 AC: signup → verify email → login → me → logout revokes 
     expect(t.email.lastTo(email)?.text).toContain('http://localhost:3000/verify-email?token=');
   });
 
-  it('login before verification → 403 email_not_verified (only with the right password)', async () => {
+  it('login before verification is blocked with the SAME 401 as a wrong password, and re-sends the link', async () => {
+    const before = t.email.lastTokenTo(email);
     const res = await request(t.server).post('/v1/auth/login').send({ email, password: PASSWORD });
-    expect(res.status).toBe(403);
-    expect(res.body).toMatchObject({ code: 'email_not_verified' });
+    const wrong = await request(t.server)
+      .post('/v1/auth/login')
+      .send({ email, password: OTHER_PASSWORD });
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual(wrong.body);
+    expect(res.body).toMatchObject({ code: 'invalid_credentials' });
     expect(res.headers['content-type']).toMatch(/^application\/problem\+json/);
+    await t.drain();
+    expect(t.email.lastTokenTo(email)).not.toBe(before); // a fresh verification email
   });
 
   it('verify-email needs the password; wrong password → verification_failed; link works once', async () => {
@@ -448,13 +455,16 @@ describe('timing-safety: responses never depend on account state', () => {
     },
   );
 
-  it('login: exactly one argon2 verify and the same answer for unknown / wrong password / expired', async () => {
+  it('login: exactly one argon2 verify and the same answer for unknown / wrong password / expired / pending', async () => {
     const verifySpy = vi.spyOn(t.app.get(PasswordService), 'verify');
     try {
       const cases = [
         { email: uniqueEmail('nobody'), password: PASSWORD },
         { email: emails.verified, password: OTHER_PASSWORD },
         { email: emails.expired, password: PASSWORD }, // right password, expired account
+        // Right password, pending account: must not differ, or signup + login reveals whether an
+        // email already had a verified account (security review of 83bdfb8, MEDIUM 2).
+        { email: emails.pending, password: PASSWORD },
       ];
       const responses = [];
       for (const body of cases) {
@@ -650,3 +660,58 @@ describe('session lifetime', () => {
       .expect(401);
   });
 });
+
+describe('security review of 83bdfb8: replace, forgot and cancel hardening', () => {
+  freshApp();
+
+  it('forgot-password for an UNVERIFIED account sends a verify ("this wasn’t me") email, not a reset link', async () => {
+    const email = uniqueEmail('forgot-pending');
+    await signup(t, email);
+    const sent = t.email.sent.length;
+    await request(t.server).post('/v1/auth/forgot-password').send({ email }).expect(202);
+    await t.drain();
+    expect(t.email.sent.length).toBe(sent + 1);
+    const mail = t.email.lastTo(email);
+    expect(mail?.text).toContain('/verify-email?token=');
+    expect(mail?.text).not.toContain('/reset-password');
+  });
+
+  it('a pending signup can be replaced at most 3 times per email per day (any IP)', async () => {
+    const email = uniqueEmail('wiped');
+    const passwords = [
+      'first passphrase!',
+      'second passphrase!',
+      'third passphrase!',
+      'fourth passphrase!',
+    ];
+    await signup(t, email, passwords[0]);
+    for (const password of passwords.slice(1)) {
+      t.clock.advance(HOUR + 1000); // clear the hourly per-(IP, email) email limit, not the daily one
+      await signup(t, email, password);
+    }
+    const survivorToken = t.email.lastTokenTo(email);
+    t.clock.advance(HOUR + 1000);
+    await signup(t, email, 'fifth passphrase!!'); // 4th replace: refused silently (still 202)
+    // The account from the last allowed replace survives and still verifies with its password.
+    expect(t.email.lastTokenTo(email)).toBe(survivorToken);
+    await verify(t, survivorToken, passwords[3]).expect(204);
+  });
+
+  it('verify-email/cancel is rate-limited per IP', async () => {
+    for (let i = 0; i < 20; i++) {
+      await request(t.server)
+        .post('/v1/auth/verify-email/cancel')
+        .send({ token: newFakeToken() })
+        .expect(400);
+    }
+    const res = await request(t.server)
+      .post('/v1/auth/verify-email/cancel')
+      .send({ token: newFakeToken() })
+      .expect(429);
+    expect(res.body).toMatchObject({ code: 'rate_limited' });
+  });
+});
+
+function newFakeToken(): string {
+  return Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
+}

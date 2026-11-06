@@ -1,10 +1,15 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { hash, verify } from '@node-rs/argon2';
 
 /** argon2id (the @node-rs/argon2 default) with library-default cost parameters. */
 @Injectable()
-export class PasswordService {
+export class PasswordService implements OnModuleInit {
   private dummyHash: Promise<string> | undefined;
+
+  /** Precompute at startup, so even the first unknown-account login costs exactly one verify. */
+  onModuleInit(): void {
+    this.dummyHash ??= hash('dummy password for timing equalisation');
+  }
 
   hash(password: string): Promise<string> {
     return hash(password);
