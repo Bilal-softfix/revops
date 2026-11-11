@@ -24,6 +24,16 @@ export const commonEnvSchema = z.object({
     blankAsUndefined,
     z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   ),
+  /** OTLP/HTTP collector base URL (e.g. http://localhost:4318). Unset = tracing off (no exporter). */
+  OTEL_EXPORTER_OTLP_ENDPOINT: z.preprocess(
+    blankAsUndefined,
+    z.url({ protocol: /^https?$/ }).optional(),
+  ),
+  /**
+   * Bearer token for GET /metrics. Optional in dev (open); required in production, where metrics
+   * would otherwise leak traffic and queue details.
+   */
+  METRICS_TOKEN: z.preprocess(blankAsUndefined, z.string().min(16).optional()),
 });
 
 /** App runtime: connects as the non-owner `app_user` role (RLS enforced). */
@@ -90,10 +100,26 @@ export function productionEnvProblems(env: ApiEnv): string[] {
     problems.push('APP_URL: must be a public https:// URL in production');
   }
   if (!env.COOKIE_SECURE) problems.push('COOKIE_SECURE: must be true in production');
+  if (!env.METRICS_TOKEN) problems.push('METRICS_TOKEN: is required in production');
   return problems;
 }
 
-export const workerEnvSchema = commonEnvSchema.extend(databaseEnvSchema.shape);
+/**
+ * The worker runs the same modules as the API (jobs send the auth emails), so it takes the API's
+ * env plus its own settings.
+ */
+export const workerEnvSchema = apiEnvSchema.extend({
+  /** Port of the worker's small HTTP server: GET /health, /ready, /metrics (0 = any free port). */
+  WORKER_PORT: z.preprocess(
+    blankAsUndefined,
+    z.coerce.number().int().min(0).max(65_535).default(4001),
+  ),
+  /** How often the outbox relay looks for unpublished events. */
+  OUTBOX_POLL_INTERVAL_MS: z.preprocess(
+    blankAsUndefined,
+    z.coerce.number().int().min(100).max(60_000).default(1000),
+  ),
+});
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;
 export type WorkerEnv = z.infer<typeof workerEnvSchema>;

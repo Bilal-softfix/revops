@@ -19,7 +19,9 @@ Everything runs on the dev machine: Node 22, Python 3.12 (uv) and a natively ins
 |---|---|---|
 | PostgreSQL 18 | Native install (Windows: EDB installer), `localhost:5432`; two databases `revops_dev`, `revops_test` | `DATABASE_URL`, `DATABASE_URL_TEST` (app_user), `DATABASE_URL_OWNER`, `DATABASE_URL_TEST_OWNER` (revops_owner, migrations) |
 | pgvector | Optional until M4 — doctor warns if missing; CI has it | — |
-| Jobs / queues / cron | pg-boss in the same Postgres (M0-T6) | — |
+| Jobs / queues / cron | pg-boss in the same Postgres: `pgboss` schema, installed by `pnpm db:migrate` | `OUTBOX_POLL_INTERVAL_MS`, `WORKER_PORT` |
+| Tracing | Off by default; set an OTLP/HTTP endpoint to export | `OTEL_EXPORTER_OTLP_ENDPOINT` |
+| Metrics | `/metrics` on api :4000 and worker :4001, open in dev | `METRICS_TOKEN` (required in prod) |
 | Rate limits | Postgres table `rate_limit_buckets` | — |
 | Object storage | Local disk `./.data/storage` (gitignored) | `STORAGE_DRIVER=local` |
 | Email | Console provider (prints to terminal) | `EMAIL_DRIVER=console` |
@@ -69,6 +71,14 @@ Without `--write-env` the script prints the four lines (with passwords) instead 
 - `pnpm dev`, then `POST http://localhost:4000/v1/auth/signup`. The console email provider prints the verify link to the API terminal, with the recipient masked. `POST /v1/auth/verify-email {"token": …}`, then `POST /v1/auth/login`.
 - Send JSON only (`content-type: application/json`). On unsafe authenticated calls such as logout, send the `csrfToken` from the login/me response as `x-csrf-token`.
 - Rate limits live in Postgres (`rate_limit_buckets`), so they survive API restarts. To clear them in dev, truncate that table as `revops_owner`.
+
+## Running the API + worker (M0-T6)
+`pnpm dev` starts both. Signup, resend, forgot-password and invitation emails are **pg-boss jobs run by the worker**, so with only the API running, no emails print. In dev, the console email provider prints them in the **worker's** terminal.
+- Probes: `curl localhost:4000/health`, `curl localhost:4000/ready`, and the same on :4001 for the worker. `/ready` is 503 problem+json if the DB is down or migrations didn't run (no `pgboss` schema).
+- Metrics: `curl localhost:4000/metrics` and `curl localhost:4001/metrics`. When `METRICS_TOKEN` is set, add `-H "Authorization: Bearer <token>"`.
+- API docs: http://localhost:4000/docs (Swagger UI) and `/docs/openapi.json`. They are generated from the shared Zod schemas and are not served in production.
+- Logs: pretty-printed in dev, JSON otherwise. Send `x-request-id: <id>` and find it in the response header, every log line of that request and any problem+json body.
+- Queues: the jobs live in the `pgboss` schema of `revops_dev`. To inspect them, run `select name, state, count(*) from pgboss.job group by 1, 2` as `revops_owner`.
 
 ## Rules
 - Dev services hold only fake/seed data. Never real leads or recordings.

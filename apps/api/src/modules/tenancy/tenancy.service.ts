@@ -15,17 +15,19 @@ import {
   assignableRoles,
   canManageRole,
 } from '@revops/shared';
+import type { Tx } from '@revops/db';
 import type { ApiEnv } from '@revops/shared/env';
 import { API_ENV } from '../../config/env';
-import { BackgroundTasks } from '../../platform/background-tasks';
 import { Clock } from '../../platform/clock';
 import { Database } from '../../platform/database/database';
+import { JobQueue } from '../../platform/queue/job-queue';
 import { DomainError } from '../../platform/errors/domain-error';
 import { RateLimiter } from '../../platform/rate-limit/rate-limiter';
 import type { RequestMeta } from '../../platform/request-meta';
 import { EmailProvider } from '../../providers/email';
 import { type AuthContext, IdentityService, PasswordService, SessionService } from '../identity';
 import { invitationMessage } from './emails';
+import { INVITATION_EMAIL_JOB, type InvitationEmailJobData } from './job-definitions';
 import {
   alreadyMember,
   cannotChangeSelf,
@@ -82,7 +84,7 @@ export class TenancyService {
     private readonly passwords: PasswordService,
     private readonly email: EmailProvider,
     private readonly rateLimiter: RateLimiter,
-    private readonly background: BackgroundTasks,
+    private readonly jobs: JobQueue,
     private readonly clock: Clock,
   ) {}
 
@@ -172,10 +174,9 @@ export class TenancyService {
   async invite(auth: TenantAuth, input: InviteRequest, meta: RequestMeta): Promise<Invitation> {
     if (!assignableRoles(auth.role).includes(input.role)) throw forbidden();
     await this.limitInvitationEmails(auth.tenantId);
-    const token = newInvitationToken(auth.tenantId);
     const now = this.clock.now();
 
-    const { row, tenantName, inviterName } = await this.database
+    const row = await this.database
       .withContext({ tenantId: auth.tenantId, userId: auth.userId }, async (tx) => {
         const member = await this.repository.findMemberByEmail(tx, input.email);
         if (member && member.status === 'active') throw alreadyMember();
@@ -186,7 +187,8 @@ export class TenancyService {
           tenantId: auth.tenantId,
           email: input.email,
           role: input.role,
-          tokenHash: hashInvitationToken(token),
+          // A placeholder: the email job mints the real link (job rows never hold tokens).
+          tokenHash: hashInvitationToken(newInvitationToken(auth.tenantId)),
           invitedBy: auth.userId,
           expiresAt: new Date(now.getTime() + INVITATION_TTL_MS),
         });
@@ -200,11 +202,8 @@ export class TenancyService {
           after: { role: input.role },
           ip: meta.ip,
         });
-        return {
-          row: inserted,
-          tenantName: (await this.repository.getTenant(tx, auth.tenantId))?.name ?? 'a workspace',
-          inviterName: (await this.repository.getUserName(tx, auth.userId)) ?? 'A teammate',
-        };
+        await this.enqueueInvitationEmail(tx, auth, inserted.id);
+        return inserted;
       })
       .catch((error: unknown) => {
         // Lost a race with a concurrent invite for the same email.
@@ -212,25 +211,24 @@ export class TenancyService {
         throw error;
       });
 
-    this.sendInvitation({ to: input.email, token, tenantName, inviterName, role: input.role });
     return toInvitation(row);
   }
 
   /** New link (the old one dies) and a fresh 7-day expiry. */
   async resend(auth: TenantAuth, invitationId: string, meta: RequestMeta): Promise<void> {
     await this.limitInvitationEmails(auth.tenantId);
-    const token = newInvitationToken(auth.tenantId);
     const now = this.clock.now();
-    const sent = await this.database.withContext(
+    await this.database.withContext(
       { tenantId: auth.tenantId, userId: auth.userId },
       async (tx) => {
         const invitation = await this.repository.getOpenInvitation(tx, invitationId);
         if (!invitation) throw notFound();
         if (!canManageRole(auth.role, invitation.role)) throw forbidden();
+        // The old link dies now; the email job mints the new one (keeping this expiry).
         await this.repository.rotateInvitation(
           tx,
           invitationId,
-          hashInvitationToken(token),
+          hashInvitationToken(newInvitationToken(auth.tenantId)),
           new Date(now.getTime() + INVITATION_TTL_MS),
         );
         await this.repository.insertAudit(tx, {
@@ -242,15 +240,9 @@ export class TenancyService {
           entityId: invitationId,
           ip: meta.ip,
         });
-        return {
-          to: invitation.email,
-          role: invitation.role,
-          tenantName: (await this.repository.getTenant(tx, auth.tenantId))?.name ?? 'a workspace',
-          inviterName: (await this.repository.getUserName(tx, auth.userId)) ?? 'A teammate',
-        };
+        await this.enqueueInvitationEmail(tx, auth, invitationId);
       },
     );
-    this.sendInvitation({ ...sent, token });
   }
 
   async revoke(auth: TenantAuth, invitationId: string, meta: RequestMeta): Promise<void> {
@@ -422,15 +414,44 @@ export class TenancyService {
     }
   }
 
-  private sendInvitation(input: {
-    to: string;
-    token: string;
-    tenantName: string;
-    inviterName: string;
-    role: InvitationRow['role'];
-  }): void {
-    this.background.run('tenancy.invitation-email', () =>
-      this.email.send(invitationMessage({ ...input, appUrl: this.env.APP_URL })),
+  /** In the caller's transaction: no email for an invitation that was never committed. */
+  private enqueueInvitationEmail(tx: Tx, auth: TenantAuth, invitationId: string): Promise<unknown> {
+    return this.jobs.send(
+      INVITATION_EMAIL_JOB,
+      { tenantId: auth.tenantId, invitationId, actorUserId: auth.userId },
+      { tx },
     );
+  }
+
+  /**
+   * Job `tenancy.invitation-email` (worker): mints the link and emails it. Skips an invitation that
+   * was accepted, revoked or expired in the meantime. Each run rotates the token, so after a retry
+   * or a resend only the newest emailed link works; the expiry is kept.
+   */
+  async sendInvitationEmail(data: InvitationEmailJobData): Promise<void> {
+    const token = newInvitationToken(data.tenantId);
+    const now = this.clock.now();
+    const message = await this.database.withContext(
+      { tenantId: data.tenantId, userId: data.actorUserId },
+      async (tx) => {
+        const invitation = await this.repository.getOpenInvitation(tx, data.invitationId);
+        if (!invitation || invitation.expiresAt <= now) return null;
+        await this.repository.rotateInvitation(
+          tx,
+          invitation.id,
+          hashInvitationToken(token),
+          invitation.expiresAt,
+        );
+        return {
+          to: invitation.email,
+          role: invitation.role,
+          tenantName: (await this.repository.getTenant(tx, data.tenantId))?.name ?? 'a workspace',
+          inviterName: (await this.repository.getUserName(tx, data.actorUserId)) ?? 'A teammate',
+        };
+      },
+    );
+    if (message) {
+      await this.email.send(invitationMessage({ ...message, token, appUrl: this.env.APP_URL }));
+    }
   }
 }

@@ -46,5 +46,9 @@ All tables: `id uuid pk default gen_random_uuid()`, `created_at`, `updated_at ti
 - **integration_accounts** — provider (meta/google_ads), external_account_id, encrypted_tokens bytea, scopes, status, expires_at, last_sync_at
 - **ad_insights_daily** — integration_account_id, level (campaign/adset/ad), external_id, name, date, spend_paise, impressions, clicks (M7)
 - **rate_limit_buckets** (system table, ADR-011: no tenant_id; RLS enabled with no policies and no app_user grants, reached only via the definer functions `rate_limit_consume/reset/purge`) — key_hash (sha256 hex of the logical key, pk), count, reset_at. Index on reset_at for purging
-- **pgboss.*** (M0-T6, separate `pgboss` schema owned by revops_owner) — pg-boss job/queue/schedule tables; not app-queried, so no RLS; payloads carry tenantId
-- **outbox_events** (created/occurred_at only) — tenant_id, type (versioned, e.g. `lead.created.v1`), aggregate_id, payload jsonb, occurred_at, published_at; partial index on unpublished rows. See architecture
+- **pgboss.*** (M0-T6, migration 0013: separate `pgboss` schema installed and owned by the owner role, pg-boss 12.38.0 schema v46). Holds the pg-boss job, queue and schedule tables. The app never queries them directly, so there is no RLS. `app_user` has USAGE plus DML and EXECUTE only, and no DDL. Payloads carry ids such as tenantId and never secrets.
+- **processed_events** (M0-T6, tenant table, FORCE RLS, append-only for app_user)
+  - Columns: consumer, event_id, tenant_id, processed_at.
+  - PK (consumer, event_id); index on tenant_id; cascades with the tenant.
+  - Consumer idempotency: inserted in the same transaction as the consumer's side effects (`processOnce`).
+- **outbox_events** (created/occurred_at only) — tenant_id, type (versioned, e.g. `lead.created.v1`), aggregate_id, payload jsonb, occurred_at, published_at; partial index on unpublished rows. The relay reads it across tenants only via `outbox_claim_batch` / `outbox_mark_published` (SECURITY DEFINER, migration 0012) and two owner-only policies (`outbox_relay_select` / `outbox_relay_update`, `TO` the owner role). See architecture

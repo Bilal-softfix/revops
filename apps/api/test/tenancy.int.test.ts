@@ -446,3 +446,77 @@ describe('members list', () => {
     for (const s of Object.values(b.sessions)) expect(ids).not.toContain(s.body.user.id);
   });
 });
+
+describe('invitation emails run as jobs (M0-T6)', () => {
+  freshApp();
+  let owner: LoggedIn;
+
+  beforeAll(async () => {
+    const email = uniqueEmail('owner');
+    await signupVerified(t, email);
+    owner = await login(t, email);
+  });
+
+  const idOf = async (email: string) =>
+    (
+      (await withSession(request(t.server).get('/v1/invitations'), owner)).body as {
+        items: Invitation[];
+      }
+    ).items.find((i) => i.email === email)?.id ?? '';
+
+  it('the job carries ids only — the link is minted by the job, never stored in the queue', async () => {
+    const email = uniqueEmail('job');
+    await invite(owner, email, 'agent').expect(201);
+    expect(t.email.lastTo(email)).toBeUndefined(); // nothing sent on the request path
+    const [job] = t.jobs.jobs;
+    expect(job?.name).toBe('tenancy.invitation-email');
+    expect(Object.keys(job?.data as object).sort()).toEqual([
+      'actorUserId',
+      'invitationId',
+      'tenantId',
+    ]);
+    await t.drain();
+    const token = t.email.lastTokenTo(email) ?? '';
+    expect(token).toMatch(/^[0-9a-f-]{36}\.[A-Za-z0-9_-]{43}$/);
+    expect(JSON.stringify(job)).not.toContain(token.split('.')[1]);
+  });
+
+  it('an invitation revoked before its job runs gets no email', async () => {
+    const email = uniqueEmail('revoked-early');
+    await invite(owner, email, 'agent').expect(201);
+    const id = await idOf(email);
+    await withSession(request(t.server).delete(`/v1/invitations/${id}`), owner).expect(204);
+    await t.drain();
+    expect(t.email.lastTo(email)).toBeUndefined();
+  });
+
+  it('a retried job re-mints the link: only the newest emailed link works, expiry unchanged', async () => {
+    const email = uniqueEmail('retry');
+    await invite(owner, email, 'agent').expect(201);
+    const [job] = t.jobs.jobs;
+    await t.drain();
+    const first = t.email.lastTokenTo(email);
+    const before = (
+      (await withSession(request(t.server).get('/v1/invitations'), owner)).body as {
+        items: Invitation[];
+      }
+    ).items.find((i) => i.email === email)?.expiresAt;
+    // Simulate pg-boss delivering the same job again (e.g. retry after a lost ack).
+    if (job) t.jobs.jobs.push({ ...job, id: crypto.randomUUID() });
+    await t.drain();
+    const second = t.email.lastTokenTo(email);
+    expect(second).not.toBe(first);
+    const after = (
+      (await withSession(request(t.server).get('/v1/invitations'), owner)).body as {
+        items: Invitation[];
+      }
+    ).items.find((i) => i.email === email)?.expiresAt;
+    expect(after).toBe(before);
+    const accept = (token: string | undefined) =>
+      request(t.server)
+        .post('/v1/invitations/accept')
+        .send({ token, name: 'Retry', password: OTHER_PASSWORD });
+    await accept(first).expect(400);
+    await accept(second).expect(200);
+  });
+});

@@ -6,6 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import type { Response } from 'express';
+import { REQUEST_ID_HEADER } from '../logging/logger';
 import { DomainError } from './domain-error';
 import { safeErrorSummary } from './safe-error';
 
@@ -64,7 +65,10 @@ export function toProblem(error: unknown): {
   };
 }
 
-/** Every error leaves as application/problem+json (RFC 7807). Request ids + pino arrive in M0-T6. */
+/**
+ * Every error leaves as application/problem+json (RFC 7807), carrying the request id so a user's
+ * report can be matched to the log lines (which carry it too).
+ */
 @Catch()
 export class ProblemDetailsFilter implements ExceptionFilter {
   private readonly logger = new Logger('ProblemDetails');
@@ -72,6 +76,8 @@ export class ProblemDetailsFilter implements ExceptionFilter {
   catch(error: unknown, host: ArgumentsHost): void {
     const res = host.switchToHttp().getResponse<Response>();
     const { problem, headers } = toProblem(error);
+    const requestId = res.getHeader(REQUEST_ID_HEADER);
+    if (typeof requestId === 'string') problem.requestId = requestId;
     if (problem.status >= 500) {
       // Never the message (may carry SQL params) or request bodies (passwords, tokens).
       this.logger.error(safeErrorSummary(error));

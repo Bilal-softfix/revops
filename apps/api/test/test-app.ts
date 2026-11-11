@@ -12,8 +12,10 @@ import { APP_OPTIONS, configureApp } from '../src/app-setup';
 import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/modules/identity/password.service';
 import { sessionCookieName } from '../src/modules/identity/session.service';
-import { BackgroundTasks, QueuedBackgroundTasks } from '../src/platform/background-tasks';
 import { Clock, FakeClock } from '../src/platform/clock';
+import { InMemoryJobQueue } from '../src/platform/queue/in-memory-job-queue';
+import { JobHandlers } from '../src/platform/queue/job-handlers';
+import { JobQueue } from '../src/platform/queue/job-queue';
 import { EmailProvider, FakeEmailProvider } from '../src/providers/email';
 
 export const SESSION_COOKIE = sessionCookieName(true);
@@ -25,14 +27,15 @@ export interface TestApp {
   /** Starts at real "now" so DB-side checks (expires_at > now()) agree with the app's clock. */
   clock: FakeClock;
   email: FakeEmailProvider;
-  /** Background work (signup processing, emails) waits here until `drain()`. */
-  background: QueuedBackgroundTasks;
+  /** Jobs (signup processing, emails) wait here until `drain()` runs their real handlers. */
+  jobs: InMemoryJobQueue;
   drain: () => Promise<void>;
   close: () => Promise<void>;
 }
 
 /**
- * The real AppModule on the test DB, with fake email, a controllable clock and queued tasks.
+ * The real AppModule on the test DB, with fake email, a controllable clock and an in-memory job
+ * queue (the pg-boss queue itself is covered by test/queue.int.test.ts).
  * Rate limits live in Postgres (ADR-011), so each new app starts with empty buckets — the same
  * isolation the per-app in-memory limiter used to give. Safe: integration files run one at a time.
  */
@@ -45,14 +48,15 @@ export async function createTestApp(): Promise<TestApp> {
     EMAIL_DRIVER: 'fake',
     APP_URL: 'http://localhost:3000',
     COOKIE_SECURE: 'true',
+    LOG_LEVEL: 'fatal',
   });
   const clock = new FakeClock(new Date());
-  const background = new QueuedBackgroundTasks();
+  const jobs = new InMemoryJobQueue();
   const moduleRef = await Test.createTestingModule({ imports: [AppModule.register(env)] })
     .overrideProvider(Clock)
     .useValue(clock)
-    .overrideProvider(BackgroundTasks)
-    .useValue(background)
+    .overrideProvider(JobQueue)
+    .useValue(jobs)
     .compile();
   const app = moduleRef.createNestApplication({ ...APP_OPTIONS, logger: false });
   configureApp(app);
@@ -62,8 +66,8 @@ export async function createTestApp(): Promise<TestApp> {
     server: app.getHttpServer() as Server,
     clock,
     email: app.get<EmailProvider, FakeEmailProvider>(EmailProvider),
-    background,
-    drain: () => background.drain(),
+    jobs,
+    drain: () => jobs.drain((name) => app.get(JobHandlers).get(name)),
     close: () => app.close(),
   };
 }

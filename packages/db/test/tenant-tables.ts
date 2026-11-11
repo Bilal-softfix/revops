@@ -1,6 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import type { Db } from '../src/client.js';
-import { auditLogs, invitations, memberships, outboxEvents, tenants } from '../src/schema/index.js';
+import {
+  auditLogs,
+  invitations,
+  memberships,
+  outboxEvents,
+  processedEvents,
+  tenants,
+} from '../src/schema/index.js';
 import { withTenant } from '../src/with-tenant.js';
 import type { TenantTableFixture } from './leak-check.js';
 import { insertUser } from './users.js';
@@ -72,6 +79,17 @@ export const TENANT_TABLES: readonly TenantTableFixture[] = [
         })
         .returning({ id: invitations.id });
       return row?.id ?? '';
+    },
+  },
+  {
+    table: 'processed_events',
+    tenantColumn: 'tenant_id',
+    idColumn: 'event_id',
+    privileges: ['SELECT', 'INSERT'],
+    insert: async (tx, tenantId) => {
+      const eventId = randomUUID();
+      await tx.insert(processedEvents).values({ consumer: 'test.consumer', eventId, tenantId });
+      return eventId;
     },
   },
 ];

@@ -8,6 +8,8 @@ export interface TenantTableFixture {
   table: string;
   /** Column the RLS policy compares with app.tenant_id (`id` for tenants). */
   tenantColumn: string;
+  /** Column that identifies a row. Default `id`; processed_events uses `event_id`. */
+  idColumn?: string;
   /** What app_user is granted; UPDATE/DELETE outside this must fail with a privilege error. */
   privileges: readonly Privilege[];
   /** Inserts one row for `tenantId` (inside the current tx) and returns its id. */
@@ -46,6 +48,7 @@ export async function findTenantLeaks(
 ): Promise<string[]> {
   const t = sql.identifier(fixture.table);
   const col = sql.identifier(fixture.tenantColumn);
+  const idCol = sql.identifier(fixture.idColumn ?? 'id');
   const violations: string[] = [];
   const inA = <T>(fn: (tx: Tx) => Promise<T>) => withTenant(db, a.tenantId, fn);
   const can = (p: Privilege) => fixture.privileges.includes(p);
@@ -60,10 +63,12 @@ export async function findTenantLeaks(
     }
   };
 
-  const own = await inA((tx) => rowCount(tx, sql`select 1 from ${t} where id = ${a.rowId}`));
+  const own = await inA((tx) => rowCount(tx, sql`select 1 from ${t} where ${idCol} = ${a.rowId}`));
   if (own !== 1) violations.push('own row is not visible');
 
-  const foreign = await inA((tx) => rowCount(tx, sql`select 1 from ${t} where id = ${b.rowId}`));
+  const foreign = await inA((tx) =>
+    rowCount(tx, sql`select 1 from ${t} where ${idCol} = ${b.rowId}`),
+  );
   if (foreign !== 0) violations.push('SELECT by id sees the other tenant’s row');
 
   const others = await inA((tx) =>
@@ -73,28 +78,30 @@ export async function findTenantLeaks(
 
   if (can('UPDATE')) {
     const touched = await inA((tx) =>
-      rowCount(tx, sql`update ${t} set ${col} = ${col} where id = ${b.rowId}`),
+      rowCount(tx, sql`update ${t} set ${col} = ${col} where ${idCol} = ${b.rowId}`),
     );
     if (touched !== 0) violations.push('UPDATE changed the other tenant’s row');
     const mine = await inA((tx) =>
-      rowCount(tx, sql`update ${t} set ${col} = ${col} where id = ${a.rowId}`),
+      rowCount(tx, sql`update ${t} set ${col} = ${col} where ${idCol} = ${a.rowId}`),
     );
     if (mine !== 1) violations.push('own row is not updatable');
     await mustBeDenied('UPDATE moving own row to the other tenant', (tx) =>
-      tx.execute(sql`update ${t} set ${col} = ${b.tenantId}::uuid where id = ${a.rowId}`),
+      tx.execute(sql`update ${t} set ${col} = ${b.tenantId}::uuid where ${idCol} = ${a.rowId}`),
     );
   } else {
     await mustBeDenied('UPDATE without the privilege', (tx) =>
-      tx.execute(sql`update ${t} set ${col} = ${col} where id = ${b.rowId}`),
+      tx.execute(sql`update ${t} set ${col} = ${col} where ${idCol} = ${b.rowId}`),
     );
   }
 
   if (can('DELETE')) {
-    const deleted = await inA((tx) => rowCount(tx, sql`delete from ${t} where id = ${b.rowId}`));
+    const deleted = await inA((tx) =>
+      rowCount(tx, sql`delete from ${t} where ${idCol} = ${b.rowId}`),
+    );
     if (deleted !== 0) violations.push('DELETE removed the other tenant’s row');
   } else {
     await mustBeDenied('DELETE without the privilege', (tx) =>
-      tx.execute(sql`delete from ${t} where id = ${b.rowId}`),
+      tx.execute(sql`delete from ${t} where ${idCol} = ${b.rowId}`),
     );
   }
 

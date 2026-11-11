@@ -15,6 +15,8 @@ export abstract class RateLimiter {
    */
   abstract consume(key: string, limit: number, windowMs: number): Promise<number>;
   abstract reset(key: string): Promise<void>;
+  /** Deletes ended windows (the worker runs this on a schedule). Returns how many were removed. */
+  abstract purgeExpired(): Promise<number>;
 }
 
 /** Keys contain IPs and emails: only their sha256 reaches the database. */
@@ -46,7 +48,6 @@ export class PostgresRateLimiter extends RateLimiter {
     await this.database.db.execute(sql`select rate_limit_reset(${rateLimitKeyHash(key)})`);
   }
 
-  /** Deletes ended windows; scheduled by the worker. Returns the number of rows removed. */
   async purgeExpired(): Promise<number> {
     const [row] = await this.database.db.execute<{ n: number }>(
       sql`select rate_limit_purge(${this.clock.now().toISOString()}::timestamptz) as n`,
@@ -81,5 +82,14 @@ export class InMemoryRateLimiter extends RateLimiter {
   reset(key: string): Promise<void> {
     this.windows.delete(key);
     return Promise.resolve();
+  }
+
+  purgeExpired(): Promise<number> {
+    const now = this.clock.now().getTime();
+    let removed = 0;
+    for (const [key, window] of this.windows) {
+      if (window.resetAt <= now && this.windows.delete(key)) removed += 1;
+    }
+    return Promise.resolve(removed);
   }
 }

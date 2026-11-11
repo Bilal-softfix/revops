@@ -7,7 +7,7 @@ import { DomainError } from '../errors/domain-error';
  * never the submitted values (passwords, tokens).
  */
 export class ZodBodyPipe<S extends z.ZodType> implements PipeTransform<unknown, z.infer<S>> {
-  constructor(private readonly schema: S) {}
+  constructor(readonly schema: S) {}
 
   transform(value: unknown): z.infer<S> {
     const result = this.schema.safeParse(value);

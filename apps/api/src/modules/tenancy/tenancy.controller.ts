@@ -29,12 +29,18 @@ import {
   pageQuerySchema,
   switchTenantRequestSchema,
   updateMemberRequestSchema,
+  memberPageSchema,
+  memberSchema,
+  invitationSchema,
+  sessionResponseSchema,
+  myTenantsResponseSchema,
 } from '@revops/shared';
 import type { ApiEnv } from '@revops/shared/env';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { API_ENV } from '../../config/env';
 import { requestMeta } from '../../platform/request-meta';
+import { ZodResponse } from '../../platform/openapi/openapi';
 import { ZodBodyPipe } from '../../platform/validation/zod-body.pipe';
 import {
   type AuthContext,
@@ -48,6 +54,7 @@ import { RequirePermission } from './permission.guard';
 import { TenancyService } from './tenancy.service';
 
 const idParam = new ZodBodyPipe(z.uuid());
+const invitationListSchema = z.object({ items: z.array(invitationSchema) });
 
 /** @RequirePermission guarantees an active tenant + role. */
 type TenantAuth = AuthContext & { tenantId: string; role: NonNullable<AuthContext['role']> };
@@ -60,6 +67,7 @@ export class TenancyController {
   ) {}
 
   @Get('members')
+  @ZodResponse(200, memberPageSchema)
   @RequirePermission('member.read')
   listMembers(
     @CurrentAuth() auth: TenantAuth,
@@ -69,6 +77,7 @@ export class TenancyController {
   }
 
   @Patch('members/:userId')
+  @ZodResponse(200, memberSchema)
   @RequirePermission('member.manage')
   updateMember(
     @CurrentAuth() auth: TenantAuth,
@@ -80,12 +89,14 @@ export class TenancyController {
   }
 
   @Get('invitations')
+  @ZodResponse(200, invitationListSchema)
   @RequirePermission('member.invite')
   listInvitations(@CurrentAuth() auth: TenantAuth): Promise<{ items: Invitation[] }> {
     return this.tenancy.listInvitations(auth);
   }
 
   @Post('invitations')
+  @ZodResponse(201, invitationSchema, 'Created')
   @HttpCode(201)
   @RequirePermission('member.invite')
   invite(
@@ -120,6 +131,7 @@ export class TenancyController {
 
   /** Public (the token is the credential); a live session is used if present (existing users). */
   @Post('invitations/accept')
+  @ZodResponse(200, sessionResponseSchema)
   @HttpCode(200)
   @UseGuards(OptionalSessionGuard)
   async accept(
@@ -134,12 +146,14 @@ export class TenancyController {
   }
 
   @Get('tenants')
+  @ZodResponse(200, myTenantsResponseSchema)
   @UseGuards(SessionGuard)
   myTenants(@CurrentAuth() auth: AuthContext): Promise<MyTenantsResponse> {
     return this.tenancy.myTenants(auth);
   }
 
   @Post('session/tenant')
+  @ZodResponse(200, sessionResponseSchema)
   @HttpCode(200)
   @UseGuards(SessionGuard)
   switchTenant(

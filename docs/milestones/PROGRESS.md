@@ -2,7 +2,7 @@
 
 ## Current
 Milestone: M0 — Foundation (in progress). Branch: `milestone/m0-foundation`.
-Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-11-05; M0-T5 done 2026-11-11. 2026-11-11: switched to local-first (ADR-011 no Redis/pg-boss, ADR-012 native Postgres). Next: M0-T6 Platform plumbing (without Redis), then M0-T7 — sequential, no parallel lanes. Draft PR #1 open, CI green.
+Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-11-05; M0-T5 done 2026-11-11. 2026-11-11: switched to local-first (ADR-011 no Redis/pg-boss, ADR-012 native Postgres). M0-T6 done 2026-11-11. Next: M0-T7 Web shell. Draft PR #1 open, CI green.
 
 ## Done
 - [x] M0-T1 Monorepo scaffold (2026-11-04)
@@ -13,8 +13,16 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
 - [x] M0 prep: `pnpm run db:bootstrap` — scripted Neon setup (DBs, extensions, app_user, env lines), since the Neon SQL editor isn't usable (2026-11-04)
 - [x] M0 local-first switch (2026-11-11): Redis removed (ADR-011: pg-boss for jobs from T6, Postgres rate limiter now via `rate_limit_buckets` + definer functions, migrations 0009/0010); native PostgreSQL 18 for dev/test (ADR-012: `DB_BOOTSTRAP_URL`, superuser mode creates `revops_owner`, verify-only reruns, `sslmode=disable` for localhost, pgvector optional until M4); second demo tenant in the seed
 
+- [x] M0-T6 Platform plumbing (2026-11-11). Delivered:
+  - pg-boss 12.38.0 behind `JobQueue`/`JobHandler`/`JobRunner`, schema installed by migration 0013;
+  - outbox relay with `outbox_claim_batch`/`outbox_mark_published` (0012), `processed_events` + `processOnce`, and the demo consumer;
+  - auth/invitation background work moved to jobs, with no secrets in job rows;
+  - cron jobs for the unverified-account and rate-limit purges;
+  - pino with request ids, PII masking and redaction; OTel tracing (opt-in); Prometheus `/metrics`; `/health` + `/ready`; OpenAPI at `/docs` from the Zod schemas;
+  - a worker HTTP server; `requestId` in problem+json.
+  - **AC test:** `apps/api/test/outbox.int.test.ts` (relay run twice and concurrently, real pg-boss worker, applied exactly once).
+
 ## In progress
-- [ ] M0-T6 Platform plumbing
 - [ ] M0-T7 Web shell
 
 ## Assumptions made
@@ -62,7 +70,7 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - 2026-11-05 · M0-T4: Rate limits (in-memory until T6): login 5 attempts/(IP, email)/15 min reserved atomically before verify, cleared on success, + 50/IP/15 min; signup 10/IP/h; verify/reset emails 3/(IP, email)/h + 20/IP/h, extra requests dropped silently (still 202).
 - 2026-11-05 · M0-T4 follow-up (Dev decision a): signup always returns `202 {"status":"check_email"}`. An existing verified email gets a "you already have an account" email and nothing is created.
 - 2026-11-05 · M0-T4 follow-up (Dev decision b): (1) verify-email needs the token and the account password; a bad link, used link, expired account and wrong password all return 400 `verification_failed` after one argon2 verify; 5 attempts per account plus 50 per IP per 15 min. Added `POST /v1/auth/verify-email/cancel {token}` ("this wasn't me"), which deletes the unverified account and its sole-owned tenant. (2) A signup for an unverified email replaces the pending account: it is deleted, a new one is created, and old links and the old password die. (3) Unverified accounts expire 48 h after signup (`auth_unverified_cutoff()` in SQL); login, verify, resend and forgot treat them as non-existent; `UnverifiedAccountCleanupJob` purges them and T6 schedules it hourly. (4) Reset revokes every session of the user, tested with 3 sessions plus a DB check.
-- 2026-11-05 · M0-T4 follow-up: all account-state work for signup, resend and forgot runs as a `BackgroundTasks` task after the 202. It is in-process for now (lost on crash, which is acceptable for dev). T6 moves it to BullMQ. Tests use a queued implementation to prove nothing state-dependent runs before the response.
+- 2026-11-05 · M0-T4 follow-up: all account-state work for signup, resend and forgot runs as a `BackgroundTasks` task after the 202. **Done in T6:** these are pg-boss jobs now (durable, retried). Tests use a queued implementation to prove nothing state-dependent runs before the response.
 - 2026-11-05 · M0-T4 follow-up: "Replace" means delete and recreate: the pending account gets a new user id and tenant, and the audit/outbox rows of the discarded tenant are deleted with it (it was never activated).
 - 2026-11-05 · M0-T4 follow-up: verify-email now also expires the user's other unused verify links.
 - 2026-11-06 · M0-T4 security review of the follow-up (security-auditor), all fixed in migration 0006 + API:
@@ -91,6 +99,14 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - 2026-11-11 · db:bootstrap with a superuser creates a dedicated NOSUPERUSER `revops_owner` that owns the DBs and runs migrations. Reason: if the owner were `postgres`, the SECURITY DEFINER functions would run as a superuser and bypass RLS, unlike Neon/CI. Doctor warns if `DATABASE_URL_OWNER` is a superuser.
 - 2026-11-11 · db:bootstrap after `--write-env` deletes `DB_BOOTSTRAP_URL` (the superuser password doesn't stay on disk); reruns connect as `revops_owner` in verify-only mode (create nothing, check everything, reuse passwords proven by login).
 - 2026-11-11 · pgvector is optional (doctor ⚠, bootstrap warns) until M4; CI keeps `pgvector/pgvector:0.8.6-pg18`.
+- 2026-11-11 · M0-T6: background work in jobs.
+  - The signup password is now hashed on the request path, once per request whatever the account state (timing stays state-independent), so the job row holds only the argon2 hash.
+  - Invitation create/resend stores the hash of a never-revealed placeholder token. The `tenancy.invitation-email` job mints and emails the real link, keeping the expiry. A retry or resend re-mints it, so only the newest emailed link works. A revoked, accepted or expired invitation gets no email.
+  - Invitation jobs are enqueued in the same transaction as the invitation.
+- 2026-11-11 · M0-T6: worker env = API env + `WORKER_PORT` (4001) + `OUTBOX_POLL_INTERVAL_MS` (1000), and the production env checks also apply to the worker. New common vars: `OTEL_EXPORTER_OTLP_ENDPOINT` (tracing off when empty) and `METRICS_TOKEN` (≥16 chars, required in production).
+- 2026-11-11 · M0-T6: problem+json bodies now include `requestId`. The auth timing-safety tests compare responses without it, since it is a fresh uuid every time and depends on no account state.
+- 2026-11-11 · M0-T6: OpenAPI comes from Nest's route scan, enriched from each route's `ZodBodyPipe` (body/query/path) and `@ZodResponse`. `@anatine/zod-openapi` and nestjs-zod were not added, so there are no DTO classes. `/health`, `/ready` and `/metrics` are excluded.
+- 2026-11-11 · M0-T6 deps: pg-boss 12.38.0, nestjs-pino 4.6.1, pino 9.14.0, pino-http 10.5.0, pino-pretty 13.2.0 (dev), prom-client 15.1.3, @nestjs/swagger 11.4.8, @opentelemetry/{api 1.10.0, sdk-node 0.300.0, exporter-trace-otlp-http 0.300.0, instrumentation-http 0.300.0, instrumentation-express 0.72.0}. These were picked as Nest-11 compatible and ≥2 weeks old; the http/express instrumentations replace the heavy auto-instrumentations bundle. The pnpm override `multer: 2.5.0` fixes the high advisory GHSA-q7qp-rjg7-q26m (via @nestjs/platform-express). `@scarf/scarf` and protobufjs install scripts are ignored.
 - 2026-11-11 · Rate limiter: `rate_limit_buckets` stores sha256(key) only (no IPs/emails), RLS enabled with no policies and no grants, reached via `rate_limit_consume/reset/purge` (definer). The app passes its Clock's now, so FakeClock tests keep working. RLS catalog meta-test gains a "system tables" class. Purge is scheduled in T6.
 
 ## Blocked on external
@@ -102,11 +118,12 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - [ ] Dev: install pgvector on the local Postgres 18 before M4 (optional until then)
 
 ## Tech debt
+- Published `outbox_events` and `processed_events` rows are never purged. Add a retention job when volumes matter (M6/M8).
+- The minimatch moderate advisory (transitive) is still reported by `pnpm audit`; it is dev-tooling only.
+- Worker jobs have no per-job log context (the job id is in the failure log only); add an AsyncLocalStorage child logger when consumers multiply.
+- `InMemoryJobQueue` is not transactional: a job sent with `tx` stays queued in tests even if the transaction rolls back. Real pg-boss behaviour is covered by `test/queue.int.test.ts`.
 _(non-blocking review findings)_
 - M8: `trust proxy` must be set to the real hop count / proxy CIDRs before deploying behind a load balancer; until then `req.ip` is the proxy and the (IP, email) limiter degrades to per-email (lockout risk), while a blanket `trust proxy=true` would make IPs spoofable.
-- M0-T6: schedule `rate_limit_purge` (pg-boss cron) so ended windows don't accumulate.
-- M0-T6: move `BackgroundTasks` (signup, resend, forgot, emails) onto pg-boss jobs so that work is durable and retried. In-process tasks are lost if the API crashes mid-task.
-- M0-T6: schedule `UnverifiedAccountCleanupJob` (hourly repeatable job in the worker).
 - M0-T7: the verify page must ask for the password and offer "This wasn't me" (`/v1/auth/verify-email/cancel`) as an explicit button, never auto-submitted on load (mail link scanners). The login error copy should say "wrong email or password, or your email isn't verified yet — check your inbox".
 - M0-T6: discarding an unverified account deletes its tenant's outbox rows, including `user.signed_up.v1`. Once the relay ships, consider a compensating `user.discarded.v1` (also needed for DPDP deletion propagation).
 - Tenant switch: `POST /v1/session/tenant` only sets an active membership, and the session guard re-resolves the membership per request, so a stale or bogus `active_tenant_id` grants nothing. A SQL WITH CHECK on sessions was not added: the touch-on-request update would then fail for disabled members.

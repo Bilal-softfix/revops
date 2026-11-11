@@ -14,9 +14,9 @@ import {
 } from '@revops/shared';
 import type { ApiEnv } from '@revops/shared/env';
 import { API_ENV } from '../../config/env';
-import { BackgroundTasks } from '../../platform/background-tasks';
 import { Clock } from '../../platform/clock';
 import { Database } from '../../platform/database/database';
+import { JobQueue } from '../../platform/queue/job-queue';
 import { RateLimiter } from '../../platform/rate-limit/rate-limiter';
 import type { RequestMeta } from '../../platform/request-meta';
 import { EmailProvider, maskEmail } from '../../providers/email';
@@ -30,6 +30,13 @@ import {
 } from './errors';
 import { IdentityRepository } from './identity.repository';
 import { PasswordService } from './password.service';
+import {
+  type EmailJobData,
+  FORGOT_PASSWORD_JOB,
+  RESEND_VERIFICATION_JOB,
+  SIGNUP_JOB,
+  type SignupJobData,
+} from './job-definitions';
 import { type AuthContext, SessionService } from './session.service';
 import { hashToken, newToken, tenantSlug } from './tokens';
 
@@ -83,7 +90,7 @@ export class IdentityService {
     private readonly sessions: SessionService,
     private readonly email: EmailProvider,
     private readonly rateLimiter: RateLimiter,
-    private readonly background: BackgroundTasks,
+    private readonly jobs: JobQueue,
     private readonly clock: Clock,
   ) {}
 
@@ -93,6 +100,8 @@ export class IdentityService {
    * - verified account → "you already have an account" email, nothing created;
    * - unverified (pending or expired) → that pending account is discarded and replaced;
    * - new → user + tenant + owner membership + audit + `user.signed_up.v1` + verify token, one tx.
+   * The password is hashed here (same argon2 work for every request) so the job row stores only
+   * the hash, never the password.
    */
   async signup(input: SignupRequest, meta: RequestMeta): Promise<SignupResponse> {
     const retryAfter = await this.rateLimiter.consume(
@@ -101,11 +110,20 @@ export class IdentityService {
       HOUR,
     );
     if (retryAfter > 0) throw rateLimited(retryAfter);
-    this.background.run('identity.signup', () => this.processSignup(input, meta));
+    const passwordHash = await this.passwords.hash(input.password);
+    await this.jobs.send(SIGNUP_JOB, {
+      name: input.name,
+      email: input.email,
+      tenantName: input.tenantName,
+      passwordHash,
+      meta,
+    });
     return CHECK_EMAIL;
   }
 
-  private async processSignup(input: SignupRequest, meta: RequestMeta): Promise<void> {
+  /** Job `identity.signup` (worker). */
+  async completeSignup(input: SignupJobData): Promise<void> {
+    const { meta } = input;
     if (!(await this.allowEmail('signup', input.email, meta))) return;
     const existing = await this.repository.findUserByEmail(input.email);
     if (existing?.emailVerifiedAt) {
@@ -129,10 +147,9 @@ export class IdentityService {
       );
     }
 
-    const passwordHash = await this.passwords.hash(input.password);
     for (let attempt = 1; ; attempt++) {
       try {
-        const verifyToken = await this.createAccount(input, passwordHash, meta);
+        const verifyToken = await this.createAccount(input, input.passwordHash, meta);
         await this.email.send(verifyEmailMessage(input.email, this.env.APP_URL, verifyToken));
         return;
       } catch (error) {
@@ -147,7 +164,7 @@ export class IdentityService {
 
   /** Returns the verification token to email. */
   private async createAccount(
-    input: SignupRequest,
+    input: Pick<SignupRequest, 'name' | 'email' | 'tenantName'>,
     passwordHash: string,
     meta: RequestMeta,
   ): Promise<string> {
@@ -248,15 +265,18 @@ export class IdentityService {
     this.logger.log(`discarded an unverified account via its "this wasn't me" link (from ${ip})`);
   }
 
-  /** Always 202; the lookup and email happen in the background (no account-state signal). */
-  resendVerification(input: EmailOnlyRequest, meta: RequestMeta): void {
-    this.background.run('identity.resend-verification', async () => {
-      if (!(await this.allowEmail('verify', input.email, meta))) return;
-      const user = await this.repository.findUserByEmail(input.email);
-      if (!user || user.emailVerifiedAt) return;
-      const token = await this.issueToken(user.id, 'email_verify', EMAIL_VERIFY_TTL_MS);
-      await this.email.send(verifyEmailMessage(input.email, this.env.APP_URL, token));
-    });
+  /** Always 202; the lookup and email happen in a job (no account-state signal). */
+  async resendVerification(input: EmailOnlyRequest, meta: RequestMeta): Promise<void> {
+    await this.jobs.send(RESEND_VERIFICATION_JOB, { email: input.email, meta });
+  }
+
+  /** Job `identity.resend-verification` (worker). */
+  async sendVerificationEmail({ email, meta }: EmailJobData): Promise<void> {
+    if (!(await this.allowEmail('verify', email, meta))) return;
+    const user = await this.repository.findUserByEmail(email);
+    if (!user || user.emailVerifiedAt) return;
+    const token = await this.issueToken(user.id, 'email_verify', EMAIL_VERIFY_TTL_MS);
+    await this.email.send(verifyEmailMessage(email, this.env.APP_URL, token));
   }
 
   async login(
@@ -281,8 +301,8 @@ export class IdentityService {
     if (!user.emailVerifiedAt) {
       // Same answer as a wrong password: a distinct "not verified" response would let anyone tell,
       // via signup + login, whether an email already had a verified account. The owner gets a
-      // fresh verification email instead (rate-limited, in the background).
-      this.resendVerification({ email: input.email }, meta);
+      // fresh verification email instead (rate-limited, in a job).
+      await this.resendVerification({ email: input.email }, meta);
       throw invalidCredentials();
     }
     await this.rateLimiter.reset(key);
@@ -356,23 +376,26 @@ export class IdentityService {
     );
   }
 
-  /** Always 202; the lookup and email happen in the background (no account-state signal). */
-  forgotPassword(input: EmailOnlyRequest, meta: RequestMeta): void {
-    this.background.run('identity.forgot-password', async () => {
-      if (!(await this.allowEmail('reset', input.email, meta))) return;
-      const user = await this.repository.findUserByEmail(input.email);
-      if (!user) return;
-      if (!user.emailVerifiedAt) {
-        // Unverified: it may be someone else's pre-registration with this email. A reset would
-        // hand the inbox owner that account (and its tenant name); the verify email offers
-        // "this wasn't me / start over" instead.
-        const token = await this.issueToken(user.id, 'email_verify', EMAIL_VERIFY_TTL_MS);
-        await this.email.send(verifyEmailMessage(input.email, this.env.APP_URL, token));
-        return;
-      }
-      const token = await this.issueToken(user.id, 'password_reset', PASSWORD_RESET_TTL_MS);
-      await this.email.send(resetPasswordMessage(input.email, this.env.APP_URL, token));
-    });
+  /** Always 202; the lookup and email happen in a job (no account-state signal). */
+  async forgotPassword(input: EmailOnlyRequest, meta: RequestMeta): Promise<void> {
+    await this.jobs.send(FORGOT_PASSWORD_JOB, { email: input.email, meta });
+  }
+
+  /** Job `identity.forgot-password` (worker). */
+  async sendPasswordResetEmail({ email, meta }: EmailJobData): Promise<void> {
+    if (!(await this.allowEmail('reset', email, meta))) return;
+    const user = await this.repository.findUserByEmail(email);
+    if (!user) return;
+    if (!user.emailVerifiedAt) {
+      // Unverified: it may be someone else's pre-registration with this email. A reset would
+      // hand the inbox owner that account (and its tenant name); the verify email offers
+      // "this wasn't me / start over" instead.
+      const token = await this.issueToken(user.id, 'email_verify', EMAIL_VERIFY_TTL_MS);
+      await this.email.send(verifyEmailMessage(email, this.env.APP_URL, token));
+      return;
+    }
+    const token = await this.issueToken(user.id, 'password_reset', PASSWORD_RESET_TTL_MS);
+    await this.email.send(resetPasswordMessage(email, this.env.APP_URL, token));
   }
 
   /**

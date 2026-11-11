@@ -11,6 +11,8 @@ import { AppModule } from './app.module';
 const env = parseEnv(apiEnvSchema, {
   DATABASE_URL: 'postgresql://app_user:unused@127.0.0.1:1/revops_dev',
   EMAIL_DRIVER: 'fake',
+  LOG_LEVEL: 'fatal',
+  METRICS_TOKEN: 'test-metrics-token-0123',
 });
 
 describe('AppModule (http)', () => {
@@ -81,5 +83,82 @@ describe('AppModule (http)', () => {
   it('does not advertise the framework', async () => {
     const res = await request(server).get('/health');
     expect(res.headers['x-powered-by']).toBeUndefined();
+  });
+
+  it('every response carries x-request-id; a safe client id is echoed, and errors include it', async () => {
+    const generated = await request(server).get('/health');
+    expect(generated.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/);
+    const echoed = await request(server).get('/nope').set('x-request-id', 'trace-abc.1');
+    expect(echoed.headers['x-request-id']).toBe('trace-abc.1');
+    expect(echoed.body).toMatchObject({ requestId: 'trace-abc.1' });
+  });
+
+  it('GET /ready → 503 problem+json naming the failing checks when the DB is down', async () => {
+    const res = await request(server).get('/ready').expect(503);
+    expect(res.headers['content-type']).toMatch(/^application\/problem\+json/);
+    expect(res.body).toMatchObject({
+      code: 'not_ready',
+      checks: { database: 'fail', queue: 'fail' },
+    });
+  });
+
+  it('GET /metrics needs the bearer token and exposes Prometheus text with route templates', async () => {
+    await request(server).get('/metrics').expect(401);
+    await request(server)
+      .get('/metrics')
+      .set('authorization', 'Bearer wrong-token-0000000')
+      .expect(401);
+    const res = await request(server)
+      .get('/metrics')
+      .set('authorization', 'Bearer test-metrics-token-0123')
+      .expect(200);
+    expect(res.headers['content-type']).toMatch(/^text\/plain/);
+    expect(res.text).toContain('http_request_duration_seconds_count');
+    expect(res.text).toMatch(/route="\/health"/);
+  });
+
+  it('OpenAPI at /docs/openapi.json: v1 routes with Zod request schemas, probes excluded', async () => {
+    const res = await request(server).get('/docs/openapi.json').expect(200);
+    const doc = res.body as {
+      paths: Record<string, Record<string, Record<string, unknown>>>;
+      components: { schemas: Record<string, unknown> };
+    };
+    expect(Object.keys(doc.paths)).toEqual(
+      expect.arrayContaining([
+        '/v1/auth/signup',
+        '/v1/auth/login',
+        '/v1/members',
+        '/v1/invitations',
+      ]),
+    );
+    for (const probe of ['/health', '/ready', '/metrics']) expect(doc.paths[probe]).toBeUndefined();
+    const signup = doc.paths['/v1/auth/signup']?.post;
+    expect(signup?.requestBody).toMatchObject({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: expect.arrayContaining([
+              'name',
+              'email',
+              'password',
+              'tenantName',
+            ]) as unknown,
+          },
+        },
+      },
+    });
+    expect(signup?.responses).toHaveProperty('default');
+    expect(doc.components.schemas).toHaveProperty('Problem');
+    const list = doc.paths['/v1/members']?.get?.parameters as { name: string; in: string }[];
+    expect(list.filter((p) => p.in === 'query').map((p) => p.name)).toEqual(
+      expect.arrayContaining(['limit']),
+    );
+  });
+
+  it('Swagger UI is served at /docs outside production', async () => {
+    const res = await request(server).get('/docs').redirects(1);
+    expect(res.status).toBe(200);
+    expect(res.text).toMatch(/swagger/i);
   });
 });

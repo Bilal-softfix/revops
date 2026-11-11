@@ -1,5 +1,10 @@
 import { Module } from '@nestjs/common';
 import { IdentityController } from './identity.controller';
+import {
+  ForgotPasswordJobHandler,
+  ResendVerificationJobHandler,
+  SignupJobHandler,
+} from './identity.job-handlers';
 import { IdentityRepository } from './identity.repository';
 import { IdentityService } from './identity.service';
 import { PasswordService } from './password.service';
@@ -25,6 +30,9 @@ export { UnverifiedAccountCleanupJob } from './unverified-cleanup.job';
     SessionGuard,
     OptionalSessionGuard,
     UnverifiedAccountCleanupJob,
+    SignupJobHandler,
+    ResendVerificationJobHandler,
+    ForgotPasswordJobHandler,
   ],
   exports: [
     IdentityService,

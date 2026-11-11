@@ -43,6 +43,13 @@ const DAY = 24 * HOUR;
 const OTHER_PASSWORD = 'a different passphrase';
 
 let t: TestApp;
+
+/** A problem body without its per-request id (unique on every response, so never comparable). */
+const sansRequestId = (body: unknown): unknown => {
+  if (typeof body !== 'object' || body === null) return body;
+  const { requestId: _requestId, ...rest } = body as Record<string, unknown>;
+  return rest;
+};
 /** A fresh app per describe: empty rate-limit buckets and its own fake clock, so blocks don't interfere. */
 function freshApp(): void {
   beforeAll(async () => {
@@ -108,7 +115,7 @@ describe('M0-T4 AC: signup → verify email → login → me → logout revokes 
       .post('/v1/auth/login')
       .send({ email, password: OTHER_PASSWORD });
     expect(res.status).toBe(401);
-    expect(res.body).toEqual(wrong.body);
+    expect(sansRequestId(res.body)).toEqual(sansRequestId(wrong.body));
     expect(res.body).toMatchObject({ code: 'invalid_credentials' });
     expect(res.headers['content-type']).toMatch(/^application\/problem\+json/);
     await t.drain();
@@ -415,10 +422,13 @@ describe('timing-safety: responses never depend on account state', () => {
     await expireSignup(emails.expired);
   });
 
-  /** status + body + content type + length: everything a client can observe. */
+  /**
+   * status + body + content type + length: everything a client can observe that could depend on
+   * account state. The per-request `requestId` (a fresh uuid, same length) is left out.
+   */
   const observable = (res: request.Response) => ({
     status: res.status,
-    body: res.body as unknown,
+    body: sansRequestId(res.body),
     type: res.headers['content-type'],
     length: res.headers['content-length'],
   });
@@ -443,13 +453,18 @@ describe('timing-safety: responses never depend on account state', () => {
         }
         expect(new Set(responses.map((r) => JSON.stringify(r))).size).toBe(1);
         expect(responses[0]?.status).toBe(202);
-        // Nothing state-dependent ran on the request path: it is all queued for the background.
+        // Nothing state-dependent ran on the request path: it is all queued as jobs.
         expect(lookups).not.toHaveBeenCalled();
         expect(discards).not.toHaveBeenCalled();
-        expect(hashes).not.toHaveBeenCalled();
-        expect(t.background.queue).toHaveLength(Object.keys(emails).length);
+        // Signup hashes on the request path, once per request whatever the email's state, so the
+        // job row holds only the hash (never the password). The others don't hash at all.
+        expect(hashes).toHaveBeenCalledTimes(endpoint === 'signup' ? responses.length : 0);
+        expect(t.jobs.jobs).toHaveLength(Object.keys(emails).length);
+        const stored = JSON.stringify(t.jobs.jobs);
+        expect(stored).not.toContain(OTHER_PASSWORD);
+        if (endpoint === 'signup') expect(stored).toContain('$argon2id$');
       } finally {
-        t.background.queue.length = 0; // don't change the fixtures for the next case
+        t.jobs.jobs.length = 0; // don't change the fixtures for the next case
         vi.restoreAllMocks();
       }
     },

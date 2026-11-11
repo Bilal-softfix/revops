@@ -14,11 +14,14 @@ import {
   resetPasswordRequestSchema,
   signupRequestSchema,
   verifyEmailRequestSchema,
+  signupResponseSchema,
+  sessionResponseSchema,
 } from '@revops/shared';
 import type { ApiEnv } from '@revops/shared/env';
 import type { Request, Response } from 'express';
 import { API_ENV } from '../../config/env';
 import { requestMeta as meta } from '../../platform/request-meta';
+import { ZodResponse } from '../../platform/openapi/openapi';
 import { ZodBodyPipe } from '../../platform/validation/zod-body.pipe';
 import { IdentityService } from './identity.service';
 import { CurrentAuth, SessionGuard } from './session.guard';
@@ -34,6 +37,7 @@ export class IdentityController {
 
   /** Always 202 { status: 'check_email' }; the outcome only ever arrives by email. */
   @Post('signup')
+  @ZodResponse(202, signupResponseSchema, 'Accepted')
   @HttpCode(202)
   signup(
     @Body(new ZodBodyPipe(signupRequestSchema)) body: SignupRequest,
@@ -71,6 +75,7 @@ export class IdentityController {
   }
 
   @Post('login')
+  @ZodResponse(200, sessionResponseSchema)
   @HttpCode(200)
   async login(
     @Body(new ZodBodyPipe(loginRequestSchema)) body: LoginRequest,
@@ -95,6 +100,7 @@ export class IdentityController {
   }
 
   @Get('me')
+  @ZodResponse(200, sessionResponseSchema)
   @UseGuards(SessionGuard)
   me(@CurrentAuth() auth: AuthContext): Promise<SessionResponse> {
     return this.identity.me(auth);

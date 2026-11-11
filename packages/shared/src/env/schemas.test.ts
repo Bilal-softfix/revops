@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { EnvValidationError, parseEnv } from './load.js';
-import { apiEnvSchema, productionEnvProblems, testDatabaseEnvSchema } from './schemas.js';
+import {
+  apiEnvSchema,
+  productionEnvProblems,
+  testDatabaseEnvSchema,
+  workerEnvSchema,
+} from './schemas.js';
 
 const validApiEnv = {
   DATABASE_URL: 'postgresql://app_user:pw@localhost:5432/revops_dev',
@@ -96,6 +101,7 @@ describe('productionEnvProblems', () => {
         NODE_ENV: 'production',
         EMAIL_DRIVER: 'console',
         APP_URL: 'https://app.revops.in',
+        METRICS_TOKEN: 'a-long-metrics-token-value',
         ...patch,
       }),
     );
@@ -117,5 +123,34 @@ describe('productionEnvProblems', () => {
         expect.stringMatching(/^COOKIE_SECURE: /),
       ]),
     );
+  });
+
+  it('requires METRICS_TOKEN in production (metrics are not public)', () => {
+    expect(prod({ EMAIL_DRIVER: 'fake', METRICS_TOKEN: '' })).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^METRICS_TOKEN: /)]),
+    );
+  });
+});
+
+describe('observability + worker env', () => {
+  it('tracing is off unless an OTLP endpoint is set; a short METRICS_TOKEN is rejected', () => {
+    expect(parseEnv(apiEnvSchema, validApiEnv).OTEL_EXPORTER_OTLP_ENDPOINT).toBeUndefined();
+    expect(() => parseEnv(apiEnvSchema, { ...validApiEnv, METRICS_TOKEN: 'short' })).toThrow(
+      /METRICS_TOKEN/,
+    );
+    expect(() =>
+      parseEnv(apiEnvSchema, { ...validApiEnv, OTEL_EXPORTER_OTLP_ENDPOINT: 'ftp://x' }),
+    ).toThrow(/OTEL_EXPORTER_OTLP_ENDPOINT/);
+  });
+
+  it('worker env = API env + worker port and outbox poll interval (bounded)', () => {
+    expect(parseEnv(workerEnvSchema, validApiEnv)).toMatchObject({
+      WORKER_PORT: 4001,
+      OUTBOX_POLL_INTERVAL_MS: 1000,
+      EMAIL_DRIVER: 'console',
+    });
+    expect(() =>
+      parseEnv(workerEnvSchema, { ...validApiEnv, OUTBOX_POLL_INTERVAL_MS: '10' }),
+    ).toThrow(/OUTBOX_POLL_INTERVAL_MS/);
   });
 });

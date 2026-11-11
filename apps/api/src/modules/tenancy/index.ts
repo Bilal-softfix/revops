@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { IdentityModule } from '../identity';
 import { PermissionGuard } from './permission.guard';
 import { TenancyController } from './tenancy.controller';
+import { InvitationEmailJobHandler } from './tenancy.job-handlers';
 import { TenancyRepository } from './tenancy.repository';
 import { TenancyService } from './tenancy.service';
 
@@ -11,7 +12,7 @@ export { PermissionGuard, RequirePermission } from './permission.guard';
 @Module({
   imports: [IdentityModule],
   controllers: [TenancyController],
-  providers: [TenancyRepository, TenancyService, PermissionGuard],
+  providers: [TenancyRepository, TenancyService, PermissionGuard, InvitationEmailJobHandler],
   exports: [PermissionGuard],
 })
 export class TenancyModule {}

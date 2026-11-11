@@ -22,3 +22,11 @@ onlyBuiltDependencies:
   - esbuild
   - sharp
   - unrs-resolver
+# Install scripts we deliberately never run: swagger-ui telemetry (scarf), protobufjs version check.
+ignoredBuiltDependencies:
+  - '@scarf/scarf'
+  - protobufjs
+
+# Security pins for transitive deps (pnpm audit): multer <2.5.0 GHSA-q7qp-rjg7-q26m via @nestjs/platform-express.
+overrides:
+  multer: 2.5.0

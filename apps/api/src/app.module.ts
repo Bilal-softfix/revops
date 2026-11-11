@@ -3,6 +3,7 @@ import type { ApiEnv } from '@revops/shared/env';
 import { IdentityModule } from './modules/identity';
 import { TenancyModule } from './modules/tenancy';
 import { HealthController } from './platform/health/health.controller';
+import { MetricsController } from './platform/metrics/metrics.controller';
 import { PlatformModule } from './platform/platform.module';
 import { EmailModule } from './providers/email';
 
@@ -12,12 +13,12 @@ export class AppModule {
     return {
       module: AppModule,
       imports: [
-        PlatformModule.register(env),
+        PlatformModule.register(env, 'api'),
         EmailModule.register(env.EMAIL_DRIVER),
         IdentityModule,
         TenancyModule,
       ],
-      controllers: [HealthController],
+      controllers: [HealthController, MetricsController],
     };
   }
 }

@@ -69,7 +69,7 @@ Modular monolith in NestJS + one Python voice worker. Modules talk via service i
 ## Auth (M0-T4, ADR-006)
 - **Session:** the `__Host-sid` cookie holds an opaque 32-byte token (httpOnly, Secure, SameSite=Lax, Path=/; the `__Host-` prefix stops sibling subdomains from planting a session). The DB stores only its sha256. Absolute lifetime is 30 days (`expires_at`, checked in SQL); the idle timeout is 7 days, checked against `last_seen_at`, which is updated at most every 5 minutes. The active membership and role are re-checked on every request, so a removed member loses tenant access immediately.
 - **CSRF:** `x-csrf-token` = HMAC-SHA256(session token, "csrf.v1"), returned by `/v1/auth/login` and `/v1/auth/me`. It is required on unsafe methods of authenticated routes. Only JSON bodies are parsed (no urlencoded/text parsers), so a cross-site HTML form can't submit to the API.
-- **Signup** always answers `202 {"status":"check_email"}` right after validation and the per-IP limit. Everything that depends on the email's state runs as a background task (a pg-boss job from M0-T6), so neither the body nor the timing reveals whether an account exists:
+- **Signup** always answers `202 {"status":"check_email"}` right after validation and the per-IP limit. Everything that depends on the email's state runs as a pg-boss job in the worker (M0-T6). The password is hashed on the request path for every request, so the job row holds only the hash. Neither the body nor the timing reveals whether an account exists:
   - **verified account:** a "you already have an account" email, nothing created;
   - **unverified, pending or expired:** that account and its tenant are discarded and replaced (new password, tenant and link);
   - **new:** one transaction creates the user, tenant, owner membership, audit log, `user.signed_up.v1` outbox event and verification token.
@@ -114,7 +114,30 @@ Permissions are strings (`lead.read.all`, `lead.read.assigned`, `routing.manage`
 - **Tenant switcher:** `GET /v1/tenants` and `POST /v1/session/tenant` work only for the caller's own active memberships (user-only context, `self_select`).
 
 ## Events
-Outbox row: `{ id, tenant_id, type, aggregate_id, payload jsonb, occurred_at, published_at }`. Relay publishes to a pg-boss queue per consumer group (ADR-011), in the same transaction that marks the rows published. Event types are versioned Zod schemas in `packages/shared/events`, e.g. `lead.created.v1`, `lead.stage_changed.v1`, `call.completed.v1`, `call.missed.v1`, `qualification.saved.v1`, `task.due.v1`.
+Outbox row: `{ id, tenant_id, type, aggregate_id, payload jsonb, occurred_at, published_at }`. The worker's relay (`apps/api/src/platform/outbox`, M0-T6) runs one transaction every `OUTBOX_POLL_INTERVAL_MS`:
+- `outbox_claim_batch(100)` claims up to 100 events (FOR UPDATE SKIP LOCKED);
+- it enqueues one pg-boss job per subscribed consumer queue, with job id = event id, carrying the `outboxEnvelopeSchema` envelope;
+- `outbox_mark_published` marks the batch published.
+
+Concurrent or repeated relay runs never publish an event twice. Consumers extend `OutboxConsumer` (`events` they subscribe to, one queue each) and wrap their side effects in `processOnce`, which records `processed_events(consumer, event_id)` in the same tenant transaction. `platform.demo-event-log` is the template consumer.
+
+### Jobs and processes
+- **API (`main.ts`):** enqueues through `JobQueue` and runs no jobs.
+- **Worker (`worker.ts`):** loads the same domain modules. `JobRunner` subscribes every `JobHandler` provider to its queue (retries with exponential backoff; payloads Zod-validated on send and on run) and registers the cron jobs:
+  - `identity.purge-expired-unverified`, hourly at :15;
+  - `platform.rate-limit-purge`, every 10 min.
+- **Worker HTTP:** a small server on `WORKER_PORT` (default 4001) serves `/health`, `/ready` and `/metrics`.
+
+### Observability (M0-T6)
+- **Logs:** pino (nestjs-pino), JSON in prod and pretty in dev.
+  - Every request gets `x-request-id` (a safe client value is kept; otherwise a uuid). The id is returned as a header, put in every log line as `requestId` and included in problem+json bodies.
+  - Emails and E.164 phones are masked in messages and objects (`+91******3210`).
+  - Auth headers, cookies, CSRF tokens, passwords and tokens are redacted.
+  - Errors are logged without `message`, which can hold SQL params.
+- **Traces:** OpenTelemetry (http + express) when `OTEL_EXPORTER_OTLP_ENDPOINT` is set; otherwise no SDK is loaded. Log lines carry `trace_id`/`span_id`.
+- **Metrics:** Prometheus at `/metrics` (Bearer `METRICS_TOKEN`, which is required in prod). Covers HTTP duration by route template, job attempts and duration by queue, outbox published/errors, and Node defaults.
+- **Probes:** `/health` is liveness and checks nothing. `/ready` checks the DB and the pgboss schema and returns 503 problem+json when one fails.
+- **API docs:** `/docs` (Swagger UI) and `/docs/openapi.json`, outside production only. They are generated from the same Zod schemas that validate requests (`ZodBodyPipe`) plus `@ZodResponse`. Event types are versioned Zod schemas in `packages/shared/events`, e.g. `lead.created.v1`, `lead.stage_changed.v1`, `call.completed.v1`, `call.missed.v1`, `qualification.saved.v1`, `task.due.v1`.
 
 ## Provider adapters (apps/api/src/providers)
 `TelephonyProvider`, `MessagingProvider` (whatsapp/sms/email), `LlmProvider`, `SttProvider`/`TtsProvider` (used by voice agent via config), `AdsLeadProvider` (Meta). Each has: interface, real impl, `Fake` impl, contract tests that both must pass.

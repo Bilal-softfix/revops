@@ -24,6 +24,13 @@ const EXTRA_TENANT_POLICIES: Record<string, string[]> = {
   memberships: ['self_select:SELECT'],
   tenants: ['self_select:SELECT'],
 };
+/**
+ * Policies bound to the OWNER role only (TO CURRENT_USER at migration time), so the SECURITY
+ * DEFINER relay functions can read every tenant's unpublished events. Never apply to app_user.
+ */
+const OWNER_ONLY_POLICIES: Record<string, string[]> = {
+  outbox_events: ['outbox_relay_select:SELECT', 'outbox_relay_update:UPDATE'],
+};
 /** SECURITY DEFINER functions → whether app_user may call them directly. */
 const DEFINER_FUNCTIONS: Record<string, boolean> = {
   auth_discard_unverified_by_email: true,
@@ -35,6 +42,8 @@ const DEFINER_FUNCTIONS: Record<string, boolean> = {
   auth_reset_password: true,
   auth_session_lookup: true,
   auth_verify_email: true,
+  outbox_claim_batch: true,
+  outbox_mark_published: true,
   rate_limit_consume: true,
   rate_limit_purge: true,
   rate_limit_reset: true,
@@ -45,7 +54,13 @@ interface TableRls {
   rls: boolean;
   force: boolean;
   tenantOwned: boolean;
-  policies: { name: string; cmd: string; qual: string | null; withCheck: string | null }[];
+  policies: {
+    name: string;
+    cmd: string;
+    roles: string[];
+    qual: string | null;
+    withCheck: string | null;
+  }[];
 }
 
 async function publicTables(): Promise<TableRls[]> {
@@ -57,7 +72,8 @@ async function publicTables(): Promise<TableRls[]> {
               select 1 from pg_attribute a
               where a.attrelid = c.oid and a.attname = 'tenant_id' and not a.attisdropped)) as "tenantOwned",
            coalesce((select json_agg(json_build_object(
-                       'name', p.policyname, 'cmd', p.cmd, 'qual', p.qual, 'withCheck', p.with_check)
+                       'name', p.policyname, 'cmd', p.cmd, 'roles', p.roles,
+                       'qual', p.qual, 'withCheck', p.with_check)
                        order by p.policyname)
                      from pg_policies p where p.schemaname = 'public' and p.tablename = c.relname),
                     '[]') as policies
@@ -100,7 +116,11 @@ describe('RLS catalog meta-test', () => {
         force: true,
       });
       expect(policyKeys(t), t.table).toEqual(
-        ['tenant_isolation:ALL', ...(EXTRA_TENANT_POLICIES[t.table] ?? [])].sort(),
+        [
+          'tenant_isolation:ALL',
+          ...(EXTRA_TENANT_POLICIES[t.table] ?? []),
+          ...(OWNER_ONLY_POLICIES[t.table] ?? []),
+        ].sort(),
       );
       const isolation = t.policies.find((p) => p.name === 'tenant_isolation');
       for (const expr of [isolation?.qual, isolation?.withCheck]) {
@@ -109,11 +129,30 @@ describe('RLS catalog meta-test', () => {
         );
       }
       // Extras are SELECT-only and require "no tenant set" — they never widen a tenant context.
-      for (const extra of t.policies.filter((p) => p.name !== 'tenant_isolation')) {
+      const ownerOnly = new Set(
+        (OWNER_ONLY_POLICIES[t.table] ?? []).map((key) => key.split(':')[0]),
+      );
+      for (const extra of t.policies.filter(
+        (p) => p.name !== 'tenant_isolation' && !ownerOnly.has(p.name),
+      )) {
         expect(extra.qual, `${t.table}.${extra.name}`).toMatch(/IS NULL/);
         expect(extra.qual, `${t.table}.${extra.name}`).toContain(
           `current_setting('${USER_SETTING}'`,
         );
+      }
+    }
+  });
+
+  it('owner-only policies (outbox relay) are bound to the owner role alone — never app_user/PUBLIC', async () => {
+    const [{ owner: ownerRole } = { owner: '' }] = await owner<{ owner: string }[]>`
+      select current_user::text as owner`;
+    expect(ownerRole).not.toBe(APP_ROLE);
+    const tables = await publicTables();
+    for (const [table, keys] of Object.entries(OWNER_ONLY_POLICIES)) {
+      const policies = tables.find((t) => t.table === table)?.policies ?? [];
+      for (const key of keys) {
+        const policy = policies.find((p) => `${p.name}:${p.cmd}` === key);
+        expect(policy?.roles, `${table} ${key}`).toEqual([ownerRole]);
       }
     }
   });
