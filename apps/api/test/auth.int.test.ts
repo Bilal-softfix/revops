@@ -43,7 +43,7 @@ const DAY = 24 * HOUR;
 const OTHER_PASSWORD = 'a different passphrase';
 
 let t: TestApp;
-/** A fresh app per describe: its own in-memory rate limiter and fake clock, so blocks don't interfere. */
+/** A fresh app per describe: empty rate-limit buckets and its own fake clock, so blocks don't interfere. */
 function freshApp(): void {
   beforeAll(async () => {
     t = await createTestApp();

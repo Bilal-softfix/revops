@@ -31,9 +31,14 @@ export interface TestApp {
   close: () => Promise<void>;
 }
 
-/** The real AppModule on the test DB, with fake email, a controllable clock and queued tasks. */
+/**
+ * The real AppModule on the test DB, with fake email, a controllable clock and queued tasks.
+ * Rate limits live in Postgres (ADR-011), so each new app starts with empty buckets — the same
+ * isolation the per-app in-memory limiter used to give. Safe: integration files run one at a time.
+ */
 export async function createTestApp(): Promise<TestApp> {
   const { appUrl } = loadTestDatabaseEnv();
+  await asTestOwner((sql) => sql`truncate rate_limit_buckets`);
   const env = parseEnv(apiEnvSchema, {
     ...process.env,
     DATABASE_URL: appUrl,
