@@ -373,7 +373,19 @@ describe('changing roles and disabling members', () => {
       patch(sessions.owner, second.userId, { role: 'admin' }),
       patch(secondSession, firstId, { role: 'admin' }),
     ]);
-    expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
+    // Exactly one wins. The loser gets 409 last_owner if the requests really overlapped (the
+    // FOR UPDATE lock serialises them), or 403 if the winner committed before the loser's guard ran
+    // (the loser is an admin by then). Either way an active owner remains.
+    const statuses = results.map((r) => r.status);
+    expect(statuses.filter((s) => s === 200)).toHaveLength(1);
+    expect(statuses.find((s) => s !== 200)).toBeOneOf([403, 409]);
+    const members = await withSession(request(t.server).get('/v1/members'), sessions.admin)
+      .query({ limit: 100 })
+      .expect(200);
+    const owners = (members.body as MemberPage).items.filter(
+      (m) => m.role === 'owner' && m.status === 'active',
+    );
+    expect(owners).toHaveLength(1);
   });
 
   it('a disabled member loses access at once and gets it back when re-enabled', async () => {
