@@ -125,10 +125,28 @@ describe('productionEnvProblems', () => {
     );
   });
 
+  it('rejects the file email driver in production', () => {
+    expect(prod({ EMAIL_DRIVER: 'file' })).toEqual([expect.stringMatching(/^EMAIL_DRIVER: /)]);
+  });
+
   it('requires METRICS_TOKEN in production (metrics are not public)', () => {
     expect(prod({ EMAIL_DRIVER: 'fake', METRICS_TOKEN: '' })).toEqual(
       expect.arrayContaining([expect.stringMatching(/^METRICS_TOKEN: /)]),
     );
+  });
+});
+
+describe('TRUST_PROXY', () => {
+  it.each(['loopback', 'false', '1', '10.0.0.0/8,172.16.0.0/12'])('accepts %s', (value) => {
+    expect(parseEnv(apiEnvSchema, { ...validApiEnv, TRUST_PROXY: value }).TRUST_PROXY).toBe(value);
+  });
+
+  it('rejects `true` (would let any client spoof its IP) and junk', () => {
+    for (const value of ['true', 'everyone']) {
+      expect(() => parseEnv(apiEnvSchema, { ...validApiEnv, TRUST_PROXY: value })).toThrow(
+        /TRUST_PROXY/,
+      );
+    }
   });
 });
 

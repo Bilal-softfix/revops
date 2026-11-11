@@ -2,7 +2,7 @@
 
 ## Current
 Milestone: M0 — Foundation (in progress). Branch: `milestone/m0-foundation`.
-Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-11-05; M0-T5 done 2026-11-11. 2026-11-11: switched to local-first (ADR-011 no Redis/pg-boss, ADR-012 native Postgres). M0-T6 done 2026-11-11. Next: M0-T7 Web shell. Draft PR #1 open, CI green.
+Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-11-05; M0-T5 done 2026-11-11. 2026-11-11: switched to local-first (ADR-011 no Redis/pg-boss, ADR-012 native Postgres). M0-T6, M0-T7 done 2026-11-11. Next: M0 milestone review (`/review-milestone M0`). Draft PR #1 open, CI green.
 
 ## Done
 - [x] M0-T1 Monorepo scaffold (2026-11-04)
@@ -22,8 +22,14 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
   - a worker HTTP server; `requestId` in problem+json.
   - **AC test:** `apps/api/test/outbox.int.test.ts` (relay run twice and concurrently, real pg-boss worker, applied exactly once).
 
+- [x] M0-T7 Web shell (2026-11-11):
+  - auth pages: login, signup + resend, verify-email with password and "This wasn't me", forgot/reset, accept-invite (new user / signed in / login required / wrong user);
+  - app shell: sidebar with role-based nav, tenant switcher, user menu; Settings → Team (members with cursor paging, invite, change role, disable/re-enable, resend/revoke invitations); loading/empty/error states throughout;
+  - same-origin `/api` proxy; the API gains `EMAIL_DRIVER=file` and `TRUST_PROXY`;
+  - consumers now skip events whose tenant was deleted;
+  - tests: Playwright e2e (6 tests), web unit tests (25), CI `e2e` job.
+
 ## In progress
-- [ ] M0-T7 Web shell
 
 ## Assumptions made
 _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
@@ -99,6 +105,16 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - 2026-11-11 · db:bootstrap with a superuser creates a dedicated NOSUPERUSER `revops_owner` that owns the DBs and runs migrations. Reason: if the owner were `postgres`, the SECURITY DEFINER functions would run as a superuser and bypass RLS, unlike Neon/CI. Doctor warns if `DATABASE_URL_OWNER` is a superuser.
 - 2026-11-11 · db:bootstrap after `--write-env` deletes `DB_BOOTSTRAP_URL` (the superuser password doesn't stay on disk); reruns connect as `revops_owner` in verify-only mode (create nothing, check everything, reuse passwords proven by login).
 - 2026-11-11 · pgvector is optional (doctor ⚠, bootstrap warns) until M4; CI keeps `pgvector/pgvector:0.8.6-pg18`.
+- 2026-11-11 · M0-T7: the web never calls the API from the browser directly. A Next route handler proxies `/api/v1/*` → `API_INTERNAL_URL` (a runtime setting, not baked into the build by a next.config rewrite). Only `/v1` is exposed.
+- 2026-11-11 · M0-T7: "restricted nav" today means:
+  - every role sees Dashboard + Team, because all four roles have `member.read` (the T5 permission map);
+  - managers and agents get the Team page read-only: no invite button, no pending invitations, no role or disable controls.
+  - Nav items are permission-tagged data, so M1+ items (leads etc.) hide automatically.
+  - **Review:** should agents see the Team page at all?
+- 2026-11-11 · M0-T7: dates show in Asia/Kolkata (tenants have no timezone setting yet). UI is light-only (no theme switcher), uses the system font stack (no next/font/google download) and the shadcn radix-nova style.
+- 2026-11-11 · M0-T7: e2e runs against revops_test (truncated by its global setup, like the integration suite), with the API's new `EMAIL_DRIVER=file` (dev/test only, rejected in production) so Playwright can read links the worker emails.
+- 2026-11-11 · M0-T7 deps (web): @tanstack/react-query 5.105.0, react-hook-form 7.91.0, @hookform/resolvers 5.9.2 (v6/v7 are < 1 month old), radix-ui 1.8.1, class-variance-authority 0.7.1, clsx 2.1.1, tailwind-merge 3.7.0, lucide-react 1.62.0, sonner 2.0.8. Dev: @playwright/test 1.64.1, shadcn 4.23.0 (its CSS only), tw-animate-css 1.4.0, vitest. Not taken from the shadcn CLI: `cn` (a 0.x package; clsx + tailwind-merge do the same) and `next-themes` (no theme switching).
+- 2026-11-11 · M0-T7 fix (API): a consumer job whose tenant was deleted (e.g. a discarded unverified signup) used to fail on the processed_events FK and retry until its limit. `processOnce` now skips it; there is a test.
 - 2026-11-11 · M0-T6: background work in jobs.
   - The signup password is now hashed on the request path, once per request whatever the account state (timing stays state-independent), so the job row holds only the argon2 hash.
   - Invitation create/resend stores the hash of a never-revealed placeholder token. The `tenancy.invitation-email` job mints and emails the real link, keeping the expiry. A retry or resend re-mints it, so only the newest emailed link works. A revoked, accepted or expired invitation gets no email.
@@ -123,11 +139,9 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - Worker jobs have no per-job log context (the job id is in the failure log only); add an AsyncLocalStorage child logger when consumers multiply.
 - `InMemoryJobQueue` is not transactional: a job sent with `tx` stays queued in tests even if the transaction rolls back. Real pg-boss behaviour is covered by `test/queue.int.test.ts`.
 _(non-blocking review findings)_
-- M8: `trust proxy` must be set to the real hop count / proxy CIDRs before deploying behind a load balancer; until then `req.ip` is the proxy and the (IP, email) limiter degrades to per-email (lockout risk), while a blanket `trust proxy=true` would make IPs spoofable.
-- M0-T7: the verify page must ask for the password and offer "This wasn't me" (`/v1/auth/verify-email/cancel`) as an explicit button, never auto-submitted on load (mail link scanners). The login error copy should say "wrong email or password, or your email isn't verified yet — check your inbox".
+- M8: set `TRUST_PROXY` (M0-T7, default `loopback`) to the real hop count / proxy CIDRs before deploying behind a load balancer. Note: Next.js keeps a client-supplied `X-Forwarded-For` instead of appending to it, so behind the web proxy a client can choose the IP the API sees (rate-limit evasion per IP; the per-email limits still hold). M8 must put a trusted LB in front that overwrites XFF, or have the web proxy set it from the socket address.
 - M0-T6: discarding an unverified account deletes its tenant's outbox rows, including `user.signed_up.v1`. Once the relay ships, consider a compensating `user.discarded.v1` (also needed for DPDP deletion propagation).
 - Tenant switch: `POST /v1/session/tenant` only sets an active membership, and the session guard re-resolves the membership per request, so a stale or bogus `active_tenant_id` grants nothing. A SQL WITH CHECK on sessions was not added: the touch-on-request update would then fail for disabled members.
-- M0-T7: the accept-invite page needs a "signed in as the wrong user" state (`invitation_email_mismatch`) and a "sign in first" state (`invitation_login_required`).
 - Slug-collision retry in signup has no test (random 24-bit suffix can't be forced to collide without a seam).
 - ESLint 9 is marked deprecated on npm. Blocked on ESLint 10: eslint-config-next 16.4.5 pulls eslint-plugin-react / -import / -jsx-a11y whose peer ranges stop at ESLint 9. Revisit when they support 10.
 - drizzle-kit 0.31 pulls deprecated `@esbuild-kit/*` (transitive). Goes away with drizzle-kit 1.0 (currently RC).

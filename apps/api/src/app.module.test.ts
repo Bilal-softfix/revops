@@ -4,7 +4,7 @@ import { Test } from '@nestjs/testing';
 import { apiEnvSchema, parseEnv } from '@revops/shared/env';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { APP_OPTIONS, configureApp } from './app-setup';
+import { APP_OPTIONS, configureApp, trustProxySetting } from './app-setup';
 import { AppModule } from './app.module';
 
 // No database needed: the pool connects lazily and these routes never query it.
@@ -161,4 +161,13 @@ describe('AppModule (http)', () => {
     expect(res.status).toBe(200);
     expect(res.text).toMatch(/swagger/i);
   });
+});
+
+describe('trustProxySetting', () => {
+  it.each([
+    ['false', false],
+    ['loopback', 'loopback'],
+    ['2', 2],
+    ['10.0.0.0/8, 192.168.0.0/16', '10.0.0.0/8, 192.168.0.0/16'],
+  ])('%s → %s', (input, expected) => expect(trustProxySetting(input)).toBe(expected));
 });

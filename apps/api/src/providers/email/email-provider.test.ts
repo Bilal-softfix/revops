@@ -1,8 +1,15 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Logger } from '@nestjs/common';
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { ConsoleEmailProvider } from './console-email.provider';
 import { type EmailProvider, maskEmail } from './email-provider';
 import { FakeEmailProvider } from './fake-email.provider';
+import { FileEmailProvider, readMailbox } from './file-email.provider';
+
+const mailDir = mkdtempSync(join(tmpdir(), 'revops-mail-'));
+afterAll(() => rmSync(mailDir, { recursive: true, force: true }));
 
 const message = {
   to: 'asha@example.com',
@@ -14,6 +21,7 @@ const message = {
 describe.each<[string, () => EmailProvider]>([
   ['ConsoleEmailProvider', () => new ConsoleEmailProvider()],
   ['FakeEmailProvider', () => new FakeEmailProvider()],
+  ['FileEmailProvider', () => new FileEmailProvider(join(mailDir, 'contract'))],
 ])('%s contract', (_name, make) => {
   it('send resolves', async () => {
     vi.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
@@ -43,6 +51,19 @@ describe('FakeEmailProvider', () => {
     expect(fake.lastTo('b@x.io')?.subject).toMatch(/reset/i);
     expect(fake.lastTokenTo('b@x.io')).toBe('R'.repeat(43));
     expect(fake.lastTokenTo('nobody@x.io')).toBeUndefined();
+  });
+});
+
+describe('FileEmailProvider', () => {
+  it('writes one JSON file per email, readable in send order by another process', async () => {
+    vi.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+    const dir = join(mailDir, 'order');
+    const provider = new FileEmailProvider(dir);
+    await provider.send(message);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await provider.send({ ...message, subject: 'Second' });
+    expect((await readMailbox(dir)).map((m) => m.subject)).toEqual(['Verify', 'Second']);
+    expect(await readMailbox(join(mailDir, 'missing'))).toEqual([]);
   });
 });
 

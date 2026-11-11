@@ -113,6 +113,18 @@ Permissions are strings (`lead.read.all`, `lead.read.assigned`, `routing.manage`
   - The invitation is claimed atomically in the same transaction as the membership insert, the audit row and `member.joined.v1`.
 - **Tenant switcher:** `GET /v1/tenants` and `POST /v1/session/tenant` work only for the caller's own active memberships (user-only context, `self_select`).
 
+## Web app (apps/web, M0-T7)
+- **The browser never calls the API directly.** It calls same-origin `/api/v1/*`, and the route handler `app/api/[...path]/route.ts` forwards that to `API_INTERNAL_URL`, which is read at runtime.
+  - Only `/v1` is exposed: `/metrics`, `/docs` and the probes stay internal.
+  - The handler forwards a fixed set of request headers: cookie, CSRF, content-type, request id, user-agent and X-Forwarded-For.
+  - Every `Set-Cookie` is passed back, so the `__Host-sid` session cookie stays first-party and no CORS is needed.
+  - The API derives the client IP from X-Forwarded-For only for hops trusted by `TRUST_PROXY` (default `loopback`).
+- **Session:** the `(app)` layout is a Server Component. It calls `GET /v1/auth/me` with the browser's cookie and redirects to `/login` on 401. The session is then held in TanStack Query (`SessionProvider`), and the CSRF token from it is sent as `x-csrf-token` on unsafe calls. Switching tenant replaces the session and refetches all tenant-scoped queries, whose keys include the tenant id.
+- **Validation and errors:** forms use react-hook-form with the shared Zod request schemas, and responses are parsed with the shared response schemas. problem+json is mapped to `ApiError` (`code`, field errors, `requestId`, Retry-After), and user-facing copy comes from `lib/strings/*` (one file per feature, ready for Hindi).
+- **Navigation is data** (`lib/nav.ts`): each item names the permission that guards its API, and the sidebar shows only what the role can use. Pages re-check on the server (`notFound()`), and the API enforces it anyway.
+- **States:** every page has loading (skeletons, `loading.tsx`), empty and error (message + support reference + retry; `error.tsx`, `global-error.tsx`) states.
+- **UI kit:** shadcn/ui (radix-nova) in `components/ui` with the system font stack, so builds don't download fonts.
+
 ## Events
 Outbox row: `{ id, tenant_id, type, aggregate_id, payload jsonb, occurred_at, published_at }`. The worker's relay (`apps/api/src/platform/outbox`, M0-T6) runs one transaction every `OUTBOX_POLL_INTERVAL_MS`:
 - `outbox_claim_batch(100)` claims up to 100 events (FOR UPDATE SKIP LOCKED);

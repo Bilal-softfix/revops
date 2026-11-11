@@ -33,3 +33,7 @@ test-results/
 .DS_Store
 Thumbs.db
 .idea/
+
+# E2E (apps/web): the file email driver's mailbox, Playwright blob reports
+.e2e-mail/
+blob-report/

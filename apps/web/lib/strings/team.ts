@@ -1,0 +1,47 @@
+// Copy for Settings → Team.
+
+export const teamStrings = {
+  title: 'Team',
+  description: 'People who can sign in to this workspace.',
+  members: {
+    heading: 'Members',
+    name: 'Name',
+    email: 'Email',
+    role: 'Role',
+    status: 'Status',
+    joined: 'Joined',
+    actions: 'Actions',
+    you: 'You',
+    active: 'Active',
+    disabled: 'Disabled',
+    disable: 'Disable',
+    enable: 'Re-enable',
+    roleChanged: (name: string, role: string) => `${name} is now ${role}`,
+    disabled_: (name: string) => `${name} can no longer sign in to this workspace`,
+    enabled: (name: string) => `${name} can sign in again`,
+    loadMore: 'Load more',
+    empty: 'No members yet.',
+    disableConfirmTitle: (name: string) => `Disable ${name}?`,
+    disableConfirmBody:
+      'They’ll lose access to this workspace immediately. You can re-enable them later.',
+  },
+  invitations: {
+    heading: 'Pending invitations',
+    empty: 'No pending invitations.',
+    expires: 'Expires',
+    resend: 'Resend',
+    revoke: 'Revoke',
+    resent: (email: string) => `Invitation re-sent to ${email}`,
+    revoked: (email: string) => `Invitation to ${email} revoked`,
+  },
+  invite: {
+    open: 'Invite member',
+    title: 'Invite a team member',
+    body: 'They’ll get an email with a link to join. Links expire after 7 days.',
+    email: 'Email',
+    role: 'Role',
+    submit: 'Send invitation',
+    sent: (email: string) => `Invitation sent to ${email}`,
+  },
+  readOnly: 'Only owners and admins can invite or manage members.',
+} as const;

@@ -9,7 +9,8 @@ export const PASSWORD_MAX_LENGTH = 128;
 
 export const emailSchema = z.string().trim().toLowerCase().pipe(z.email().max(254));
 export const passwordSchema = z.string().min(PASSWORD_MIN_LENGTH).max(PASSWORD_MAX_LENGTH);
-const nameSchema = z.string().trim().min(1).max(100);
+/** Display names (people, workspaces). */
+export const nameSchema = z.string().trim().min(1).max(100);
 /** One-time tokens from emailed links: 32 random bytes, base64url. */
 const tokenSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/, 'invalid token');
 

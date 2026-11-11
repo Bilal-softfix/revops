@@ -185,6 +185,34 @@ describe('consumer idempotency (processOnce)', () => {
   });
 });
 
+describe('consumer: events whose tenant was deleted', () => {
+  it('are skipped (not failed and retried) once the tenant is gone', async () => {
+    const goneTenant = randomUUID();
+    await withTenant(app.db, goneTenant, (tx) =>
+      tx.insert(tenants).values({ id: goneTenant, name: 'Gone', slug: `gone-${goneTenant}` }),
+    );
+    const envelope: OutboxEnvelope = {
+      eventId: randomUUID(),
+      tenantId: goneTenant,
+      type: USER_SIGNED_UP_V1,
+      aggregateId: null,
+      payload: {},
+      occurredAt: new Date().toISOString(),
+    };
+    // app_user can't delete tenants; the owner can, in that tenant's context (FORCE RLS).
+    await asTestOwner((sql) =>
+      sql.begin(async (tx) => {
+        await tx`select set_config('app.tenant_id', ${goneTenant}, true)`;
+        await tx`delete from tenants where id = ${goneTenant}`;
+      }),
+    );
+    await expect(
+      consumer.handle(envelope, { jobId: envelope.eventId, attempt: 0 }),
+    ).resolves.toBeUndefined();
+    expect(applied).not.toHaveBeenCalled();
+  });
+});
+
 describe('end to end with the real job runner (AC)', () => {
   it('event written in a tx, relay run twice → the worker applies it exactly once', async () => {
     const runner = new JobRunner(

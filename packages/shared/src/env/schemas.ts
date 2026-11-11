@@ -77,9 +77,33 @@ export const apiEnvSchema = commonEnvSchema.extend(databaseEnvSchema.shape).exte
     blankAsUndefined,
     z.url({ protocol: /^https?$/ }).default('http://localhost:3000'),
   ),
-  /** `console` prints emails to the terminal (dev); `fake` keeps them in memory (tests). */
-  EMAIL_DRIVER: z.preprocess(blankAsUndefined, z.enum(['console', 'fake']).default('console')),
+  /**
+   * `console` prints emails to the terminal (dev); `fake` keeps them in memory (unit/integration
+   * tests); `file` writes one JSON file per email to EMAIL_FILE_DIR (e2e: the worker sends, the
+   * Playwright test reads). None of them is allowed in production.
+   */
+  EMAIL_DRIVER: z.preprocess(
+    blankAsUndefined,
+    z.enum(['console', 'fake', 'file']).default('console'),
+  ),
+  /** Directory for EMAIL_DRIVER=file (relative to the process cwd). */
+  EMAIL_FILE_DIR: z.preprocess(blankAsUndefined, z.string().min(1).default('.data/mail')),
   EMAIL_FROM: z.preprocess(blankAsUndefined, z.string().default('RevOps <no-reply@revops.local>')),
+  /**
+   * Express `trust proxy`: which hops may set X-Forwarded-For (client IP for rate limits/audit).
+   * `loopback` (default) = the Next.js /api proxy on the same host; `false` = none; a number = that
+   * many hops; or a comma-separated list of CIDRs. Set it to match the M8 load balancer.
+   */
+  TRUST_PROXY: z.preprocess(
+    blankAsUndefined,
+    z
+      .string()
+      .regex(
+        /^(false|loopback|\d{1,2}|[0-9a-fA-F.:/,\s]+)$/,
+        'use false, loopback, a hop count or CIDRs',
+      )
+      .default('loopback'),
+  ),
   /** Secure cookies. Browsers treat http://localhost as secure, so keep true in dev too. */
   COOKIE_SECURE: z.preprocess(blankAsUndefined, booleanFlag.default(true)),
 });
@@ -92,7 +116,7 @@ export const apiEnvSchema = commonEnvSchema.extend(databaseEnvSchema.shape).exte
 export function productionEnvProblems(env: ApiEnv): string[] {
   if (env.NODE_ENV !== 'production') return [];
   const problems: string[] = [];
-  if (env.EMAIL_DRIVER === 'console' || env.EMAIL_DRIVER === 'fake') {
+  if (['console', 'fake', 'file'].includes(env.EMAIL_DRIVER)) {
     problems.push(`EMAIL_DRIVER: "${env.EMAIL_DRIVER}" is not allowed in production`);
   }
   const appUrl = new URL(env.APP_URL);

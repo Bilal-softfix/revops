@@ -11,6 +11,7 @@ Everything runs on the dev machine: Node 22, Python 3.12 (uv) and a natively ins
 
 ## CI (GitHub Actions, `.github/workflows/ci.yml`)
 - `checks (ubuntu-latest)`: typecheck, lint, unit, build, `pnpm audit --prod` (warn only). `checks (windows-latest)`: typecheck, unit, build.
+- `e2e (ubuntu-latest)`: Postgres service + Chromium, `pnpm test:e2e`; the Playwright report is uploaded on failure.
 - `integration (ubuntu-latest)`: Postgres 18 + pgvector (`pgvector/pgvector:0.8.6-pg18`, ADR-010) as a service container (Docker exists only in CI). No Redis. `scripts/ci/setup-db.sql` mirrors what `db:bootstrap` sets up, then `pnpm run doctor` and `pnpm test:integration` run. `BOOTSTRAP_SUPERUSER_URL` lets the bootstrap test exercise the superuser path a local install uses.
 - Each job times out after 15 min; a new push cancels the in-flight run for the same branch/PR. pnpm store and uv caches are restored per run.
 
@@ -79,6 +80,15 @@ Without `--write-env` the script prints the four lines (with passwords) instead 
 - API docs: http://localhost:4000/docs (Swagger UI) and `/docs/openapi.json`. They are generated from the shared Zod schemas and are not served in production.
 - Logs: pretty-printed in dev, JSON otherwise. Send `x-request-id: <id>` and find it in the response header, every log line of that request and any problem+json body.
 - Queues: the jobs live in the `pgboss` schema of `revops_dev`. To inspect them, run `select name, state, count(*) from pgboss.job group by 1, 2` as `revops_owner`.
+
+## Web app (M0-T7)
+- `pnpm dev` serves the web app at http://localhost:3000; it reaches the API through its own `/api` proxy (`API_INTERNAL_URL`, default http://localhost:4000, in `apps/web/.env`).
+- Sign in with the seed users (`pnpm db:seed`, password = `SEED_PASSWORD`). Every page and email link works locally: `/signup`, `/verify-email`, `/forgot-password`, `/reset-password`, `/accept-invite`. The links print in the **worker's** terminal.
+- **E2E (Playwright):**
+  - Once per machine: `pnpm --filter @revops/web exec playwright install chromium`.
+  - Then `pnpm test:e2e`. It builds the API and web, migrates and truncates **revops_test**, and starts the built API (:4100), worker (:4101) and `next start` (:3100) with `EMAIL_DRIVER=file`. The tests read the links from `apps/web/.e2e-mail/`.
+  - It doesn't touch a running `pnpm dev`. Don't run it while `pnpm test:integration` is running, because both use revops_test.
+- Web unit tests: `pnpm --filter @revops/web test` (Vitest: API client, /api proxy, nav, redirects).
 
 ## Rules
 - Dev services hold only fake/seed data. Never real leads or recordings.

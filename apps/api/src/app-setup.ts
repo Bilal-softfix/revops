@@ -15,12 +15,22 @@ import { setupOpenApi } from './platform/openapi/openapi';
 export const APP_OPTIONS: NestApplicationOptions = { bodyParser: false, bufferLogs: true };
 
 /** HTTP setup shared by main.ts and the tests, so tests exercise the real middleware. */
+/** TRUST_PROXY → Express `trust proxy` (see the env schema). */
+export function trustProxySetting(value: string): boolean | number | string {
+  if (value === 'false') return false;
+  if (/^\d+$/.test(value)) return Number(value);
+  return value;
+}
+
 export function configureApp(app: INestApplication): void {
   const express = app as NestExpressApplication;
+  const env = app.get<ApiEnv>(API_ENV);
   express.disable('x-powered-by');
+  // Client IP for rate limits and audit logs, from X-Forwarded-For set by trusted hops only.
+  express.set('trust proxy', trustProxySetting(env.TRUST_PROXY));
   express.use(app.get(Metrics).httpMiddleware());
   express.useBodyParser('json', { limit: '100kb' });
   express.use(bodyParserErrorHandler);
   express.use(cookieParser());
-  setupOpenApi(app, app.get<ApiEnv>(API_ENV).NODE_ENV);
+  setupOpenApi(app, env.NODE_ENV);
 }

@@ -26,7 +26,7 @@ export class WorkerModule {
       module: WorkerModule,
       imports: [
         PlatformModule.register(env, 'worker'),
-        EmailModule.register(env.EMAIL_DRIVER),
+        EmailModule.register(env),
         IdentityModule,
         TenancyModule,
       ],

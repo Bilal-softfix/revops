@@ -14,7 +14,7 @@ export class AppModule {
       module: AppModule,
       imports: [
         PlatformModule.register(env, 'api'),
-        EmailModule.register(env.EMAIL_DRIVER),
+        EmailModule.register(env),
         IdentityModule,
         TenancyModule,
       ],
