@@ -172,6 +172,11 @@ jobs:
           PGPASSWORD: postgres
         run: psql -v ON_ERROR_STOP=1 -f scripts/ci/setup-db.sql
 
+      # Playwright starts the servers before its global setup, and the worker needs the pgboss
+      # schema at boot, so migrate the test database first.
+      - name: Migrate the test database
+        run: pnpm db:migrate --test
+
       - name: Install Chromium for Playwright
         run: pnpm --filter @revops/web exec playwright install --with-deps chromium
 

@@ -86,7 +86,7 @@ Without `--write-env` the script prints the four lines (with passwords) instead 
 - Sign in with the seed users (`pnpm db:seed`, password = `SEED_PASSWORD`). Every page and email link works locally: `/signup`, `/verify-email`, `/forgot-password`, `/reset-password`, `/accept-invite`. The links print in the **worker's** terminal.
 - **E2E (Playwright):**
   - Once per machine: `pnpm --filter @revops/web exec playwright install chromium`.
-  - Then `pnpm test:e2e`. It builds the API and web, migrates and truncates **revops_test**, and starts the built API (:4100), worker (:4101) and `next start` (:3100) with `EMAIL_DRIVER=file`. The tests read the links from `apps/web/.e2e-mail/`.
+  - Then `pnpm test:e2e` (the test DB must be migrated first: `pnpm db:migrate --test`, because Playwright starts the worker before its own setup runs). It builds the API and web, migrates and truncates **revops_test**, and starts the built API (:4100), worker (:4101) and `next start` (:3100) with `EMAIL_DRIVER=file`. The tests read the links from `apps/web/.e2e-mail/`.
   - It doesn't touch a running `pnpm dev`. Don't run it while `pnpm test:integration` is running, because both use revops_test.
 - Web unit tests: `pnpm --filter @revops/web test` (Vitest: API client, /api proxy, nav, redirects).
 
