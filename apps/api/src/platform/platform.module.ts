@@ -6,7 +6,7 @@ import { BackgroundTasks, InProcessBackgroundTasks } from './background-tasks';
 import { Clock, SystemClock } from './clock';
 import { Database } from './database/database';
 import { ProblemDetailsFilter } from './errors/problem-details.filter';
-import { InMemoryRateLimiter, RateLimiter } from './rate-limit/rate-limiter';
+import { PostgresRateLimiter, RateLimiter } from './rate-limit/rate-limiter';
 
 /** Cross-cutting providers available to every module: env, DB pool, clock, rate limiter, errors. */
 @Global()
@@ -20,7 +20,7 @@ export class PlatformModule {
         { provide: Database, useFactory: () => new Database(env.DATABASE_URL) },
         { provide: Clock, useClass: SystemClock },
         { provide: BackgroundTasks, useClass: InProcessBackgroundTasks },
-        { provide: RateLimiter, useClass: InMemoryRateLimiter },
+        { provide: RateLimiter, useClass: PostgresRateLimiter },
         { provide: APP_FILTER, useClass: ProblemDetailsFilter },
       ],
       exports: [API_ENV, Database, Clock, RateLimiter, BackgroundTasks],

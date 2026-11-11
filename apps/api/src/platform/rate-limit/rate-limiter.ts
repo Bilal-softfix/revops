@@ -1,9 +1,12 @@
+import { createHash } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
+import { sql } from '@revops/db';
 import { Clock } from '../clock';
+import { Database } from '../database/database';
 
 /**
  * Fixed-window counters. `consume` counts and decides in one step, so concurrent requests can't
- * all slip through a check-then-increment gap (the Redis version, M0-T6, uses INCR + PEXPIRE NX).
+ * all slip through a check-then-increment gap.
  */
 export abstract class RateLimiter {
   /**
@@ -14,8 +17,46 @@ export abstract class RateLimiter {
   abstract reset(key: string): Promise<void>;
 }
 
+/** Keys contain IPs and emails: only their sha256 reaches the database. */
+export const rateLimitKeyHash = (key: string): string =>
+  createHash('sha256').update(key, 'utf8').digest('hex');
+
 /**
- * Single-process implementation for dev/tests until Redis is wired in M0-T6. Synchronous inside
+ * Shared across processes (ADR-011: Postgres, no Redis). Atomic in SQL: `rate_limit_consume` is a
+ * single INSERT .. ON CONFLICT DO UPDATE (migration 0010). Windows use the app's Clock.
+ */
+@Injectable()
+export class PostgresRateLimiter extends RateLimiter {
+  constructor(
+    private readonly database: Database,
+    private readonly clock: Clock,
+  ) {
+    super();
+  }
+
+  async consume(key: string, limit: number, windowMs: number): Promise<number> {
+    const [row] = await this.database.db.execute<{ retry_after: number }>(
+      sql`select rate_limit_consume(${rateLimitKeyHash(key)}, ${limit}::int, ${windowMs}::int,
+                                    ${this.clock.now().toISOString()}::timestamptz) as retry_after`,
+    );
+    return row?.retry_after ?? 0;
+  }
+
+  async reset(key: string): Promise<void> {
+    await this.database.db.execute(sql`select rate_limit_reset(${rateLimitKeyHash(key)})`);
+  }
+
+  /** Deletes ended windows; scheduled by the worker. Returns the number of rows removed. */
+  async purgeExpired(): Promise<number> {
+    const [row] = await this.database.db.execute<{ n: number }>(
+      sql`select rate_limit_purge(${this.clock.now().toISOString()}::timestamptz) as n`,
+    );
+    return row?.n ?? 0;
+  }
+}
+
+/**
+ * Single-process fake for unit tests (and the DB-less AppModule smoke test). Synchronous inside
  * `consume`, so it is atomic on the event loop.
  */
 @Injectable()

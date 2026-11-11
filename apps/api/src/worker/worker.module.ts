@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 
 /**
- * Keeps the worker process alive until real consumers exist. BullMQ workers (M0-T6) hold
+ * Keeps the worker process alive until real consumers exist. pg-boss workers (M0-T6) hold
  * the event loop themselves, at which point this goes away.
  */
 @Injectable()

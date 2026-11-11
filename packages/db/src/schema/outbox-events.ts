@@ -5,7 +5,7 @@ import { tenants } from './tenants.js';
 
 /**
  * Written in the same transaction as the state change it describes; the relay (M0-T6) publishes
- * unpublished rows to BullMQ. `id` is the event id consumers dedupe on.
+ * unpublished rows to pg-boss queues (ADR-011). `id` is the event id consumers dedupe on.
  */
 export const outboxEvents = pgTable(
   'outbox_events',

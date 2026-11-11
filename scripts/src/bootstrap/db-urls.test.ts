@@ -6,7 +6,8 @@ import {
   generatePassword,
   passwordLiteral,
   withTarget,
-} from './neon-urls.js';
+  isLocalHost,
+} from './db-urls.js';
 
 const NEON_DIRECT = 'ep-cool-darkness-a1b2c3d4.ap-southeast-1.aws.neon.tech';
 const NEON_POOLED = 'ep-cool-darkness-a1b2c3d4-pooler.ap-southeast-1.aws.neon.tech';
@@ -28,13 +29,12 @@ describe('deriveHosts', () => {
     });
   });
 
-  it('leaves non-Neon hosts unchanged', () => {
-    expect(deriveHosts('localhost')).toEqual({
-      direct: 'localhost',
-      pooled: 'localhost',
-      isNeon: false,
-    });
-  });
+  it.each(['localhost', '127.0.0.1', 'db.internal', 'ep-lookalike.example.com'])(
+    'never derives a -pooler host for non-Neon host %s',
+    (host) => {
+      expect(deriveHosts(host)).toEqual({ direct: host, pooled: host, isNeon: false });
+    },
+  );
 });
 
 describe('generatePassword', () => {
@@ -70,7 +70,25 @@ describe('assertIdentifier / passwordLiteral (DDL injection guards)', () => {
   });
 });
 
+describe('isLocalHost', () => {
+  it.each(['localhost', '127.0.0.1', '::1', '[::1]'])('%s is local', (h) => {
+    expect(isLocalHost(h)).toBe(true);
+  });
+  it('a Neon host is not', () => expect(isLocalHost(NEON_DIRECT)).toBe(false));
+});
+
 describe('withTarget', () => {
+  it('adds sslmode=disable for a local host without one, and keeps an explicit sslmode', () => {
+    const local = new URL('postgresql://postgres:pw@localhost:5432/postgres');
+    expect(withTarget(local, { host: 'localhost', database: 'revops_dev' }).toString()).toBe(
+      'postgresql://postgres:pw@localhost:5432/revops_dev?sslmode=disable',
+    );
+    const explicit = new URL('postgresql://postgres:pw@localhost:5432/postgres?sslmode=require');
+    expect(
+      withTarget(explicit, { host: 'localhost', database: 'x' }).searchParams.get('sslmode'),
+    ).toBe('require');
+  });
+
   it('keeps port and query (sslmode, channel_binding) while changing host/db/user', () => {
     const base = new URL(
       `postgresql://neondb_owner:ownerpw@${NEON_DIRECT}:5432/neondb?sslmode=require&channel_binding=require`,
@@ -88,18 +106,16 @@ describe('withTarget', () => {
 });
 
 describe('buildEnvLines', () => {
-  const ownerUrl = new URL(
-    `postgresql://neondb_owner:ownerpw@${NEON_DIRECT}/neondb?sslmode=require`,
-  );
-  const input = {
-    ownerUrl,
-    appRole: 'app_user',
+  const neon = new URL(`postgresql://neondb_owner:ownerpw@${NEON_DIRECT}/neondb?sslmode=require`);
+  const base = {
+    serverUrl: neon,
+    owner: { role: 'neondb_owner', password: 'ownerpw' },
     devDatabase: 'revops_dev',
     testDatabase: 'revops_test',
   };
 
-  it('builds app_user on the pooled host and the owner on the direct host', () => {
-    expect(buildEnvLines({ ...input, appPassword: 'secretpw' })).toEqual([
+  it('Neon: app_user on the pooled host, the owner on the direct host', () => {
+    expect(buildEnvLines({ ...base, app: { role: 'app_user', password: 'secretpw' } })).toEqual([
       `DATABASE_URL=postgresql://app_user:secretpw@${NEON_POOLED}/revops_dev?sslmode=require`,
       `DATABASE_URL_OWNER=postgresql://neondb_owner:ownerpw@${NEON_DIRECT}/revops_dev?sslmode=require`,
       `DATABASE_URL_TEST=postgresql://app_user:secretpw@${NEON_POOLED}/revops_test?sslmode=require`,
@@ -107,32 +123,62 @@ describe('buildEnvLines', () => {
     ]);
   });
 
-  it('uses a placeholder (never a guessed password) when the role already existed', () => {
-    const lines = buildEnvLines({ ...input, appPassword: null });
+  it('local Postgres: one host, the dedicated owner role, sslmode=disable', () => {
+    const lines = buildEnvLines({
+      serverUrl: new URL('postgresql://postgres:superpw@localhost:5432/postgres'),
+      owner: { role: 'revops_owner', password: 'ownerpw' },
+      app: { role: 'app_user', password: 'apppw' },
+      devDatabase: 'revops_dev',
+      testDatabase: 'revops_test',
+    });
+    expect(lines).toEqual([
+      'DATABASE_URL=postgresql://app_user:apppw@localhost:5432/revops_dev?sslmode=disable',
+      'DATABASE_URL_OWNER=postgresql://revops_owner:ownerpw@localhost:5432/revops_dev?sslmode=disable',
+      'DATABASE_URL_TEST=postgresql://app_user:apppw@localhost:5432/revops_test?sslmode=disable',
+      'DATABASE_URL_TEST_OWNER=postgresql://revops_owner:ownerpw@localhost:5432/revops_test?sslmode=disable',
+    ]);
+    expect(lines.join(' ')).not.toContain('superpw');
+  });
+
+  it('uses placeholders (never a guessed password) when a role already existed', () => {
+    const lines = buildEnvLines({
+      ...base,
+      owner: { role: 'revops_owner', password: null },
+      app: { role: 'app_user', password: null },
+    });
     expect(lines[0]).toBe(
       `DATABASE_URL=postgresql://app_user:<APP_USER_PASSWORD>@${NEON_POOLED}/revops_dev?sslmode=require`,
     );
+    expect(lines[1]).toContain('revops_owner:<OWNER_PASSWORD>@');
     expect(lines[2]).toContain('app_user:<APP_USER_PASSWORD>@');
   });
 
   it('derives the same lines whether the bootstrap URL was pooled or direct', () => {
-    const pooledOwner = new URL(ownerUrl.toString().replace(NEON_DIRECT, NEON_POOLED));
-    expect(buildEnvLines({ ...input, ownerUrl: pooledOwner, appPassword: 'p' })).toEqual(
-      buildEnvLines({ ...input, appPassword: 'p' }),
+    const pooled = new URL(neon.toString().replace(NEON_DIRECT, NEON_POOLED));
+    const app = { role: 'app_user', password: 'p' };
+    expect(buildEnvLines({ ...base, serverUrl: pooled, app })).toEqual(
+      buildEnvLines({ ...base, app }),
     );
   });
 
-  it('produces URLs the env schemas accept and the doctor isolation check passes', async () => {
+  it.each([
+    ['Neon', neon],
+    ['local', new URL('postgresql://postgres:x@localhost:5432/postgres')],
+  ])('%s: URLs pass the env schemas and the doctor isolation check', async (_label, serverUrl) => {
     const { apiEnvSchema, testDatabaseEnvSchema, migrationEnvSchema } =
       await import('@revops/shared/env');
     const { checkTestDbIsolation } = await import('../checks.js');
     const env = Object.fromEntries(
-      buildEnvLines({ ...input, appPassword: generatePassword() }).map((l) => {
+      buildEnvLines({
+        ...base,
+        serverUrl,
+        app: { role: 'app_user', password: generatePassword() },
+      }).map((l) => {
         const i = l.indexOf('=');
         return [l.slice(0, i), l.slice(i + 1)];
       }),
     ) as Record<string, string>;
-    expect(apiEnvSchema.safeParse({ ...env, REDIS_URL: 'redis://h:1' }).success).toBe(true);
+    expect(apiEnvSchema.safeParse(env).success).toBe(true);
     expect(testDatabaseEnvSchema.safeParse(env).success).toBe(true);
     expect(migrationEnvSchema.safeParse(env).success).toBe(true);
     expect(checkTestDbIsolation(env.DATABASE_URL ?? '', env.DATABASE_URL_TEST ?? '').status).toBe(

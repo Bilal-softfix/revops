@@ -28,7 +28,7 @@ describe('editEnv', () => {
       'NEON_BOOTSTRAP_URL=postgresql://owner:pw@h/neondb',
       'DATABASE_URL=old',
       '',
-      'REDIS_URL=redis://h:1',
+      'SEED_PASSWORD=x',
     ].join('\n');
     const { content, changes } = editEnv(
       `${before}\n`,
@@ -36,9 +36,7 @@ describe('editEnv', () => {
       ['NEON_BOOTSTRAP_URL'],
     );
     expect(content).toBe(
-      ['# Neon', 'DATABASE_URL=new', '', 'REDIS_URL=redis://h:1', 'DATABASE_URL_TEST=t', ''].join(
-        '\n',
-      ),
+      ['# Neon', 'DATABASE_URL=new', '', 'SEED_PASSWORD=x', 'DATABASE_URL_TEST=t', ''].join('\n'),
     );
     expect(Object.fromEntries(changes)).toEqual({
       NEON_BOOTSTRAP_URL: 'removed',

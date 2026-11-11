@@ -1,4 +1,6 @@
-# 05 — Local Dev Setup (without Docker)
+# 05 — Local Dev Setup (local-first, without Docker)
+
+Everything runs on the dev machine: Node 22, Python 3.12 (uv) and a natively installed **PostgreSQL 18**. No Redis (ADR-011), no cloud services (ADR-012), no Docker (ADR-009).
 
 ## Toolchain
 - **Node 22** via [fnm](https://github.com/Schniz/fnm) (`.nvmrc` pins 22). Enable auto-switching in your shell profile: `fnm env --use-on-cd | Out-String | Invoke-Expression` (PowerShell) or `eval "$(fnm env --use-on-cd)"` (bash/zsh).
@@ -9,41 +11,53 @@
 
 ## CI (GitHub Actions, `.github/workflows/ci.yml`)
 - `checks (ubuntu-latest)`: typecheck, lint, unit, build, `pnpm audit --prod` (warn only). `checks (windows-latest)`: typecheck, unit, build.
-- `integration (ubuntu-latest)`: Postgres 18 + pgvector (`pgvector/pgvector:0.8.6-pg18`, ADR-010) and Redis 7 as service containers (Docker exists only in CI). `scripts/ci/setup-db.sql` mirrors the Neon setup below, then `pnpm run doctor` and `pnpm test:integration` run.
+- `integration (ubuntu-latest)`: Postgres 18 + pgvector (`pgvector/pgvector:0.8.6-pg18`, ADR-010) as a service container (Docker exists only in CI). No Redis. `scripts/ci/setup-db.sql` mirrors what `db:bootstrap` sets up, then `pnpm run doctor` and `pnpm test:integration` run. `BOOTSTRAP_SUPERUSER_URL` lets the bootstrap test exercise the superuser path a local install uses.
 - Each job times out after 15 min; a new push cancels the in-flight run for the same branch/PR. pnpm store and uv caches are restored per run.
 
 ## Services
 | Need | Dev choice | Env var |
 |---|---|---|
-| PostgreSQL 18 + pgvector | Neon project (Postgres 18), nearest Asia region; two databases: `revops_dev`, `revops_test` | `DATABASE_URL`, `DATABASE_URL_TEST`, `DATABASE_URL_OWNER` (migrations), `DATABASE_URL_TEST_OWNER` (test migrations) |
-| Redis | Redis Cloud free database, eviction policy set to `noeviction` (BullMQ requirement) | `REDIS_URL` |
+| PostgreSQL 18 | Native install (Windows: EDB installer), `localhost:5432`; two databases `revops_dev`, `revops_test` | `DATABASE_URL`, `DATABASE_URL_TEST` (app_user), `DATABASE_URL_OWNER`, `DATABASE_URL_TEST_OWNER` (revops_owner, migrations) |
+| pgvector | Optional until M4 — doctor warns if missing; CI has it | — |
+| Jobs / queues / cron | pg-boss in the same Postgres (M0-T6) | — |
+| Rate limits | Postgres table `rate_limit_buckets` | — |
 | Object storage | Local disk `./.data/storage` (gitignored) | `STORAGE_DRIVER=local` |
 | Email | Console provider (prints to terminal) | `EMAIL_DRIVER=console` |
-| LiveKit (S1/M4) | LiveKit Cloud free project | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` |
+| LiveKit (S1/M4) | LiveKit Cloud free project (decided in S1) | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` |
 
-## Neon setup (scripted — no SQL editor needed)
-1. Create a Neon project in the nearest Asia region (e.g. Singapore `ap-southeast-1`, or Mumbai if your plan offers it).
-2. Neon console → **Connect** → role `neondb_owner`, database `neondb` → copy the connection string (pooled or direct both work).
-3. Put it in the repo-root `.env`: `NEON_BOOTSTRAP_URL=postgresql://neondb_owner:...@ep-....neon.tech/neondb?sslmode=require`
-4. Run `pnpm run db:bootstrap --write-env`. Idempotent, safe to rerun. It:
-   - creates databases `revops_dev` and `revops_test` (skips existing ones);
-   - runs `CREATE EXTENSION IF NOT EXISTS vector, citext, pg_trgm` in **both**;
-   - creates role `app_user` (LOGIN, NOSUPERUSER, NOBYPASSRLS, owns nothing) with a generated 256-bit URL-safe password. It skips this if the role exists, and then **never prints the password**: the lines show `<APP_USER_PASSWORD>` instead;
-   - builds four URLs: `DATABASE_URL` / `DATABASE_URL_TEST` = `app_user` on the **pooled** host (`ep-<id>-pooler…`), `DATABASE_URL_OWNER` / `DATABASE_URL_TEST_OWNER` = owner on the **direct** host. `sslmode`/`channel_binding` are kept from your URL;
-   - with `--write-env`: writes them into the root `.env` **and** `apps/api/.env` (existing keys replaced in place, every other line kept, file created if missing), deletes `NEON_BOOTSTRAP_URL`, and prints only a masked summary (`added` / `replaced` / `unchanged` per key, passwords as `****`). If `app_user` already exists, it reuses the `app_user` password already in those files after proving it logs in; if none works it stops and tells you to add `--reset-app-password`;
-   - without `--write-env`: prints the four lines (with passwords) to paste yourself.
-5. Rerun it: everything reports `exists, skipped` / `unchanged`. With `NEON_BOOTSTRAP_URL` gone, it connects with `DATABASE_URL_OWNER` (the same owner role).
-6. Lost the `app_user` password? `pnpm run db:bootstrap --write-env --reset-app-password` rotates it and writes the new one.
-7. `pnpm run doctor` → all ✔ for the database checks. Redis is a ⚠ warning until you set `REDIS_URL` (optional until M0-T6).
+## PostgreSQL setup (scripted — no SQL client needed)
+1. Install PostgreSQL 18 (Windows: the EDB installer; keep port 5432 and note the `postgres` superuser password). macOS: Postgres.app or Homebrew; Linux: the PGDG packages.
+2. Put a superuser URL in the repo-root `.env` as `DB_BOOTSTRAP_URL`. From the repo root in PowerShell, so the password is never echoed, typed into a command line, or saved in shell history. This replaces any old `NEON_BOOTSTRAP_URL` / `DB_BOOTSTRAP_URL` line, leaves every other line alone, and writes UTF-8 without a BOM, on both Windows PowerShell 5.1 and PowerShell 7:
+   ```powershell
+   $sec  = Read-Host -AsSecureString "postgres superuser password"
+   $enc  = [Uri]::EscapeDataString([Net.NetworkCredential]::new('', $sec).Password)
+   $path = Join-Path (Get-Location) '.env'
+   $keep = @(if (Test-Path $path) { Get-Content $path | Where-Object { $_ -notmatch '^\s*(DB|NEON)_BOOTSTRAP_URL\s*=' } })
+   [IO.File]::WriteAllLines($path, [string[]]($keep + "DB_BOOTSTRAP_URL=postgresql://postgres:$enc@localhost:5432/postgres?sslmode=disable"))
+   Remove-Variable sec, enc, keep
+   ```
+3. Run `pnpm run db:bootstrap --write-env`. It is idempotent and safe to rerun. Connected as a superuser it:
+   - creates role `revops_owner` (LOGIN, NOSUPERUSER, NOBYPASSRLS). It owns both databases and runs the migrations, so SECURITY DEFINER functions never run as a superuser, the same as Neon and CI;
+   - creates `revops_dev` and `revops_test` owned by `revops_owner`, skipping any that already exist;
+   - installs `citext` and `pg_trgm` (required) and `vector` (optional: if pgvector isn't installed on the server it warns and carries on);
+   - creates `app_user` (LOGIN, NOSUPERUSER, NOBYPASSRLS, owns nothing);
+   - sets the role passwords last, as generated 256-bit URL-safe passwords;
+   - writes the four `DATABASE_*` URLs into the root `.env` **and** `apps/api/.env`, replacing existing keys in place and keeping every other line. Local URLs get `sslmode=disable`, and no `-pooler` host is derived for non-Neon hosts;
+   - **deletes `DB_BOOTSTRAP_URL`**, so the superuser password doesn't stay in the file, and prints only a masked summary.
+4. Rerun it: with `DB_BOOTSTRAP_URL` gone it connects as `revops_owner` via `DATABASE_URL_OWNER` in **verify-only** mode. Nothing is created, extensions are checked, the passwords already in `.env` are verified by logging in, and every key reports `unchanged`.
+5. Lost a password? Put `DB_BOOTSTRAP_URL` back and run `pnpm run db:bootstrap --write-env --reset-app-password` (or `--reset-owner-password`).
+6. `pnpm db:migrate`, then `pnpm db:seed`, then `pnpm run doctor`. All database checks should be ✔; the pgvector line is a ⚠ until it's installed.
 
-The script connects to the direct endpoint for admin work (`CREATE DATABASE` must not go through PgBouncer). It needs a role with CREATEDB + CREATEROLE (`neondb_owner` has both) and refuses otherwise. Table grants for `app_user` come from the M0-T3 migrations, not from this script. Its integration test runs in CI against the Postgres container (locally only with `RUN_BOOTSTRAP_INTEGRATION=1`, because it creates and drops throwaway `bt_*` databases).
+**Neon still works but is unused.** Put the `neondb_owner` URL in `DB_BOOTSTRAP_URL`. A role with CREATEDB + CREATEROLE that isn't a superuser is used as the owner itself (admin-owner mode). `app_user` URLs then go to the `-pooler` host and owner URLs to the direct host, keeping `sslmode`/`channel_binding`.
 
-Manual equivalent, if you ever have SQL access: in each DB `CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS citext; CREATE EXTENSION IF NOT EXISTS pg_trgm;` and once `CREATE ROLE app_user LOGIN PASSWORD '<strong-password>';`.
+Without `--write-env` the script prints the four lines (with passwords) instead of writing them. Its integration test runs in CI against the Postgres container. Locally it runs only with `RUN_BOOTSTRAP_INTEGRATION=1`, because it creates and drops throwaway `bt_*` databases and roles; set `BOOTSTRAP_SUPERUSER_URL` as well to cover the superuser path.
 
 ## Migrations, seed and integration tests
-- `pnpm db:migrate` applies `packages/db/migrations` to the dev DB as the owner over `DATABASE_URL_OWNER` (direct endpoint). `pnpm db:migrate --test` does the same for the test DB.
+- `pnpm db:migrate` applies `packages/db/migrations` to the dev DB as `revops_owner` over `DATABASE_URL_OWNER` (on Neon: the direct endpoint). `pnpm db:migrate --test` does the same for the test DB.
 - `pnpm db:generate --name=<change>` creates a migration from `packages/db/src/schema`; add `--custom` for hand-written SQL such as RLS. Migrations are forward-only, and a merged migration is never edited.
-- `pnpm db:seed`: set `SEED_PASSWORD` (at least 12 characters) in `.env` first. It creates the demo tenant plus `owner|admin|manager|agent@demo.revops.test` as `app_user`, through RLS. It is idempotent and refuses to run with `NODE_ENV=production`.
+- `pnpm db:seed`: set `SEED_PASSWORD` (at least 12 characters) in `.env` first. It runs as `app_user`, through RLS, is idempotent, and refuses to run with `NODE_ENV=production`. It creates:
+  - **Demo Realty** (`demo`): `owner|admin|manager|agent@demo.revops.test`;
+  - **Demo Clinic** (`demo-clinic`): `owner2@demo.revops.test`, `agent2@demo.revops.test`, and **`manager@demo.revops.test`, who belongs to both tenants**. Use them to try the tenant switcher and isolation.
 - `pnpm test:integration` runs against `DATABASE_URL_TEST`:
   - a guard refuses any database whose name doesn't end in `_test`, or that is the dev database;
   - Vitest globalSetup migrates the test DB;
@@ -54,11 +68,7 @@ Manual equivalent, if you ever have SQL access: in each DB `CREATE EXTENSION IF 
 - `apps/api/.env` holds API-only vars (see `apps/api/.env.example`): `APP_URL` (web origin used in email links), `EMAIL_DRIVER=console`, `EMAIL_FROM`, `COOKIE_SECURE=true`.
 - `pnpm dev`, then `POST http://localhost:4000/v1/auth/signup`. The console email provider prints the verify link to the API terminal, with the recipient masked. `POST /v1/auth/verify-email {"token": …}`, then `POST /v1/auth/login`.
 - Send JSON only (`content-type: application/json`). On unsafe authenticated calls such as logout, send the `csrfToken` from the login/me response as `x-csrf-token`.
-- The login rate limiter is in-memory until M0-T6 (Redis), so restarting the API clears it.
-
-## Redis Cloud setup
-Not needed until M0-T6 (BullMQ, outbox relay): until then `REDIS_URL` may be blank and `pnpm run doctor` only warns. Set it up before T6:
-Create free database → Configuration → set eviction policy to **noeviction** → copy public endpoint + password into `REDIS_URL=rediss://default:<password>@<host>:<port>` (use `redis://` if TLS is not enabled on the free plan).
+- Rate limits live in Postgres (`rate_limit_buckets`), so they survive API restarts. To clear them in dev, truncate that table as `revops_owner`.
 
 ## Rules
 - Dev services hold only fake/seed data. Never real leads or recordings.

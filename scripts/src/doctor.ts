@@ -1,9 +1,8 @@
-// `pnpm run doctor` — validates env vars and pings the cloud dev services (Neon Postgres, Redis Cloud).
+// `pnpm run doctor` — validates env vars and checks the dev/test databases (local Postgres 18, ADR-012).
 // Exit code 1 if any check fails; warnings don't fail. Never prints secrets or raw URLs.
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { Redis } from 'ioredis';
 import postgres from 'postgres';
 import {
   apiEnvSchema,
@@ -18,14 +17,13 @@ import {
   type PostgresFacts,
   checkEnv,
   checkNodeVersion,
-  REDIS_NOT_CONFIGURED,
   checkDuplicateEnvKeys,
+  checkOwnerNotSuperuser,
   checkRoleSeparation,
   checkTestDbIsolation,
   checkUv,
   evaluateAppPostgres,
   evaluatePostgresVersion,
-  evaluateRedis,
   maskUrl,
   summarize,
 } from './checks.js';
@@ -129,17 +127,26 @@ async function checkOwnerDatabase(
   if (!url) return { results: [{ name: label, status: 'fail', detail: 'skipped — not set' }] };
   try {
     const facts = await withPostgres(url, async (sql) => {
-      const [row] = await sql<{ version_num: number; version: string; role: string }[]>`
+      const [row] = await sql<
+        { version_num: number; version: string; role: string; superuser: boolean }[]
+      >`
         select current_setting('server_version_num')::int as version_num,
                current_setting('server_version') as version,
-               current_user::text as role`;
+               current_user::text as role,
+               (select rolsuper from pg_roles where rolname = current_user) as superuser`;
       if (!row) throw new Error('empty result');
-      return { versionNum: row.version_num, version: row.version, role: row.role };
+      return {
+        versionNum: row.version_num,
+        version: row.version,
+        role: row.role,
+        superuser: row.superuser,
+      };
     });
     return {
       results: [
         { name: `${label}: connect`, status: 'pass', detail: maskUrl(url) },
         evaluatePostgresVersion(label, facts),
+        checkOwnerNotSuperuser(label, facts.role, facts.superuser),
       ],
       role: facts.role,
     };
@@ -147,40 +154,6 @@ async function checkOwnerDatabase(
     return {
       results: [{ name: `${label}: connect`, status: 'fail', detail: errorMessage(error) }],
     };
-  }
-}
-
-async function checkRedis(url: string | undefined): Promise<CheckResult[]> {
-  if (!url) return [REDIS_NOT_CONFIGURED];
-  const redis = new Redis(url, {
-    lazyConnect: true,
-    connectTimeout: CONNECT_TIMEOUT_SEC * 1000,
-    maxRetriesPerRequest: 1,
-    retryStrategy: () => null,
-  });
-  // ioredis rejects connect() with a generic "Connection is closed."; keep the socket error.
-  let socketError: string | undefined;
-  redis.on('error', (error: Error) => {
-    socketError = error.message;
-  });
-  try {
-    await redis.connect();
-    await redis.ping();
-    const results: CheckResult[] = [
-      { name: 'Redis: connect', status: 'pass', detail: maskUrl(url) },
-    ];
-    let info = '';
-    try {
-      info = `${await redis.info('server')}\n${await redis.info('memory')}`;
-    } catch {
-      // Some managed plans restrict INFO; evaluateRedis reports "unknown" as warnings.
-    }
-    return [...results, ...evaluateRedis(info)];
-  } catch (error) {
-    const detail = `${socketError ?? errorMessage(error)} — check host/port and redis:// vs rediss:// (TLS)`;
-    return [{ name: 'Redis: connect', status: 'fail', detail }];
-  } finally {
-    redis.disconnect();
   }
 }
 
@@ -215,16 +188,14 @@ async function main(): Promise<void> {
     results.push(checkTestDbIsolation(env.DATABASE_URL, env.DATABASE_URL_TEST));
   }
 
-  const [dev, devOwner, test, testOwner, redis] = await Promise.all([
+  const [dev, devOwner, test, testOwner] = await Promise.all([
     checkAppDatabase('DATABASE_URL', env.DATABASE_URL),
     checkOwnerDatabase('DATABASE_URL_OWNER', env.DATABASE_URL_OWNER),
     checkAppDatabase('DATABASE_URL_TEST', env.DATABASE_URL_TEST),
     checkOwnerDatabase('DATABASE_URL_TEST_OWNER', env.DATABASE_URL_TEST_OWNER),
-    checkRedis(env.REDIS_URL),
   ]);
   results.push(...dev.results, ...devOwner.results, ...test.results, ...testOwner.results);
   if (dev.role && devOwner.role) results.push(checkRoleSeparation(dev.role, devOwner.role));
-  results.push(...redis);
 
   print(results);
   const { ok, counts } = summarize(results);

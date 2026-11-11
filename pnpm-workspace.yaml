@@ -8,7 +8,6 @@ catalog:
   '@types/node': 22.20.5
   '@vitest/coverage-v8': 4.1.12
   eslint: 9.39.5
-  ioredis: 5.11.1
   postgres: 3.4.9
   prettier: 3.9.10
   tsx: 4.23.15

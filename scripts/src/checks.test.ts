@@ -4,15 +4,13 @@ import {
   type PostgresFacts,
   checkEnv,
   checkNodeVersion,
-  REDIS_NOT_CONFIGURED,
   checkDuplicateEnvKeys,
   checkRoleSeparation,
   checkTestDbIsolation,
   checkUv,
   evaluateAppPostgres,
-  evaluateRedis,
   maskUrl,
-  parseRedisInfo,
+  checkOwnerNotSuperuser,
   summarize,
 } from './checks.js';
 
@@ -79,12 +77,8 @@ describe('checkDuplicateEnvKeys', () => {
   });
 });
 
-describe('REDIS_NOT_CONFIGURED', () => {
-  it('is a warning, so doctor stays green without Redis until M0-T6', () => {
-    expect(REDIS_NOT_CONFIGURED.status).toBe('warn');
-    expect(summarize([REDIS_NOT_CONFIGURED]).ok).toBe(true);
-  });
-  it('api/worker env validate without REDIS_URL', () => {
+describe('no Redis (ADR-011)', () => {
+  it('api/worker env validate with only a DATABASE_URL', () => {
     const env = { DATABASE_URL: 'postgresql://app_user:p@h/revops_dev' };
     expect(checkEnv('env: api', apiEnvSchema, env).status).toBe('pass');
   });
@@ -127,12 +121,19 @@ describe('evaluateAppPostgres', () => {
     expect(statusOf(results, 'version')).toBe('fail');
   });
 
-  it('names missing extensions', () => {
-    const results = evaluateAppPostgres('DB', { ...goodFacts, extensions: ['citext'] });
+  it('fails on missing required extensions and names them', () => {
+    const results = evaluateAppPostgres('DB', { ...goodFacts, extensions: ['vector'] });
     const ext = results.find((r) => r.name.endsWith('extensions'));
     expect(ext?.status).toBe('fail');
-    expect(ext?.detail).toContain('vector');
+    expect(ext?.detail).toContain('citext');
     expect(ext?.detail).toContain('pg_trgm');
+  });
+
+  it('only warns when pgvector is missing (optional until M4), so doctor stays green', () => {
+    const results = evaluateAppPostgres('DB', { ...goodFacts, extensions: ['citext', 'pg_trgm'] });
+    expect(statusOf(results, 'pgvector')).toBe('warn');
+    expect(statusOf(results, 'extensions')).toBe('pass');
+    expect(summarize(results).ok).toBe(true);
   });
 
   it.each<[string, Partial<PostgresFacts>]>([
@@ -154,29 +155,12 @@ describe('checkRoleSeparation', () => {
   });
 });
 
-describe('Redis', () => {
-  const info = '# Server\r\nredis_version:7.4.2\r\n\r\n# Memory\r\nmaxmemory_policy:noeviction\r\n';
-
-  it('parses INFO output with CRLF line endings', () => {
-    expect(parseRedisInfo(info).get('maxmemory_policy')).toBe('noeviction');
+describe('checkOwnerNotSuperuser', () => {
+  it('warns for a superuser owner (definer functions would bypass RLS)', () => {
+    expect(checkOwnerNotSuperuser('DB', 'postgres', true).status).toBe('warn');
   });
-
-  it('passes for Redis 7 with noeviction', () => {
-    expect(evaluateRedis(info).every((r) => r.status === 'pass')).toBe(true);
-  });
-
-  it('warns (not fails) on an evicting policy', () => {
-    const results = evaluateRedis(info.replace('noeviction', 'volatile-lru'));
-    expect(statusOf(results, 'maxmemory-policy')).toBe('warn');
-    expect(summarize(results).ok).toBe(true);
-  });
-
-  it('warns when INFO is unavailable', () => {
-    expect(evaluateRedis('').map((r) => r.status)).toEqual(['warn', 'warn']);
-  });
-
-  it('warns on Redis 6', () => {
-    expect(statusOf(evaluateRedis(info.replace('7.4.2', '6.2.14')), 'version')).toBe('warn');
+  it('passes for a plain owner role', () => {
+    expect(checkOwnerNotSuperuser('DB', 'revops_owner', false).status).toBe('pass');
   });
 });
 

@@ -1,6 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 
-// Liveness only. Readiness (DB/Redis) + terminus arrive in M0-T6.
+// Liveness only. Readiness (DB) arrives in M0-T6.
 @Controller('health')
 export class HealthController {
   @Get()

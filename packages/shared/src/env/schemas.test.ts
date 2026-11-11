@@ -4,7 +4,6 @@ import { apiEnvSchema, productionEnvProblems, testDatabaseEnvSchema } from './sc
 
 const validApiEnv = {
   DATABASE_URL: 'postgresql://app_user:pw@localhost:5432/revops_dev',
-  REDIS_URL: 'redis://localhost:6379',
 };
 
 describe('apiEnvSchema', () => {
@@ -29,28 +28,24 @@ describe('apiEnvSchema', () => {
     );
   });
 
-  it('accepts both postgres:// and postgresql:// and redis:// / rediss://', () => {
+  it('accepts both postgres:// and postgresql://, incl. sslmode=disable for a local server', () => {
+    expect(() => parseEnv(apiEnvSchema, { DATABASE_URL: 'postgres://u:p@h/db' })).not.toThrow();
     expect(() =>
       parseEnv(apiEnvSchema, {
-        DATABASE_URL: 'postgres://u:p@h/db',
-        REDIS_URL: 'rediss://default:p@h:1234',
+        DATABASE_URL: 'postgresql://app_user:p@localhost:5432/revops_dev?sslmode=disable',
       }),
     ).not.toThrow();
   });
 
-  it('rejects a non-postgres DATABASE_URL and a non-redis REDIS_URL', () => {
+  it('rejects a non-postgres DATABASE_URL', () => {
     try {
-      parseEnv(apiEnvSchema, { DATABASE_URL: 'mysql://u:p@h/db', REDIS_URL: 'http://h' });
+      parseEnv(apiEnvSchema, { DATABASE_URL: 'mysql://u:p@h/db' });
       expect.unreachable();
     } catch (error) {
       expect(error).toBeInstanceOf(EnvValidationError);
-      const issues = (error as EnvValidationError).issues;
-      expect(issues).toEqual(
-        expect.arrayContaining([
-          expect.stringMatching(/^DATABASE_URL: /),
-          expect.stringMatching(/^REDIS_URL: /),
-        ]),
-      );
+      expect((error as EnvValidationError).issues).toEqual([
+        expect.stringMatching(/^DATABASE_URL: /),
+      ]);
     }
   });
 
@@ -68,10 +63,8 @@ describe('apiEnvSchema', () => {
     expect(() => parseEnv(apiEnvSchema, {})).toThrow(/DATABASE_URL: is required/);
   });
 
-  it('treats REDIS_URL as optional until M0-T6 (missing or blank is fine)', () => {
-    const { DATABASE_URL } = validApiEnv;
-    expect(parseEnv(apiEnvSchema, { DATABASE_URL }).REDIS_URL).toBeUndefined();
-    expect(parseEnv(apiEnvSchema, { DATABASE_URL, REDIS_URL: '' }).REDIS_URL).toBeUndefined();
+  it('has no Redis setting any more (ADR-011)', () => {
+    expect(Object.keys(apiEnvSchema.shape)).not.toContain('REDIS_URL');
   });
 
   it('treats a blank required var as missing', () => {

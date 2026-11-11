@@ -14,11 +14,6 @@ const requiredUrl = (protocol: RegExp, invalid: string) =>
   );
 
 const postgresUrl = requiredUrl(/^postgres(ql)?$/, 'must be a postgres:// URL');
-// Optional until M0-T6 (BullMQ/outbox relay) is the first real Redis consumer; make it required then.
-const optionalRedisUrl = z.preprocess(
-  blankAsUndefined,
-  z.url({ protocol: /^rediss?$/, error: 'must be a redis:// or rediss:// URL' }).optional(),
-);
 const port = z.coerce.number().int().min(1).max(65_535);
 
 export const nodeEnvSchema = z.enum(['development', 'test', 'production']);
@@ -55,36 +50,29 @@ export const seedEnvSchema = z.object({
   ),
 });
 
-/** One-off `pnpm run db:bootstrap`: the Neon owner role (needs CREATEDB + CREATEROLE). */
-export const neonBootstrapEnvSchema = z.object({
-  NEON_BOOTSTRAP_URL: postgresUrl,
-});
-
-export const redisEnvSchema = z.object({
-  REDIS_URL: optionalRedisUrl,
+/**
+ * One-off `pnpm run db:bootstrap`: a superuser (local Postgres, e.g. `postgres`) or a role with
+ * CREATEDB + CREATEROLE (Neon's `neondb_owner`). ADR-012.
+ */
+export const bootstrapEnvSchema = z.object({
+  DB_BOOTSTRAP_URL: postgresUrl,
 });
 
 const booleanFlag = z.enum(['true', 'false']).transform((value) => value === 'true');
 
-export const apiEnvSchema = commonEnvSchema
-  .extend(databaseEnvSchema.shape)
-  .extend(redisEnvSchema.shape)
-  .extend({
-    API_PORT: z.preprocess(blankAsUndefined, port.default(4000)),
-    /** Web app origin, used to build links in emails (verify email, reset password). */
-    APP_URL: z.preprocess(
-      blankAsUndefined,
-      z.url({ protocol: /^https?$/ }).default('http://localhost:3000'),
-    ),
-    /** `console` prints emails to the terminal (dev); `fake` keeps them in memory (tests). */
-    EMAIL_DRIVER: z.preprocess(blankAsUndefined, z.enum(['console', 'fake']).default('console')),
-    EMAIL_FROM: z.preprocess(
-      blankAsUndefined,
-      z.string().default('RevOps <no-reply@revops.local>'),
-    ),
-    /** Secure cookies. Browsers treat http://localhost as secure, so keep true in dev too. */
-    COOKIE_SECURE: z.preprocess(blankAsUndefined, booleanFlag.default(true)),
-  });
+export const apiEnvSchema = commonEnvSchema.extend(databaseEnvSchema.shape).extend({
+  API_PORT: z.preprocess(blankAsUndefined, port.default(4000)),
+  /** Web app origin, used to build links in emails (verify email, reset password). */
+  APP_URL: z.preprocess(
+    blankAsUndefined,
+    z.url({ protocol: /^https?$/ }).default('http://localhost:3000'),
+  ),
+  /** `console` prints emails to the terminal (dev); `fake` keeps them in memory (tests). */
+  EMAIL_DRIVER: z.preprocess(blankAsUndefined, z.enum(['console', 'fake']).default('console')),
+  EMAIL_FROM: z.preprocess(blankAsUndefined, z.string().default('RevOps <no-reply@revops.local>')),
+  /** Secure cookies. Browsers treat http://localhost as secure, so keep true in dev too. */
+  COOKIE_SECURE: z.preprocess(blankAsUndefined, booleanFlag.default(true)),
+});
 
 /**
  * Settings that are fine in dev but unsafe in production: the console email driver writes live
@@ -105,9 +93,7 @@ export function productionEnvProblems(env: ApiEnv): string[] {
   return problems;
 }
 
-export const workerEnvSchema = commonEnvSchema
-  .extend(databaseEnvSchema.shape)
-  .extend(redisEnvSchema.shape);
+export const workerEnvSchema = commonEnvSchema.extend(databaseEnvSchema.shape);
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;
 export type WorkerEnv = z.infer<typeof workerEnvSchema>;

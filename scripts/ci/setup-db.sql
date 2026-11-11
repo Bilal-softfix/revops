@@ -1,4 +1,4 @@
--- CI only: mirrors the Neon setup in docs/05-local-dev-setup.md on a throwaway
+-- CI only: mirrors what `pnpm run db:bootstrap` sets up (docs/05-local-dev-setup.md) on a throwaway
 -- pgvector/pgvector:0.8.6-pg18 service container. Run as the container superuser via psql.
 -- Passwords here are CI-only placeholders for a container that lives for one job.
 

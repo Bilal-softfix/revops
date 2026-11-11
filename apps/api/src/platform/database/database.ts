@@ -2,7 +2,7 @@ import { Injectable, type OnApplicationShutdown } from '@nestjs/common';
 import { type Db, type DbContext, type DbHandle, type Tx, createDb, withContext } from '@revops/db';
 
 /**
- * The app's pool (app_user over DATABASE_URL, Neon's pooled endpoint). Tenant/user-scoped work goes
+ * The app's pool (app_user over DATABASE_URL; on Neon, the pooled endpoint). Tenant/user-scoped work goes
  * through `withContext`; `db` is for the SECURITY DEFINER lookups that run before any context.
  */
 @Injectable()

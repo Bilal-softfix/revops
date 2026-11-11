@@ -7,7 +7,7 @@ All tables: `id uuid pk default gen_random_uuid()`, `created_at`, `updated_at ti
 - **users** (global, no tenant_id; RLS: self + members of the current tenant; unverified accounts expire 48 h after created_at and are purged with their sole-owned tenants) — email (unique, citext), name, phone_e164, password_hash (argon2id, nullable until set), email_verified_at
 - **memberships** — tenant_id, user_id, role, status (invited/active/disabled); unique(tenant_id,user_id)
 - **sessions** (global, user-scoped RLS) — user_id, token_hash (sha256, unique), active_tenant_id, ip, user_agent, created_at, last_seen_at, expires_at (created + 30d), revoked_at
-- **auth_tokens** (global, user-scoped RLS) — user_id, purpose (email_verify/password_reset), token_hash (unique), expires_at, used_at (single use via `auth_consume_token`)
+- **auth_tokens** (global, user-scoped RLS) — user_id, purpose (email_verify/password_reset), token_hash (unique), expires_at, used_at (single use, consumed atomically inside `auth_verify_email` / `auth_reset_password`)
 - **invitations** (tenant, FORCE RLS) — email (citext), role, token_hash (sha256 of `<tenant_id>.<random>`, unique), invited_by, expires_at (7 d), accepted_at, revoked_at; unique(tenant_id, email) where open
 - **business_hours** — tenant_id, weekday, open_time, close_time; **holidays** — tenant_id, date
 - **audit_logs** (append-only: app_user has SELECT + INSERT only; created_at, no updated_at) — tenant_id, actor_type (user/ai/system), actor_id, action, entity, entity_id (text), before/after jsonb, ip inet
@@ -45,4 +45,6 @@ All tables: `id uuid pk default gen_random_uuid()`, `created_at`, `updated_at ti
 - **tenant_limits** — type, monthly_cap, alert_threshold_pct
 - **integration_accounts** — provider (meta/google_ads), external_account_id, encrypted_tokens bytea, scopes, status, expires_at, last_sync_at
 - **ad_insights_daily** — integration_account_id, level (campaign/adset/ad), external_id, name, date, spend_paise, impressions, clicks (M7)
+- **rate_limit_buckets** (system table, ADR-011: no tenant_id; RLS enabled with no policies and no app_user grants, reached only via the definer functions `rate_limit_consume/reset/purge`) — key_hash (sha256 hex of the logical key, pk), count, reset_at. Index on reset_at for purging
+- **pgboss.*** (M0-T6, separate `pgboss` schema owned by revops_owner) — pg-boss job/queue/schedule tables; not app-queried, so no RLS; payloads carry tenantId
 - **outbox_events** (created/occurred_at only) — tenant_id, type (versioned, e.g. `lead.created.v1`), aggregate_id, payload jsonb, occurred_at, published_at; partial index on unpublished rows. See architecture

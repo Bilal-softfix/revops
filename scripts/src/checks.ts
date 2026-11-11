@@ -14,10 +14,11 @@ export interface CheckResult {
 export const REQUIRED_NODE_MAJOR = 22;
 /** 22.12 unflagged require(esm), which apps/api relies on to load the ESM workspace packages. */
 export const MIN_NODE_MINOR = 12;
-/** ADR-010: PostgreSQL 18 everywhere (Neon dev/test, CI). */
+/** ADR-010: PostgreSQL 18 everywhere (local dev/test, CI). */
 export const MIN_POSTGRES_VERSION_NUM = 180_000;
-export const REQUIRED_EXTENSIONS = ['vector', 'citext', 'pg_trgm'] as const;
-export const MIN_REDIS_MAJOR = 7;
+export const REQUIRED_EXTENSIONS = ['citext', 'pg_trgm'] as const;
+/** pgvector: not needed until M4 (knowledge base), so missing is a warning. CI always has it. */
+export const OPTIONAL_EXTENSIONS = ['vector'] as const;
 
 /** Hides credentials: `postgresql://app_user:****@host/db`. Never print raw URLs. */
 export function maskUrl(raw: string): string {
@@ -118,7 +119,17 @@ export function evaluateAppPostgres(label: string, facts: PostgresFacts): CheckR
       : {
           name: `${label}: extensions`,
           status: 'fail',
-          detail: `missing ${missing.join(', ')} — run CREATE EXTENSION as owner (docs/05)`,
+          detail: `missing ${missing.join(', ')} — rerun pnpm run db:bootstrap (docs/05)`,
+        },
+  );
+  const missingOptional = OPTIONAL_EXTENSIONS.filter((ext) => !facts.extensions.includes(ext));
+  results.push(
+    missingOptional.length === 0
+      ? { name: `${label}: pgvector`, status: 'pass', detail: 'vector installed' }
+      : {
+          name: `${label}: pgvector`,
+          status: 'warn',
+          detail: 'vector not installed — optional until M4 (knowledge base); CI has it',
         },
   );
 
@@ -152,6 +163,24 @@ export function evaluatePostgresVersion(
       };
 }
 
+/**
+ * The owner runs migrations and owns the SECURITY DEFINER functions. A superuser owner would make
+ * those functions bypass RLS entirely (unlike Neon/CI), so local dev uses revops_owner (ADR-012).
+ */
+export function checkOwnerNotSuperuser(
+  label: string,
+  role: string,
+  isSuperuser: boolean,
+): CheckResult {
+  return isSuperuser
+    ? {
+        name: `${label}: owner role`,
+        status: 'warn',
+        detail: `${role} is a superuser — definer functions would bypass RLS; rerun db:bootstrap with DB_BOOTSTRAP_URL (creates revops_owner)`,
+      }
+    : { name: `${label}: owner role`, status: 'pass', detail: `${role} (not superuser)` };
+}
+
 /** Owner and app connections must be different roles, otherwise RLS is bypassed in the app. */
 export function checkRoleSeparation(appRole: string, ownerRole: string): CheckResult {
   return appRole !== ownerRole
@@ -178,52 +207,6 @@ export function checkDuplicateEnvKeys(file: string, content: string): CheckResul
         status: 'warn',
         detail: `${dupes.join('; ')} — the last line wins; delete the others`,
       };
-}
-
-/** REDIS_URL is optional until M0-T6: unset is a warning, not a failure. */
-export const REDIS_NOT_CONFIGURED: CheckResult = {
-  name: 'Redis',
-  status: 'warn',
-  detail: 'REDIS_URL not set — optional until M0-T6 (queues/outbox relay), required after',
-};
-
-/** Parses `key:value` lines from a Redis INFO reply. */
-export function parseRedisInfo(info: string): Map<string, string> {
-  const fields = new Map<string, string>();
-  for (const line of info.split(/\r?\n/)) {
-    if (!line || line.startsWith('#')) continue;
-    const idx = line.indexOf(':');
-    if (idx > 0) fields.set(line.slice(0, idx), line.slice(idx + 1).trim());
-  }
-  return fields;
-}
-
-export function evaluateRedis(info: string): CheckResult[] {
-  const fields = parseRedisInfo(info);
-  const results: CheckResult[] = [];
-
-  const version = fields.get('redis_version');
-  const major = version ? Number(version.split('.')[0]) : NaN;
-  results.push(
-    !version
-      ? { name: 'Redis: version', status: 'warn', detail: 'unknown (INFO server not available)' }
-      : major >= MIN_REDIS_MAJOR
-        ? { name: 'Redis: version', status: 'pass', detail: version }
-        : { name: 'Redis: version', status: 'warn', detail: `${version} — Redis 7 expected` },
-  );
-
-  // BullMQ loses jobs if Redis evicts keys under memory pressure.
-  const policy = fields.get('maxmemory_policy');
-  results.push(
-    policy === 'noeviction'
-      ? { name: 'Redis: maxmemory-policy', status: 'pass', detail: 'noeviction' }
-      : {
-          name: 'Redis: maxmemory-policy',
-          status: 'warn',
-          detail: `${policy ?? 'unknown'} — set to noeviction (BullMQ can lose jobs)`,
-        },
-  );
-  return results;
 }
 
 export function summarize(results: readonly CheckResult[]): {

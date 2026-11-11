@@ -6,7 +6,7 @@ import { IdentityRepository } from './identity.repository';
  * auth_unverified_cutoff() in migration 0005. Login, verify, resend and forgot-password already
  * treat them as non-existent; this just removes the rows.
  *
- * Stub until M0-T6: the worker will schedule `run()` hourly as a BullMQ repeatable job.
+ * Stub until M0-T6: the worker will schedule `run()` hourly as a pg-boss cron job.
  */
 @Injectable()
 export class UnverifiedAccountCleanupJob {

@@ -7,7 +7,7 @@ Business rules react to events automatically: assignment, tasks, reminders, stag
 ## Tasks
 **M5-T1 Rule engine** — rules = trigger event + condition tree (field comparisons on lead/contact/call/qualification) + ordered actions (assign, create_task, change_stage, send_whatsapp, notify_user, add_note, delay). Pure evaluator with unit tests; runs via outbox consumers; `automation_runs` unique(rule,event) for idempotency; loop protection (max depth, no self-trigger storms).
 
-**M5-T2 Scheduled actions** — delays and reminders with BullMQ delayed jobs (survive restarts); cancel pending actions if condition no longer true at execution (e.g. lead already contacted).
+**M5-T2 Scheduled actions** — delays and reminders with pg-boss delayed jobs (survive restarts, ADR-011); cancel pending actions if condition no longer true at execution (e.g. lead already contacted).
 
 **M5-T3 WhatsApp messaging** — MessagingProvider for WhatsApp Cloud API (+ Fake); template sync & approval status; send only if consent opt-in present; delivery/read status webhooks; inbound messages create/attach to lead + timeline; 24h session window enforced for free-form replies from the inbox.
 

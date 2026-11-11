@@ -17,6 +17,8 @@ const USER_TABLE_POLICIES: Record<string, string[]> = {
   sessions: ['user_isolation:ALL'],
   users: ['user_self_insert:INSERT', 'user_self_update:UPDATE', 'user_visibility:SELECT'],
 };
+/** System tables: RLS ENABLED, no policies, no app_user privileges (definer functions only). */
+const SYSTEM_TABLES = ['rate_limit_buckets'];
 /** Read-only extras on tenant tables for a user-only context (login tenant choice, switcher). */
 const EXTRA_TENANT_POLICIES: Record<string, string[]> = {
   memberships: ['self_select:SELECT'],
@@ -33,6 +35,9 @@ const DEFINER_FUNCTIONS: Record<string, boolean> = {
   auth_reset_password: true,
   auth_session_lookup: true,
   auth_verify_email: true,
+  rate_limit_consume: true,
+  rate_limit_purge: true,
+  rate_limit_reset: true,
 };
 
 interface TableRls {
@@ -65,14 +70,26 @@ async function publicTables(): Promise<TableRls[]> {
 const policyKeys = (t: TableRls) => t.policies.map((p) => `${p.name}:${p.cmd}`).sort();
 
 describe('RLS catalog meta-test', () => {
-  it('every table in public is either a registered tenant table or a known user table', async () => {
+  it('every table in public is a registered tenant table, a known user table or a system table', async () => {
     const tables = await publicTables();
     expect(tables.filter((t) => t.tenantOwned).map((t) => t.table)).toEqual(
       TENANT_TABLES.map((f) => f.table).sort(),
     );
     expect(tables.filter((t) => !t.tenantOwned).map((t) => t.table)).toEqual(
-      Object.keys(USER_TABLE_POLICIES).sort(),
+      [...Object.keys(USER_TABLE_POLICIES), ...SYSTEM_TABLES].sort(),
     );
+  });
+
+  it('system tables: RLS ENABLED, no policies, and app_user has no privileges at all', async () => {
+    const tables = (await publicTables()).filter((t) => SYSTEM_TABLES.includes(t.table));
+    expect(
+      tables.map((t) => ({ table: t.table, rls: t.rls, policies: t.policies.length })),
+    ).toEqual(SYSTEM_TABLES.map((table) => ({ table, rls: true, policies: 0 })));
+    const privs = await owner<{ table: string; any: boolean }[]>`
+      select t as table,
+             has_table_privilege(${APP_ROLE}, t, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE') as any
+      from unnest(${SYSTEM_TABLES}::text[]) t order by 1`;
+    expect(privs).toEqual(SYSTEM_TABLES.map((table) => ({ table, any: false })));
   });
 
   it('tenant tables: ENABLE + FORCE RLS, one tenant_isolation ALL policy (+ known read extras)', async () => {
@@ -102,7 +119,9 @@ describe('RLS catalog meta-test', () => {
   });
 
   it('user tables: RLS ENABLED (not forced) with exactly the expected policies on app.user_id', async () => {
-    for (const t of (await publicTables()).filter((x) => !x.tenantOwned)) {
+    for (const t of (await publicTables()).filter(
+      (x) => !x.tenantOwned && !SYSTEM_TABLES.includes(x.table),
+    )) {
       expect({ table: t.table, rls: t.rls, force: t.force }).toEqual({
         table: t.table,
         rls: true,

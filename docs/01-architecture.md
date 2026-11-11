@@ -13,11 +13,11 @@ Modular monolith in NestJS + one Python voice worker. Modules talk via service i
 │ automation · messaging · reporting · usage · integrations(meta)   │
 │        │ outbox_events (same tx)                                  │
 │        ▼                                                          │
-│  worker.ts: outbox relay → BullMQ queues → consumers, schedulers  │
+│  worker.ts: outbox relay → pg-boss queues → consumers, cron       │
 └──────┬──────────────┬─────────────────┬───────────────────────────┘
        │              │                 │
-  PostgreSQL 18     Redis 7       Storage adapter (local disk dev / S3 prod)
-  (RLS, pgvector)   (BullMQ)
+  PostgreSQL 18                   Storage adapter (local disk dev / S3 prod)
+  (RLS, pgvector, pg-boss queues, rate limits — no Redis, ADR-011)
        ▲
        │ internal API (service token)
 ┌──────┴──────── apps/voice-agent (Python, LiveKit Agents) ─────────┐
@@ -48,7 +48,7 @@ Modular monolith in NestJS + one Python voice worker. Modules talk via service i
 - Shared DB, shared schema, `tenant_id` on every tenant table.
 - Postgres RLS: `ALTER TABLE ... ENABLE ROW LEVEL SECURITY; FORCE ROW LEVEL SECURITY;` policy `tenant_id = current_setting('app.tenant_id')::uuid`.
 - App connects as a non-owner role (`app_user`); migrations run as owner.
-- `withContext(db, { tenantId, userId }, fn)` (`@revops/db`) opens a transaction and runs `set_config('app.tenant_id', …, true)` and `set_config('app.user_id', …, true)`, the transaction-local equivalent of `SET LOCAL`. Unset values are written as `''`. `withTenant(db, tenantId, fn)` is the tenant-only shorthand. Never use a session-level `SET`: `DATABASE_URL` is Neon's PgBouncer endpoint in transaction mode, so session state would leak to other clients' transactions. Jobs carry `tenantId` in their payload and use the same helper.
+- `withContext(db, { tenantId, userId }, fn)` (`@revops/db`) opens a transaction and runs `set_config('app.tenant_id', …, true)` and `set_config('app.user_id', …, true)`, the transaction-local equivalent of `SET LOCAL`. Unset values are written as `''`. `withTenant(db, tenantId, fn)` is the tenant-only shorthand. Never use a session-level `SET`: `DATABASE_URL` may point at a transaction-mode pooler (PgBouncer, Neon's pooled endpoint, a managed proxy in prod), where session state would leak to other clients' transactions. Jobs carry `tenantId` in their payload and use the same helper.
 - Policies compare against `nullif(current_setting('app.tenant_id', true), '')::uuid`. After a transaction-local value ends, a pooled connection reads the setting back as `''`; `nullif` turns that into NULL, so a query outside `withTenant` sees no rows instead of hitting a uuid cast error.
 - New tenant table: generate the RLS SQL with `tenantRlsSql()` (`packages/db/src/rls.ts`) into a custom migration (`pnpm db:generate --custom --name=<table>_rls`), then register the table in `packages/db/test/tenant-tables.ts`. The catalog meta-test fails until both are done. App grants are explicit per table; there are no default privileges.
 - **User-scoped tables** (`users`, `sessions`, `auth_tokens`; global, no `tenant_id`) have RLS **enabled but not forced**, with policies on `app.user_id`:
@@ -69,7 +69,7 @@ Modular monolith in NestJS + one Python voice worker. Modules talk via service i
 ## Auth (M0-T4, ADR-006)
 - **Session:** the `__Host-sid` cookie holds an opaque 32-byte token (httpOnly, Secure, SameSite=Lax, Path=/; the `__Host-` prefix stops sibling subdomains from planting a session). The DB stores only its sha256. Absolute lifetime is 30 days (`expires_at`, checked in SQL); the idle timeout is 7 days, checked against `last_seen_at`, which is updated at most every 5 minutes. The active membership and role are re-checked on every request, so a removed member loses tenant access immediately.
 - **CSRF:** `x-csrf-token` = HMAC-SHA256(session token, "csrf.v1"), returned by `/v1/auth/login` and `/v1/auth/me`. It is required on unsafe methods of authenticated routes. Only JSON bodies are parsed (no urlencoded/text parsers), so a cross-site HTML form can't submit to the API.
-- **Signup** always answers `202 {"status":"check_email"}` right after validation and the per-IP limit. Everything that depends on the email's state runs as a background task (BullMQ from M0-T6), so neither the body nor the timing reveals whether an account exists:
+- **Signup** always answers `202 {"status":"check_email"}` right after validation and the per-IP limit. Everything that depends on the email's state runs as a background task (a pg-boss job from M0-T6), so neither the body nor the timing reveals whether an account exists:
   - **verified account:** a "you already have an account" email, nothing created;
   - **unverified, pending or expired:** that account and its tenant are discarded and replaced (new password, tenant and link);
   - **new:** one transaction creates the user, tenant, owner membership, audit log, `user.signed_up.v1` outbox event and verification token.
@@ -84,7 +84,8 @@ Modular monolith in NestJS + one Python voice worker. Modules talk via service i
   - Login: 5 attempts per (IP, email) per 15 minutes, reserved atomically *before* the password check and cleared on success, plus 50 per IP. Over the limit: 429 with `Retry-After`.
   - Signup: 10 per IP per hour.
   - Verify/reset emails: 3 per (IP, email) and 20 per IP per hour.
-  - In-memory until M0-T6 (Redis). Unknown emails get a dummy argon2 verify, so timing doesn't reveal which accounts exist.
+  - Stored in Postgres (ADR-011): `rate_limit_buckets`, keyed by sha256 of the key (no IPs/emails stored), reached only via the definer function `rate_limit_consume` (one atomic upsert), so limits hold across API processes and restarts. Windows follow the app's clock.
+  - Unknown emails get a dummy argon2 verify, so timing doesn't reveal which accounts exist.
 - **Resend verification and forgot password** always return 202. The lookup, token and email all run in the background. A reset sets the new password, marks the email verified, revokes all sessions and expires the user's other reset links. Links are single-use and expire after 24 hours (verify) or 1 hour (reset).
 - **Errors:** RFC 7807 `application/problem+json` with a stable `code` (`AUTH_ERROR_CODES` in `@revops/shared`).
 
@@ -113,7 +114,7 @@ Permissions are strings (`lead.read.all`, `lead.read.assigned`, `routing.manage`
 - **Tenant switcher:** `GET /v1/tenants` and `POST /v1/session/tenant` work only for the caller's own active memberships (user-only context, `self_select`).
 
 ## Events
-Outbox row: `{ id, tenant_id, type, aggregate_id, payload jsonb, occurred_at, published_at }`. Relay publishes to BullMQ queue per consumer group. Event types are versioned Zod schemas in `packages/shared/events`, e.g. `lead.created.v1`, `lead.stage_changed.v1`, `call.completed.v1`, `call.missed.v1`, `qualification.saved.v1`, `task.due.v1`.
+Outbox row: `{ id, tenant_id, type, aggregate_id, payload jsonb, occurred_at, published_at }`. Relay publishes to a pg-boss queue per consumer group (ADR-011), in the same transaction that marks the rows published. Event types are versioned Zod schemas in `packages/shared/events`, e.g. `lead.created.v1`, `lead.stage_changed.v1`, `call.completed.v1`, `call.missed.v1`, `qualification.saved.v1`, `task.due.v1`.
 
 ## Provider adapters (apps/api/src/providers)
 `TelephonyProvider`, `MessagingProvider` (whatsapp/sms/email), `LlmProvider`, `SttProvider`/`TtsProvider` (used by voice agent via config), `AdsLeadProvider` (Meta). Each has: interface, real impl, `Fake` impl, contract tests that both must pass.
@@ -129,7 +130,7 @@ Candidates to benchmark (S1): telephony — Exotel, Plivo, Twilio(+SIP trunk); S
 6. On end: transcript + summary + structured qualification → `conversations`, timeline entry, events fire automation.
 
 ## Deployment (MVP)
-- Local dev: no Docker; apps run natively, data services are cloud dev instances (docs/05-local-dev-setup.md).
+- Local dev: no Docker, no cloud services; apps and a native PostgreSQL 18 run on the dev machine (ADR-012, docs/05-local-dev-setup.md).
 - Docker images for web, api, worker, voice-agent are built in CI only (multi-stage Dockerfiles written in M8).
-- Prod: managed Postgres + Redis in ap-south-1, containers on ECS/Fly/Render-style platform (decide in M8 ADR), S3 private bucket, LiveKit Cloud or self-hosted (S1 decides).
+- Prod: managed Postgres in ap-south-1 (no Redis, ADR-011), containers on ECS/Fly/Render-style platform (decide in M8 ADR), S3 private bucket, LiveKit Cloud or self-hosted (S1 decides).
 - Kubernetes, Kafka, ClickHouse, Temporal: explicitly deferred — see ADRs for revisit triggers.

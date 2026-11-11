@@ -5,7 +5,7 @@ import {
   apiEnvSchema,
   findRepoRoot,
   migrationEnvSchema,
-  neonBootstrapEnvSchema,
+  bootstrapEnvSchema,
   seedEnvSchema,
   testDatabaseEnvSchema,
   workerEnvSchema,
@@ -25,7 +25,7 @@ const schemas = {
   worker: workerEnvSchema,
   migrations: migrationEnvSchema,
   tests: testDatabaseEnvSchema,
-  bootstrap: neonBootstrapEnvSchema,
+  bootstrap: bootstrapEnvSchema,
   seed: seedEnvSchema,
 };
 
@@ -46,7 +46,7 @@ describe('.env.example files', () => {
 
   it('contain only placeholder secrets', () => {
     for (const [key, value] of Object.entries(apiExample)) {
-      if (!/URL$/.test(key) || !value) continue; // blank = optional and unset (e.g. REDIS_URL)
+      if (!/URL$/.test(key) || !value) continue; // blank = optional and unset
       expect(new URL(value ?? '').password, key).toMatch(/^(change-me)?$/);
     }
   });

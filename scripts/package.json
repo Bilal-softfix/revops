@@ -13,7 +13,6 @@
   },
   "dependencies": {
     "@revops/shared": "workspace:*",
-    "ioredis": "catalog:",
     "postgres": "catalog:",
     "zod": "catalog:"
   },

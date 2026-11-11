@@ -1,6 +1,7 @@
 # CI — see M0-T2 in docs/milestones/M0-foundation.md.
 # checks:      matrix. ubuntu runs typecheck, lint, unit, build, audit; windows runs typecheck, unit, build.
-# integration: ubuntu only (service containers are Linux-only): Postgres 18 + pgvector (ADR-010), Redis 7.
+# integration: ubuntu only (service containers are Linux-only): Postgres 18 + pgvector (ADR-010).
+#              No Redis: queues and rate limits live in Postgres (ADR-011).
 # Actions are pinned to commit SHAs (tag in the trailing comment).
 name: CI
 
@@ -86,12 +87,6 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 5s --health-timeout 5s --health-retries 12
-      redis:
-        image: redis:7
-        ports: ['6379:6379']
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s --health-timeout 5s --health-retries 12
     # Throwaway CI containers — these credentials exist only for this job (scripts/ci/setup-db.sql).
     env:
       NODE_ENV: test
@@ -99,7 +94,8 @@ jobs:
       DATABASE_URL_OWNER: postgresql://revops_owner:ci_owner_pw@localhost:5432/revops_dev
       DATABASE_URL_TEST: postgresql://app_user:ci_app_pw@localhost:5432/revops_test
       DATABASE_URL_TEST_OWNER: postgresql://revops_owner:ci_owner_pw@localhost:5432/revops_test
-      REDIS_URL: redis://localhost:6379
+      # db:bootstrap's superuser mode (what a native local Postgres uses, ADR-012).
+      BOOTSTRAP_SUPERUSER_URL: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -128,7 +124,7 @@ jobs:
           PGPASSWORD: postgres
         run: psql -v ON_ERROR_STOP=1 -f scripts/ci/setup-db.sql
 
-      # Same checks as on a dev machine: non-owner app role, extensions, test-DB isolation, noeviction.
+      # Same checks as on a dev machine: non-owner app role, extensions, test-DB isolation.
       - name: Doctor
         run: pnpm run doctor
 

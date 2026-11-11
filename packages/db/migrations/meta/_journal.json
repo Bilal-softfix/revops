@@ -64,6 +64,20 @@
       "when": 1793942853593,
       "tag": "0008_invitations_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794378947598,
+      "tag": "0009_rate_limits",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794378948873,
+      "tag": "0010_rate_limits_functions",
+      "breakpoints": true
     }
   ]
 }

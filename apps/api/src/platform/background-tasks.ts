@@ -4,7 +4,7 @@ import { safeErrorSummary } from './errors/safe-error';
 /**
  * Work that must not run on the request path, so a response can't reveal (by content or timing)
  * what that work found — e.g. whether an email has an account. In-process for now; M0-T6 moves
- * these onto BullMQ jobs (durable, retried).
+ * these onto pg-boss jobs in Postgres (durable, retried; ADR-011).
  */
 export abstract class BackgroundTasks {
   abstract run(name: string, task: () => Promise<void>): void;
