@@ -2,17 +2,17 @@
 
 ## Current
 Milestone: M0 — Foundation (in progress). Branch: `milestone/m0-foundation`.
-Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-11-05. Next: M0-T5 RBAC + invitations. Draft PR #1 open, CI green.
+Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-11-05; M0-T5 done 2026-11-11. Next: M0-T6 Platform plumbing. Draft PR #1 open, CI green.
 
 ## Done
 - [x] M0-T1 Monorepo scaffold (2026-11-04)
 - [x] M0-T2 CI (2026-11-04) — green on GitHub (draft PR #1) after two fixes: build workspace deps before doctor, extensions in template1 for the CI owner
 - [x] M0-T3 DB layer + tenancy core (2026-11-05): Drizzle schema + migrations, `withTenant`, `tenantRlsSql` generator, seed, test-DB strategy, leak suite + 2 meta-tests
 - [x] M0-T4 Auth (2026-11-05): signup/verify/login/logout/me/forgot/reset under /v1/auth, opaque `__Host-sid` sessions, CSRF, argon2id, rate limits, users/sessions/auth_tokens RLS + 3 SECURITY DEFINER lookups, security review fixes (migration 0004)
+- [x] M0-T5 RBAC + invitations (2026-11-11): permission map + `@RequirePermission`, members list/role/disable with last-owner lock, invitations (create/list/resend/revoke/accept), tenant switcher; role × route matrix + invitation leak tests
 - [x] M0 prep: `pnpm run db:bootstrap` — scripted Neon setup (DBs, extensions, app_user, env lines), since the Neon SQL editor isn't usable (2026-11-04)
 
 ## In progress
-- [ ] M0-T5 RBAC + invitations
 - [ ] M0-T6 Platform plumbing
 - [ ] M0-T7 Web shell
 
@@ -77,6 +77,15 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - 2026-11-05 · M0-T4: Security review (security-auditor) fixed now: concurrent-burst login bypass, membership not re-checked after login, no per-IP limits, reset-email blocking, timing of 202 endpoints (email off the request path), console email in prod, password_hash readable to co-members, self_select ignoring status, cookie tossing (`__Host-`), slug collision reported as email_taken (now retried), malformed JSON/413 as problem+json. Both review decisions (a) signup enumeration and (b) pre-account hijack were resolved in the T4 follow-up (see above).
 - 2026-11-04 · M0-T3: Cross-tenant reads (tenant switcher, invite lookup, outbox relay) go through narrow `SECURITY DEFINER` functions rather than a BYPASSRLS role.
 
+- 2026-11-11 · M0-T5 (Dev decisions): only owners and admins invite. Owners can grant any role; admins can grant admin/manager/agent but never owner. Changing roles and disabling/re-enabling follows the same rule, so admins never touch owners. The last active owner can't be demoted or disabled, and nobody can disable themselves.
+- 2026-11-11 · M0-T5 (Dev decision): an invitation for an email with a verified account is accepted only while signed in as that email; this adds the membership and switches the session to the tenant. For new emails, name + password create a verified account; a pending unverified account for that email is replaced.
+- 2026-11-11 · M0-T5 (Dev decision): invitations are single-use and last 7 days; inviters can list, resend (which rotates the link) and revoke them; one open invitation per email per tenant.
+- 2026-11-11 · M0-T5: `member.read` is granted to every role (agents can see their teammates). M0 permissions: member.read / member.invite / member.manage. Later milestones add lead.*, routing.* and so on to `ROLE_PERMISSIONS`.
+- 2026-11-11 · M0-T5: The invitation token is `<tenant_id>.<random>`. The tenant part isn't secret; it lets accept look the hashed token up in that tenant's RLS context, so invitations stay FORCE RLS with no definer function. A disabled member can be re-invited; accepting re-activates them with the invited role.
+- 2026-11-11 · M0-T5: Members list uses cursor pagination; the cursor is the last membership id, compared against exact DB values (JS Dates lose microseconds). Max page size is 100.
+- 2026-11-11 · M0-T5: Rate limits: 100 invitation emails per tenant per day (create + resend); invitation accepts 20 per IP per 15 min.
+- 2026-11-11 · M0-T5: Audit log actions: invitation.created/resent/revoked, member.joined (plus a `member.joined.v1` outbox event), member.role_changed/disabled/enabled with before/after.
+
 ## Blocked on external
 - [ ] Meta Business Verification + App Review
 - [ ] WhatsApp Cloud API number + templates
@@ -94,7 +103,8 @@ _(non-blocking review findings)_
 - M0-T6: schedule `UnverifiedAccountCleanupJob` (hourly repeatable job in the worker).
 - M0-T7: the verify page must ask for the password and offer "This wasn't me" (`/v1/auth/verify-email/cancel`) as an explicit button, never auto-submitted on load (mail link scanners). The login error copy should say "wrong email or password, or your email isn't verified yet — check your inbox".
 - M0-T6: discarding an unverified account deletes its tenant's outbox rows, including `user.signed_up.v1`. Once the relay ships, consider a compensating `user.discarded.v1` (also needed for DPDP deletion propagation).
-- M0-T5: tenant switcher must only set `sessions.active_tenant_id` to an active membership; consider a sessions WITH CHECK enforcing it in SQL.
+- Tenant switch: `POST /v1/session/tenant` only sets an active membership, and the session guard re-resolves the membership per request, so a stale or bogus `active_tenant_id` grants nothing. A SQL WITH CHECK on sessions was not added: the touch-on-request update would then fail for disabled members.
+- M0-T7: the accept-invite page needs a "signed in as the wrong user" state (`invitation_email_mismatch`) and a "sign in first" state (`invitation_login_required`).
 - Slug-collision retry in signup has no test (random 24-bit suffix can't be forced to collide without a seam).
 - ESLint 9 is marked deprecated on npm. Blocked on ESLint 10: eslint-config-next 16.4.5 pulls eslint-plugin-react / -import / -jsx-a11y whose peer ranges stop at ESLint 9. Revisit when they support 10.
 - drizzle-kit 0.31 pulls deprecated `@esbuild-kit/*` (transitive). Goes away with drizzle-kit 1.0 (currently RC).

@@ -97,6 +97,21 @@ Modular monolith in NestJS + one Python voice worker. Modules talk via service i
 | agent | own/assigned leads, take calls, tasks, notes |
 Permissions are strings (`lead.read.all`, `lead.read.assigned`, `routing.manage`…) mapped from roles, checked with a Nest guard + decorator.
 
+**M0-T5 implementation:**
+- **Permission map:** `ROLE_PERMISSIONS` in `@revops/shared` (data). M0 has `member.read` (all roles) and `member.invite` + `member.manage` (owner, admin).
+- **Guarding a route:** `@RequirePermission('…')` applies `SessionGuard` (session + CSRF) and `PermissionGuard`. The role comes from the active membership, which is re-checked on every request. With no active tenant the route returns 403 `no_active_tenant`; without the permission, 403 `forbidden`.
+- **Granting roles:** only owners grant `owner`; admins grant admin/manager/agent. An actor can only change, disable, resend or revoke for roles it may grant, so admins never touch owners.
+- **Last owner:** the last active owner can't be demoted or disabled. This is checked under `FOR UPDATE` on the owner rows, so concurrent demotions can't leave none. Nobody can disable themselves.
+- **Invitations** (tenant table, FORCE RLS):
+  - one open invitation per email per tenant; 7-day, single-use links;
+  - resend rotates the link, revoke kills it;
+  - the token is `<tenant_id>.<random>`, so accept looks up its sha256 inside that tenant's RLS context, with no definer function.
+- **Accepting:**
+  - **email with a verified account:** the caller must be signed in as that email; the membership is added and the session switches to the tenant;
+  - **otherwise:** name + password create a verified account, discarding any pending unverified one, and sign it in.
+  - The invitation is claimed atomically in the same transaction as the membership insert, the audit row and `member.joined.v1`.
+- **Tenant switcher:** `GET /v1/tenants` and `POST /v1/session/tenant` work only for the caller's own active memberships (user-only context, `self_select`).
+
 ## Events
 Outbox row: `{ id, tenant_id, type, aggregate_id, payload jsonb, occurred_at, published_at }`. Relay publishes to BullMQ queue per consumer group. Event types are versioned Zod schemas in `packages/shared/events`, e.g. `lead.created.v1`, `lead.stage_changed.v1`, `call.completed.v1`, `call.missed.v1`, `qualification.saved.v1`, `task.due.v1`.
 

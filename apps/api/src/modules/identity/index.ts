@@ -3,13 +3,16 @@ import { IdentityController } from './identity.controller';
 import { IdentityRepository } from './identity.repository';
 import { IdentityService } from './identity.service';
 import { PasswordService } from './password.service';
-import { SessionGuard } from './session.guard';
+import { OptionalSessionGuard, SessionGuard } from './session.guard';
 import { SessionService } from './session.service';
 import { UnverifiedAccountCleanupJob } from './unverified-cleanup.job';
 
 // Public API of the identity module: other modules import only from here.
-export { CurrentAuth, SessionGuard } from './session.guard';
-export type { AuthContext } from './session.service';
+export { IdentityService } from './identity.service';
+export { PasswordService } from './password.service';
+export { setSessionCookie } from './session-cookie';
+export { CurrentAuth, OptionalAuth, OptionalSessionGuard, SessionGuard } from './session.guard';
+export { type AuthContext, SessionService } from './session.service';
 export { UnverifiedAccountCleanupJob } from './unverified-cleanup.job';
 
 @Module({
@@ -20,8 +23,16 @@ export { UnverifiedAccountCleanupJob } from './unverified-cleanup.job';
     PasswordService,
     SessionService,
     SessionGuard,
+    OptionalSessionGuard,
     UnverifiedAccountCleanupJob,
   ],
-  exports: [SessionService, SessionGuard, UnverifiedAccountCleanupJob],
+  exports: [
+    IdentityService,
+    PasswordService,
+    SessionService,
+    SessionGuard,
+    OptionalSessionGuard,
+    UnverifiedAccountCleanupJob,
+  ],
 })
 export class IdentityModule {}

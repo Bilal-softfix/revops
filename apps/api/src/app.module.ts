@@ -1,6 +1,7 @@
 import { type DynamicModule, Module } from '@nestjs/common';
 import type { ApiEnv } from '@revops/shared/env';
 import { IdentityModule } from './modules/identity';
+import { TenancyModule } from './modules/tenancy';
 import { HealthController } from './platform/health/health.controller';
 import { PlatformModule } from './platform/platform.module';
 import { EmailModule } from './providers/email';
@@ -14,6 +15,7 @@ export class AppModule {
         PlatformModule.register(env),
         EmailModule.register(env.EMAIL_DRIVER),
         IdentityModule,
+        TenancyModule,
       ],
       controllers: [HealthController],
     };

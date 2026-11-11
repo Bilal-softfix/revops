@@ -9,3 +9,12 @@ export const userSignedUpV1Schema = z.object({
   tenantId: z.uuid(),
 });
 export type UserSignedUpV1 = z.infer<typeof userSignedUpV1Schema>;
+
+export const MEMBER_JOINED_V1 = 'member.joined.v1';
+/** A user joined a tenant by accepting an invitation. */
+export const memberJoinedV1Schema = z.object({
+  tenantId: z.uuid(),
+  userId: z.uuid(),
+  invitationId: z.uuid(),
+});
+export type MemberJoinedV1 = z.infer<typeof memberJoinedV1Schema>;

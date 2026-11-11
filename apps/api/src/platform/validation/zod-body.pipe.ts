@@ -12,7 +12,7 @@ export class ZodBodyPipe<S extends z.ZodType> implements PipeTransform<unknown, 
   transform(value: unknown): z.infer<S> {
     const result = this.schema.safeParse(value);
     if (result.success) return result.data;
-    throw new DomainError('validation_failed', 400, 'Invalid request body', {
+    throw new DomainError('validation_failed', 400, 'Invalid request', {
       extensions: {
         errors: result.error.issues.map((issue) => ({
           path: issue.path.join('.'),

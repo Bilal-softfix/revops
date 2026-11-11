@@ -5,3 +5,4 @@ export * from './memberships.js';
 export * from './audit-logs.js';
 export * from './outbox-events.js';
 export * from './auth.js';
+export * from './invitations.js';

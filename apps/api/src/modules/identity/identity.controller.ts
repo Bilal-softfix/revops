@@ -16,17 +16,14 @@ import {
   verifyEmailRequestSchema,
 } from '@revops/shared';
 import type { ApiEnv } from '@revops/shared/env';
-import type { CookieOptions, Request, Response } from 'express';
+import type { Request, Response } from 'express';
 import { API_ENV } from '../../config/env';
+import { requestMeta as meta } from '../../platform/request-meta';
 import { ZodBodyPipe } from '../../platform/validation/zod-body.pipe';
-import { IdentityService, type RequestMeta } from './identity.service';
+import { IdentityService } from './identity.service';
 import { CurrentAuth, SessionGuard } from './session.guard';
-import { type AuthContext, SESSION_MAX_AGE_MS, sessionCookieName } from './session.service';
-
-const meta = (req: Request): RequestMeta => ({
-  ip: req.ip ?? null,
-  userAgent: req.header('user-agent')?.slice(0, 512) ?? null,
-});
+import { clearSessionCookie, setSessionCookie } from './session-cookie';
+import type { AuthContext } from './session.service';
 
 @Controller('v1/auth')
 export class IdentityController {
@@ -34,10 +31,6 @@ export class IdentityController {
     private readonly identity: IdentityService,
     @Inject(API_ENV) private readonly env: ApiEnv,
   ) {}
-
-  private cookieOptions(): CookieOptions {
-    return { httpOnly: true, secure: this.env.COOKIE_SECURE, sameSite: 'lax', path: '/' };
-  }
 
   /** Always 202 { status: 'check_email' }; the outcome only ever arrives by email. */
   @Post('signup')
@@ -85,10 +78,7 @@ export class IdentityController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<SessionResponse> {
     const { token, response } = await this.identity.login(body, meta(req));
-    res.cookie(sessionCookieName(this.env.COOKIE_SECURE), token, {
-      ...this.cookieOptions(),
-      maxAge: SESSION_MAX_AGE_MS,
-    });
+    setSessionCookie(res, this.env, token);
     return response;
   }
 
@@ -101,7 +91,7 @@ export class IdentityController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
     await this.identity.logout(auth, meta(req));
-    res.clearCookie(sessionCookieName(this.env.COOKIE_SECURE), this.cookieOptions());
+    clearSessionCookie(res, this.env);
   }
 
   @Get('me')

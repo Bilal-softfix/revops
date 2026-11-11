@@ -8,6 +8,7 @@ All tables: `id uuid pk default gen_random_uuid()`, `created_at`, `updated_at ti
 - **memberships** — tenant_id, user_id, role, status (invited/active/disabled); unique(tenant_id,user_id)
 - **sessions** (global, user-scoped RLS) — user_id, token_hash (sha256, unique), active_tenant_id, ip, user_agent, created_at, last_seen_at, expires_at (created + 30d), revoked_at
 - **auth_tokens** (global, user-scoped RLS) — user_id, purpose (email_verify/password_reset), token_hash (unique), expires_at, used_at (single use via `auth_consume_token`)
+- **invitations** (tenant, FORCE RLS) — email (citext), role, token_hash (sha256 of `<tenant_id>.<random>`, unique), invited_by, expires_at (7 d), accepted_at, revoked_at; unique(tenant_id, email) where open
 - **business_hours** — tenant_id, weekday, open_time, close_time; **holidays** — tenant_id, date
 - **audit_logs** (append-only: app_user has SELECT + INSERT only; created_at, no updated_at) — tenant_id, actor_type (user/ai/system), actor_id, action, entity, entity_id (text), before/after jsonb, ip inet
 

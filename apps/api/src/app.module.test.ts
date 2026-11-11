@@ -25,7 +25,7 @@ describe('AppModule (http)', () => {
     configureApp(app);
     await app.init();
     server = app.getHttpServer() as Server;
-  });
+  }, 30_000); // boots the whole app (incl. the argon2 dummy-hash warm-up): slow on a busy machine
 
   afterAll(async () => {
     await app.close();

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Db } from '../src/client.js';
-import { auditLogs, memberships, outboxEvents, tenants } from '../src/schema/index.js';
+import { auditLogs, invitations, memberships, outboxEvents, tenants } from '../src/schema/index.js';
 import { withTenant } from '../src/with-tenant.js';
 import type { TenantTableFixture } from './leak-check.js';
 import { insertUser } from './users.js';
@@ -53,6 +53,24 @@ export const TENANT_TABLES: readonly TenantTableFixture[] = [
         .insert(outboxEvents)
         .values({ tenantId, type: 'test.created.v1', payload: { ok: true } })
         .returning({ id: outboxEvents.id });
+      return row?.id ?? '';
+    },
+  },
+  {
+    table: 'invitations',
+    tenantColumn: 'tenant_id',
+    privileges: ['SELECT', 'INSERT', 'UPDATE'],
+    insert: async (tx, tenantId) => {
+      const [row] = await tx
+        .insert(invitations)
+        .values({
+          tenantId,
+          email: `${randomUUID()}@invite.test`,
+          role: 'agent',
+          tokenHash: randomUUID(),
+          expiresAt: new Date(Date.now() + 86_400_000),
+        })
+        .returning({ id: invitations.id });
       return row?.id ?? '';
     },
   },

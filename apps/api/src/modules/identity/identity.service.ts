@@ -18,6 +18,7 @@ import { BackgroundTasks } from '../../platform/background-tasks';
 import { Clock } from '../../platform/clock';
 import { Database } from '../../platform/database/database';
 import { RateLimiter } from '../../platform/rate-limit/rate-limiter';
+import type { RequestMeta } from '../../platform/request-meta';
 import { EmailProvider, maskEmail } from '../../providers/email';
 import { accountExistsMessage, resetPasswordMessage, verifyEmailMessage } from './emails';
 import {
@@ -59,11 +60,6 @@ const EMAILS_PER_IP_PER_HOUR = 20;
 const REPLACES_PER_EMAIL_PER_DAY = 3;
 const CANCELS_PER_IP = 20;
 const SIGNUP_ATTEMPTS = 3; // retries on a (24-bit) tenant slug collision
-
-export interface RequestMeta {
-  ip: string | null;
-  userAgent: string | null;
-}
 
 /** The violated unique constraint's name, or undefined if `error` isn't a unique violation. */
 function uniqueViolation(error: unknown): string | undefined {

@@ -3,12 +3,14 @@ import type { Server } from 'node:http';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { loadTestDatabaseEnv } from '@revops/db/testing';
-import { CSRF_HEADER, type SessionResponse } from '@revops/shared';
+import { createDb, memberships, users, withContext } from '@revops/db';
+import { CSRF_HEADER, type Role, type SessionResponse } from '@revops/shared';
 import { apiEnvSchema, parseEnv } from '@revops/shared/env';
 import postgres from 'postgres';
 import request from 'supertest';
 import { APP_OPTIONS, configureApp } from '../src/app-setup';
 import { AppModule } from '../src/app.module';
+import { PasswordService } from '../src/modules/identity/password.service';
 import { sessionCookieName } from '../src/modules/identity/session.service';
 import { BackgroundTasks, QueuedBackgroundTasks } from '../src/platform/background-tasks';
 import { Clock, FakeClock } from '../src/platform/clock';
@@ -131,3 +133,34 @@ export const expireSignup = (email: string) =>
   asTestOwner(
     (sql) => sql`update users set created_at = now() - interval '49 hours' where email = ${email}`,
   );
+
+/**
+ * Adds a verified user with `role` to the tenant directly in the test DB (through RLS, as
+ * app_user), password PASSWORD. Much faster than invite + accept for role-matrix tests.
+ */
+export async function addMember(
+  t: TestApp,
+  tenantId: string,
+  role: Role,
+  status: 'active' | 'disabled' = 'active',
+): Promise<{ userId: string; email: string }> {
+  const userId = randomUUID();
+  const email = uniqueEmail(role);
+  const passwordHash = await t.app.get(PasswordService).hash(PASSWORD);
+  const db = createDb(loadTestDatabaseEnv().appUrl, { max: 1 });
+  try {
+    await withContext(db.db, { tenantId, userId }, async (tx) => {
+      await tx.insert(users).values({
+        id: userId,
+        email,
+        name: `${role} user`,
+        passwordHash,
+        emailVerifiedAt: new Date(),
+      });
+      await tx.insert(memberships).values({ tenantId, userId, role, status });
+    });
+  } finally {
+    await db.close();
+  }
+  return { userId, email };
+}
