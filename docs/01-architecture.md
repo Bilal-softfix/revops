@@ -113,6 +113,17 @@ Permissions are strings (`lead.read.all`, `lead.read.assigned`, `routing.manage`
   - The invitation is claimed atomically in the same transaction as the membership insert, the audit row and `member.joined.v1`.
 - **Tenant switcher:** `GET /v1/tenants` and `POST /v1/session/tenant` work only for the caller's own active memberships (user-only context, `self_select`).
 
+## CRM setup and industry templates (M1-T3a)
+- **Templates are data, not code:** `packages/shared/src/templates/data/*.json`, validated at import by `industryTemplateSchema`. The six templates are `generic`, `real-estate`, `education`, `clinic`, `software-agency` and `repair-shop`. Each one defines:
+  - one or more pipelines (exactly one default), with stages (category open/won/lost, probability) and lost-reason presets;
+  - suggested custom fields;
+  - lead sources.
+- **Provisioning:** `provisionCrm(tx, tenantId, templateKey)` (`packages/db`) copies a template into the tenant's own pipelines, stages, custom field definitions and lead sources.
+  - It runs once: a per-tenant advisory lock, and a tenant that already has a pipeline is left alone. Later template edits never change existing tenants.
+  - Signup's "Business type" (`industry`, default `generic`) provisions in the same transaction as the tenant.
+  - Tenants created earlier are provisioned lazily from `tenants.industry_template` by `CrmService.withCrm` on first CRM access.
+- **Cross-tenant references are impossible:** CRM child rows reference their parent through composite foreign keys on `(tenant_id, parent_id)` against `unique(tenant_id, id)`. FK checks bypass RLS, so a plain `pipeline_id` FK would let one tenant point at another tenant's row by its uuid. Every M1 table follows this rule.
+
 ## Web app (apps/web, M0-T7)
 - **The browser never calls the API directly.** It calls same-origin `/api/v1/*`, and the route handler `app/api/[...path]/route.ts` forwards that to `API_INTERNAL_URL`, which is read at runtime.
   - Only `/v1` is exposed: `/metrics`, `/docs` and the probes stay internal.

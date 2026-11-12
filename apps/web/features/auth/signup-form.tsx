@@ -1,13 +1,28 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { type SignupRequest, signupRequestSchema, signupResponseSchema } from '@revops/shared';
+import {
+  DEFAULT_INDUSTRY_TEMPLATE,
+  INDUSTRY_TEMPLATES,
+  INDUSTRY_TEMPLATE_KEYS,
+  type SignupRequest,
+  signupRequestSchema,
+  signupResponseSchema,
+} from '@revops/shared';
 import Link from 'next/link';
 import { useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { Controller, useForm } from 'react-hook-form';
 import type { z } from 'zod';
 import { FormError, TextField } from '@/components/form/text-field';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { api } from '@/lib/api/client';
 import { applyApiError } from '@/lib/forms';
 import { authStrings as s } from '@/lib/strings/auth';
@@ -19,7 +34,13 @@ export function SignupForm() {
   const [formError, setFormError] = useState<string | null>(null);
   const form = useForm<z.input<typeof signupRequestSchema>, unknown, SignupRequest>({
     resolver: zodResolver(signupRequestSchema),
-    defaultValues: { name: '', email: '', password: '', tenantName: '' },
+    defaultValues: {
+      name: '',
+      email: '',
+      password: '',
+      tenantName: '',
+      industry: DEFAULT_INDUSTRY_TEMPLATE,
+    },
   });
   const { errors, isSubmitting } = form.formState;
 
@@ -31,7 +52,13 @@ export function SignupForm() {
       setSentTo(values.email);
     } catch (error) {
       setFormError(
-        applyApiError(error, form.setError, ['name', 'email', 'password', 'tenantName']),
+        applyApiError(error, form.setError, [
+          'name',
+          'email',
+          'password',
+          'tenantName',
+          'industry',
+        ]),
       );
     }
   });
@@ -70,6 +97,31 @@ export function SignupForm() {
           error={errors.tenantName?.message}
           {...form.register('tenantName')}
         />
+        <div className="grid gap-1.5">
+          <Label htmlFor="signup-industry">{s.businessType}</Label>
+          <Controller
+            control={form.control}
+            name="industry"
+            render={({ field }) => (
+              <Select
+                value={field.value ?? DEFAULT_INDUSTRY_TEMPLATE}
+                onValueChange={field.onChange}
+              >
+                <SelectTrigger id="signup-industry" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {INDUSTRY_TEMPLATE_KEYS.map((key) => (
+                    <SelectItem key={key} value={key}>
+                      {INDUSTRY_TEMPLATES[key].name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          />
+          <p className="text-xs text-muted-foreground">{s.businessTypeHint}</p>
+        </div>
         <TextField
           label={s.email}
           type="email"

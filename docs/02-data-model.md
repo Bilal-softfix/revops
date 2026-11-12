@@ -14,14 +14,15 @@ All tables: `id uuid pk default gen_random_uuid()`, `created_at`, `updated_at ti
 
 ## CRM
 - **contacts** — name, phone_e164, alt_phones text[], email, city, custom_fields jsonb, consent jsonb (whatsapp/sms/call/recording with timestamps + source), deleted_at. Index: unique(tenant_id, phone_e164) where deleted_at is null; (tenant_id, email)
-- **pipelines** — name, is_default; **pipeline_stages** — pipeline_id, name, position, category (open/won/lost), probability
+- **pipelines** (M1-T3a) — key (template key, null for user-made), name, is_default (one per tenant), position, lost_reasons jsonb (suggested reasons), deleted_at; unique(tenant_id, id) for composite FKs
+- **pipeline_stages** — (tenant_id, pipeline_id) → pipelines, key, name, position, category (open/won/lost), probability 0–100
 - **leads** — contact_id, pipeline_id, stage_id, owner_user_id, status, score (nullable, post-MVP), value_paise bigint, currency default 'INR', source_id, attribution jsonb (utm_*, gclid, fbclid, meta campaign/adset/ad/form ids, landing_url, referrer), first_response_at, qualified_at, won_at, lost_reason, custom_fields jsonb
-- **custom_field_defs** — entity (contact/lead), key, label, type (text/number/date/select/multiselect/bool), options jsonb, required
+- **custom_field_defs** — entity (contact/lead), key (immutable; unique per tenant and entity forever, even after deletion, so values never come back under another type), label, type (text/number/date/select/multiselect/bool), options jsonb [{value,label}], required, position, deleted_at (hides values, never destroys them)
 - **notes** — lead_id, author_id, body; **tasks** — lead_id, assignee_id, type (call/followup/meeting/other), due_at, status, completed_at
 - **timeline_events** — lead_id, contact_id, type (created/stage_changed/call/message/note/task/qualification/assignment), ref_table, ref_id, summary, occurred_at. Index (tenant_id, lead_id, occurred_at desc)
 
 ## Capture
-- **lead_sources** — type (web_form/api/csv/phone/whatsapp/meta/manual), name, config jsonb, public_key (for form embed), is_active
+- **lead_sources** — type (web_form/api/csv/phone/whatsapp/meta/manual/walk_in), key (template key), name, is_active. Created minimal in M1-T3a from the industry template; M2 adds config jsonb and public_key (for form embed)
 - **inbound_webhooks** — provider, external_event_id, signature_valid, payload jsonb, status, error, processed_at; unique(provider, external_event_id)
 - **imports** — file_key, status, totals jsonb, error_report_key
 

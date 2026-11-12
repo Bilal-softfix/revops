@@ -120,6 +120,20 @@
       "when": 1794478131863,
       "tag": "0016_auth_cancel_signup",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1794481112989,
+      "tag": "0017_crm_setup",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1794481129285,
+      "tag": "0018_crm_setup_rls",
+      "breakpoints": true
     }
   ]
 }

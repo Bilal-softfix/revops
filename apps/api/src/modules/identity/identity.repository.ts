@@ -149,7 +149,10 @@ export class IdentityRepository {
     await tx.insert(users).values(user);
   }
 
-  async insertTenant(tx: Tx, tenant: { id: string; name: string; slug: string }): Promise<void> {
+  async insertTenant(
+    tx: Tx,
+    tenant: { id: string; name: string; slug: string; industryTemplate: string },
+  ): Promise<void> {
     await tx.insert(tenants).values(tenant);
   }
 

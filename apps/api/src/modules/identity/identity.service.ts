@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { provisionCrm } from '@revops/db';
 import {
   type CancelSignupRequest,
+  DEFAULT_INDUSTRY_TEMPLATE,
+  type IndustryTemplateKey,
   type EmailOnlyRequest,
   type LoginRequest,
   type ResetPasswordRequest,
@@ -133,6 +136,7 @@ export class IdentityService {
       name: input.name,
       email: input.email,
       tenantName: input.tenantName,
+      industry: input.industry ?? DEFAULT_INDUSTRY_TEMPLATE,
       passwordHash,
       meta,
     });
@@ -189,7 +193,7 @@ export class IdentityService {
 
   /** Returns the verification token to email. */
   private async createAccount(
-    input: Pick<SignupRequest, 'name' | 'email' | 'tenantName'>,
+    input: Pick<SignupRequest, 'name' | 'email' | 'tenantName'> & { industry: IndustryTemplateKey },
     passwordHash: string,
     meta: RequestMeta,
   ): Promise<string> {
@@ -209,8 +213,12 @@ export class IdentityService {
         id: tenantId,
         name: input.tenantName,
         slug: tenantSlug(input.tenantName),
+        industryTemplate: input.industry,
       });
       await this.repository.insertMembership(tx, { tenantId, userId, role: 'owner' });
+      // The CRM setup (pipelines, fields, sources) comes from the chosen industry template, in
+      // the same transaction: a new tenant never exists without one (M1-T3a).
+      await provisionCrm(tx, tenantId, input.industry);
       await recordAudit(tx, {
         tenantId,
         actorType: 'user',

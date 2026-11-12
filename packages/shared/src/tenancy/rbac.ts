@@ -11,14 +11,18 @@ export const PERMISSIONS = [
   'member.invite',
   /** Change members' roles; disable / re-enable members. */
   'member.manage',
+  /** Work with own/assigned leads and the CRM setup they need (pipelines, sources, fields). */
+  'lead.read.assigned',
+  /** See every lead and contact in the tenant (not just own/assigned). */
+  'lead.read.all',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
 export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
-  owner: ['member.read', 'member.invite', 'member.manage'],
-  admin: ['member.read', 'member.invite', 'member.manage'],
-  manager: ['member.read'],
-  agent: ['member.read'],
+  owner: ['member.read', 'member.invite', 'member.manage', 'lead.read.assigned', 'lead.read.all'],
+  admin: ['member.read', 'member.invite', 'member.manage', 'lead.read.assigned', 'lead.read.all'],
+  manager: ['member.read', 'lead.read.assigned', 'lead.read.all'],
+  agent: ['member.read', 'lead.read.assigned'],
 };
 
 export function hasPermission(role: Role | null | undefined, permission: Permission): boolean {

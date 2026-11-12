@@ -1,0 +1,96 @@
+{
+  "key": "software-agency",
+  "name": "Software agency / IT services",
+  "description": "Agencies and IT service companies: inquiry → discovery → proposal → project won.",
+  "pipelines": [
+    {
+      "key": "projects",
+      "name": "Project inquiries",
+      "isDefault": true,
+      "stages": [
+        { "key": "new_inquiry", "name": "New inquiry", "category": "open", "probability": 10 },
+        {
+          "key": "discovery_call",
+          "name": "Discovery call",
+          "category": "open",
+          "probability": 25
+        },
+        {
+          "key": "proposal_sent",
+          "name": "Proposal / quote sent",
+          "category": "open",
+          "probability": 50
+        },
+        { "key": "negotiation", "name": "Negotiation", "category": "open", "probability": 75 },
+        { "key": "won", "name": "Won", "category": "won", "probability": 100 },
+        { "key": "lost", "name": "Lost", "category": "lost", "probability": 0 }
+      ],
+      "lostReasons": [
+        "Budget too low",
+        "Chose another vendor",
+        "Project on hold",
+        "Scope not a fit",
+        "No response"
+      ]
+    }
+  ],
+  "customFields": [
+    {
+      "entity": "lead",
+      "key": "project_type",
+      "label": "Project type",
+      "type": "select",
+      "options": [
+        { "value": "website", "label": "Website" },
+        { "value": "mobile_app", "label": "Mobile app" },
+        { "value": "custom_software", "label": "Custom software" },
+        { "value": "ecommerce", "label": "E-commerce" },
+        { "value": "maintenance", "label": "Maintenance / support" }
+      ]
+    },
+    {
+      "entity": "lead",
+      "key": "budget_range",
+      "label": "Budget range",
+      "type": "select",
+      "options": [
+        { "value": "under_1l", "label": "Under ₹1 lakh" },
+        { "value": "1l_5l", "label": "₹1–5 lakh" },
+        { "value": "5l_20l", "label": "₹5–20 lakh" },
+        { "value": "over_20l", "label": "Over ₹20 lakh" }
+      ]
+    },
+    { "entity": "lead", "key": "desired_start", "label": "Desired start date", "type": "date" },
+    {
+      "entity": "lead",
+      "key": "tech_stack",
+      "label": "Tech stack",
+      "type": "multiselect",
+      "options": [
+        { "value": "react", "label": "React / Next.js" },
+        { "value": "node", "label": "Node.js" },
+        { "value": "flutter", "label": "Flutter" },
+        { "value": "android_ios", "label": "Native Android / iOS" },
+        { "value": "php_laravel", "label": "PHP / Laravel" },
+        { "value": "wordpress", "label": "WordPress" },
+        { "value": "python", "label": "Python" }
+      ]
+    },
+    {
+      "entity": "lead",
+      "key": "requirements_doc",
+      "label": "Requirements received",
+      "type": "bool"
+    },
+    { "entity": "contact", "key": "company", "label": "Company", "type": "text" },
+    { "entity": "contact", "key": "designation", "label": "Designation", "type": "text" }
+  ],
+  "leadSources": [
+    { "key": "website", "name": "Website", "type": "web_form" },
+    { "key": "referral", "name": "Referral", "type": "manual" },
+    { "key": "phone", "name": "Phone call", "type": "phone" },
+    { "key": "whatsapp", "name": "WhatsApp", "type": "whatsapp" },
+    { "key": "linkedin", "name": "LinkedIn", "type": "manual" },
+    { "key": "freelance_portal", "name": "Freelance portal", "type": "manual" }
+  ]
+}

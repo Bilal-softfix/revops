@@ -1,0 +1,29 @@
+{
+  "key": "generic",
+  "name": "Other / general business",
+  "description": "A simple sales pipeline that fits most businesses. You can rename stages and add fields later.",
+  "pipelines": [
+    {
+      "key": "sales",
+      "name": "Sales",
+      "isDefault": true,
+      "stages": [
+        { "key": "new", "name": "New", "category": "open", "probability": 10 },
+        { "key": "contacted", "name": "Contacted", "category": "open", "probability": 25 },
+        { "key": "qualified", "name": "Qualified", "category": "open", "probability": 50 },
+        { "key": "proposal", "name": "Proposal", "category": "open", "probability": 70 },
+        { "key": "won", "name": "Won", "category": "won", "probability": 100 },
+        { "key": "lost", "name": "Lost", "category": "lost", "probability": 0 }
+      ],
+      "lostReasons": ["Price too high", "Chose a competitor", "No response", "Not a fit"]
+    }
+  ],
+  "customFields": [],
+  "leadSources": [
+    { "key": "website", "name": "Website", "type": "web_form" },
+    { "key": "phone", "name": "Phone call", "type": "phone" },
+    { "key": "whatsapp", "name": "WhatsApp", "type": "whatsapp" },
+    { "key": "referral", "name": "Referral", "type": "manual" },
+    { "key": "other", "name": "Other", "type": "manual" }
+  ]
+}

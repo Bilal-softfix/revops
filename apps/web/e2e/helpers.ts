@@ -53,10 +53,21 @@ export async function linkFromEmail(to: string, path: string): Promise<string> {
 }
 
 /** Signs up through the UI, verifies through the emailed link, and lands signed out on /login. */
-export async function signupAndVerify(page: Page, email: string, business: string, name: string) {
+export async function signupAndVerify(
+  page: Page,
+  email: string,
+  business: string,
+  name: string,
+  /** Option label of the "Business type" picker; default leaves it at generic. */
+  businessType?: string,
+) {
   await page.goto('/signup');
   await page.getByLabel('Your name').fill(name);
   await page.getByLabel('Business name').fill(business);
+  if (businessType) {
+    await page.getByRole('combobox', { name: 'Business type' }).click();
+    await page.getByRole('option', { name: businessType }).click();
+  }
   await page.getByLabel('Work email').fill(email);
   await page.getByLabel('Password').fill(PASSWORD);
   await page.getByRole('button', { name: 'Create account' }).click();

@@ -1,0 +1,86 @@
+{
+  "key": "repair-shop",
+  "name": "Repair shop / service centre",
+  "description": "Mobile and electronics repair: inquiries from calls and walk-ins, and repair jobs from receipt to delivery.",
+  "pipelines": [
+    {
+      "key": "inquiries",
+      "name": "Inquiries",
+      "isDefault": true,
+      "stages": [
+        { "key": "new", "name": "New", "category": "open", "probability": 20 },
+        { "key": "quoted", "name": "Quoted", "category": "open", "probability": 50 },
+        {
+          "key": "device_received",
+          "name": "Device received",
+          "category": "won",
+          "probability": 100
+        },
+        { "key": "lost", "name": "Not repairing", "category": "lost", "probability": 0 }
+      ],
+      "lostReasons": ["Quote too high", "Went to another shop", "Will repair later", "No response"]
+    },
+    {
+      "key": "repair_jobs",
+      "name": "Repair jobs",
+      "isDefault": false,
+      "stages": [
+        { "key": "received", "name": "Received", "category": "open", "probability": 60 },
+        { "key": "diagnosing", "name": "Diagnosing", "category": "open", "probability": 60 },
+        {
+          "key": "awaiting_approval",
+          "name": "Awaiting approval",
+          "category": "open",
+          "probability": 50
+        },
+        { "key": "repairing", "name": "Repairing", "category": "open", "probability": 80 },
+        {
+          "key": "ready_for_pickup",
+          "name": "Ready for pickup",
+          "category": "open",
+          "probability": 95
+        },
+        { "key": "delivered", "name": "Delivered", "category": "won", "probability": 100 },
+        { "key": "cancelled", "name": "Cancelled", "category": "lost", "probability": 0 }
+      ],
+      "lostReasons": [
+        "Customer declined estimate",
+        "Not repairable",
+        "Parts unavailable",
+        "Customer took device back"
+      ]
+    }
+  ],
+  "customFields": [
+    { "entity": "lead", "key": "device_brand", "label": "Device brand", "type": "text" },
+    { "entity": "lead", "key": "device_model", "label": "Device model", "type": "text" },
+    { "entity": "lead", "key": "imei_serial", "label": "IMEI / serial no.", "type": "text" },
+    {
+      "entity": "lead",
+      "key": "issue",
+      "label": "Issue",
+      "type": "select",
+      "options": [
+        { "value": "screen", "label": "Screen / display" },
+        { "value": "battery", "label": "Battery" },
+        { "value": "charging", "label": "Charging port" },
+        { "value": "water_damage", "label": "Water damage" },
+        { "value": "software", "label": "Software / dead" },
+        { "value": "camera", "label": "Camera" },
+        { "value": "speaker_mic", "label": "Speaker / mic" },
+        { "value": "other", "label": "Other" }
+      ]
+    },
+    { "entity": "lead", "key": "estimate_inr", "label": "Estimate (₹)", "type": "number" },
+    { "entity": "lead", "key": "advance_paid_inr", "label": "Advance paid (₹)", "type": "number" },
+    { "entity": "lead", "key": "promised_date", "label": "Promised delivery date", "type": "date" },
+    { "entity": "lead", "key": "under_warranty", "label": "Under warranty", "type": "bool" }
+  ],
+  "leadSources": [
+    { "key": "walk_in", "name": "Walk-in", "type": "walk_in" },
+    { "key": "phone", "name": "Phone call", "type": "phone" },
+    { "key": "whatsapp", "name": "WhatsApp", "type": "whatsapp" },
+    { "key": "google_maps", "name": "Google Maps / search", "type": "manual" },
+    { "key": "referral", "name": "Referral", "type": "manual" }
+  ]
+}
