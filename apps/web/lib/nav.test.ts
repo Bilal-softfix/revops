@@ -30,5 +30,10 @@ describe('safeNext (no open redirects)', () => {
     ['//evil.example/x', '/dashboard'],
     ['/\\evil.example', '/dashboard'],
     ['dashboard', '/dashboard'],
+    // Browsers strip tab/newline, so these would resolve to //evil.example (M0 security review).
+    ['/\t/evil.example', '/dashboard'],
+    ['/\n/evil.example', '/dashboard'],
+    ['/\u0000/evil.example', '/dashboard'],
+    ['/team#members', '/team#members'],
   ])('%s → %s', (input, expected) => expect(safeNext(input)).toBe(expected));
 });

@@ -3,7 +3,7 @@ import {
   Injectable,
   Logger,
   type OnApplicationBootstrap,
-  type OnApplicationShutdown,
+  type BeforeApplicationShutdown,
 } from '@nestjs/common';
 import { sql } from '@revops/db';
 import type { OutboxEnvelope } from '@revops/shared';
@@ -42,7 +42,7 @@ interface ClaimedRow extends Record<string, unknown> {
  * the event id anyway (processOnce), so delivery is effectively exactly-once.
  */
 @Injectable()
-export class OutboxRelay implements OnApplicationBootstrap, OnApplicationShutdown {
+export class OutboxRelay implements OnApplicationBootstrap, BeforeApplicationShutdown {
   private readonly logger = new Logger('OutboxRelay');
   private timer: NodeJS.Timeout | undefined;
   private running: Promise<unknown> | undefined;
@@ -123,7 +123,8 @@ export class OutboxRelay implements OnApplicationBootstrap, OnApplicationShutdow
     }, delay);
   }
 
-  async onApplicationShutdown(): Promise<void> {
+  /** Stops polling and waits for the current pass, before the DB pool closes. */
+  async beforeApplicationShutdown(): Promise<void> {
     this.stopped = true;
     clearTimeout(this.timer);
     await this.running;

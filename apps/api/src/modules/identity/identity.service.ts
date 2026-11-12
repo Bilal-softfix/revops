@@ -53,6 +53,12 @@ export const LOGIN_MAX_FAILURES = 5;
 export const LOGIN_WINDOW_MS = 15 * MINUTE;
 /** Per-IP ceilings across all emails (credential stuffing, argon2 CPU, junk signups). */
 export const LOGIN_PER_IP = 50;
+/**
+ * Per-account login ceiling, whatever the IP (M0 security review HIGH-1): the client IP can be
+ * spoofed behind the web proxy until M8, so an IP-keyed limit alone doesn't stop guessing one
+ * account. Cleared on success. Trade-off: 20 bad attempts lock that email out for 15 minutes.
+ */
+export const LOGIN_PER_EMAIL = 20;
 export const SIGNUPS_PER_IP_PER_HOUR = 10;
 /** Verify-email password attempts per account per 15 minutes (plus a per-IP ceiling). */
 export const VERIFY_MAX_ATTEMPTS = 5;
@@ -60,12 +66,18 @@ const VERIFY_PER_IP = 50;
 /** Auth emails per (IP, email) and per IP, per hour; extra requests are dropped silently. */
 const EMAILS_PER_ADDRESS_PER_HOUR = 3;
 const EMAILS_PER_IP_PER_HOUR = 20;
+/** Auth emails per address per hour from ANY IP (no email bombing via spoofed IPs). */
+export const EMAILS_PER_ADDRESS_ANY_IP_PER_HOUR = 5;
+/** resend-verification / forgot-password requests per IP per hour, checked before enqueueing. */
+export const EMAIL_REQUESTS_PER_IP_PER_HOUR = 20;
 /**
  * A pending signup can be replaced by a new signup for the same email (Dev decision b2), but at most
  * this often per email per day, from any IP, so nobody can keep wiping someone else's signup.
  */
 const REPLACES_PER_EMAIL_PER_DAY = 3;
 const CANCELS_PER_IP = 20;
+/** Reset attempts per IP per 15 minutes: each one costs an argon2 hash before the link is checked. */
+export const RESETS_PER_IP = 20;
 const SIGNUP_ATTEMPTS = 3; // retries on a (24-bit) tenant slug collision
 
 /** The violated unique constraint's name, or undefined if `error` isn't a unique violation. */
@@ -122,9 +134,9 @@ export class IdentityService {
   }
 
   /** Job `identity.signup` (worker). */
-  async completeSignup(input: SignupJobData): Promise<void> {
+  async completeSignup(input: SignupJobData, attempt = 0): Promise<void> {
     const { meta } = input;
-    if (!(await this.allowEmail('signup', input.email, meta))) return;
+    if (!(await this.allowEmail('signup', input.email, meta, attempt))) return;
     const existing = await this.repository.findUserByEmail(input.email);
     if (existing?.emailVerifiedAt) {
       await this.email.send(accountExistsMessage(input.email, this.env.APP_URL));
@@ -132,7 +144,7 @@ export class IdentityService {
     }
     // Pending unverified account for this email: replace it (new password, tenant and links; the
     // old ones stop working). Expired ones are invisible to the lookup and always replaced.
-    if (existing) {
+    if (existing && attempt === 0) {
       const blocked = await this.rateLimiter.consume(
         `signup-replace:${input.email}`,
         REPLACES_PER_EMAIL_PER_DAY,
@@ -267,12 +279,13 @@ export class IdentityService {
 
   /** Always 202; the lookup and email happen in a job (no account-state signal). */
   async resendVerification(input: EmailOnlyRequest, meta: RequestMeta): Promise<void> {
+    await this.limitEmailRequests('resend', meta);
     await this.jobs.send(RESEND_VERIFICATION_JOB, { email: input.email, meta });
   }
 
   /** Job `identity.resend-verification` (worker). */
-  async sendVerificationEmail({ email, meta }: EmailJobData): Promise<void> {
-    if (!(await this.allowEmail('verify', email, meta))) return;
+  async sendVerificationEmail({ email, meta }: EmailJobData, attempt = 0): Promise<void> {
+    if (!(await this.allowEmail('verify', email, meta, attempt))) return;
     const user = await this.repository.findUserByEmail(email);
     if (!user || user.emailVerifiedAt) return;
     const token = await this.issueToken(user.id, 'email_verify', EMAIL_VERIFY_TTL_MS);
@@ -286,9 +299,11 @@ export class IdentityService {
     const ip = meta.ip ?? 'unknown';
     const key = `login:${ip}:${input.email}`;
     // Reserve the attempt first (atomic), then verify: a parallel burst can't exceed the limit.
+    const emailKey = `login-email:${input.email}`;
     const retryAfter = Math.max(
       await this.rateLimiter.consume(`login-ip:${ip}`, LOGIN_PER_IP, LOGIN_WINDOW_MS),
       await this.rateLimiter.consume(key, LOGIN_MAX_FAILURES, LOGIN_WINDOW_MS),
+      await this.rateLimiter.consume(emailKey, LOGIN_PER_EMAIL, LOGIN_WINDOW_MS),
     );
     if (retryAfter > 0) throw rateLimited(retryAfter);
 
@@ -301,11 +316,12 @@ export class IdentityService {
     if (!user.emailVerifiedAt) {
       // Same answer as a wrong password: a distinct "not verified" response would let anyone tell,
       // via signup + login, whether an email already had a verified account. The owner gets a
-      // fresh verification email instead (rate-limited, in a job).
-      await this.resendVerification({ email: input.email }, meta);
+      // fresh verification email instead (rate-limited in the job). Enqueued directly: the
+      // request-path limit of /resend-verification would turn this into a distinct 429.
+      await this.jobs.send(RESEND_VERIFICATION_JOB, { email: input.email, meta });
       throw invalidCredentials();
     }
-    await this.rateLimiter.reset(key);
+    await Promise.all([this.rateLimiter.reset(key), this.rateLimiter.reset(emailKey)]);
 
     const tenantId =
       (await this.database.withContext({ userId: user.id }, (tx) =>
@@ -378,12 +394,13 @@ export class IdentityService {
 
   /** Always 202; the lookup and email happen in a job (no account-state signal). */
   async forgotPassword(input: EmailOnlyRequest, meta: RequestMeta): Promise<void> {
+    await this.limitEmailRequests('forgot', meta);
     await this.jobs.send(FORGOT_PASSWORD_JOB, { email: input.email, meta });
   }
 
   /** Job `identity.forgot-password` (worker). */
-  async sendPasswordResetEmail({ email, meta }: EmailJobData): Promise<void> {
-    if (!(await this.allowEmail('reset', email, meta))) return;
+  async sendPasswordResetEmail({ email, meta }: EmailJobData, attempt = 0): Promise<void> {
+    if (!(await this.allowEmail('reset', email, meta, attempt))) return;
     const user = await this.repository.findUserByEmail(email);
     if (!user) return;
     if (!user.emailVerifiedAt) {
@@ -402,7 +419,14 @@ export class IdentityService {
    * New password + every session of the user revoked + other reset links invalidated. The emailed
    * link proves the address, so an unverified email becomes verified.
    */
-  async resetPassword(input: ResetPasswordRequest): Promise<void> {
+  async resetPassword(input: ResetPasswordRequest, meta: RequestMeta): Promise<void> {
+    // Per-IP ceiling first: without it, fake links make unthrottled argon2 work (CPU DoS).
+    const retryAfter = await this.rateLimiter.consume(
+      `reset-ip:${meta.ip ?? 'unknown'}`,
+      RESETS_PER_IP,
+      LOGIN_WINDOW_MS,
+    );
+    if (retryAfter > 0) throw rateLimited(retryAfter);
     // Hash first (argon2 time doesn't depend on the link), then one atomic DB call.
     const passwordHash = await this.passwords.hash(input.password);
     const userId = await this.repository.resetPassword(hashToken(input.token), passwordHash);
@@ -431,16 +455,37 @@ export class IdentityService {
    * Per (IP, email) so one IP can't use up a victim's allowance for everyone, plus a per-IP ceiling.
    * Over the limit nothing is sent (the request already returned 202).
    */
+  /**
+   * Whether this job may send an auth email. Counted once per request: a retried attempt
+   * (provider outage) must not use up the user's allowance and then silently send nothing.
+   */
   private async allowEmail(
     kind: 'signup' | 'verify' | 'reset',
     email: string,
     meta: RequestMeta,
+    attempt: number,
   ): Promise<boolean> {
+    if (attempt > 0) return true;
     const ip = meta.ip ?? 'unknown';
-    const [perAddress, perIp] = await Promise.all([
+    const results = await Promise.all([
       this.rateLimiter.consume(`email-${kind}:${ip}:${email}`, EMAILS_PER_ADDRESS_PER_HOUR, HOUR),
       this.rateLimiter.consume(`email-${kind}-ip:${ip}`, EMAILS_PER_IP_PER_HOUR, HOUR),
+      this.rateLimiter.consume(
+        `email-${kind}-addr:${email}`,
+        EMAILS_PER_ADDRESS_ANY_IP_PER_HOUR,
+        HOUR,
+      ),
     ]);
-    return perAddress === 0 && perIp === 0;
+    return results.every((retryAfter) => retryAfter === 0);
+  }
+
+  /** Per-IP ceiling on resend/forgot requests, before anything is enqueued (no job flooding). */
+  private async limitEmailRequests(kind: 'resend' | 'forgot', meta: RequestMeta): Promise<void> {
+    const retryAfter = await this.rateLimiter.consume(
+      `${kind}-ip:${meta.ip ?? 'unknown'}`,
+      EMAIL_REQUESTS_PER_IP_PER_HOUR,
+      HOUR,
+    );
+    if (retryAfter > 0) throw rateLimited(retryAfter);
   }
 }

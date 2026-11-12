@@ -2,7 +2,7 @@
 
 ## Current
 Milestone: M0 — Foundation (in progress). Branch: `milestone/m0-foundation`.
-Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-11-05; M0-T5 done 2026-11-11. 2026-11-11: switched to local-first (ADR-011 no Redis/pg-boss, ADR-012 native Postgres). M0-T6, M0-T7 done 2026-11-11. Next: M0 milestone review (`/review-milestone M0`). Draft PR #1 open, CI green.
+Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-11-05; M0-T5 done 2026-11-11. 2026-11-11: switched to local-first (ADR-011 no Redis/pg-boss, ADR-012 native Postgres). M0-T6, M0-T7 done 2026-11-11. M0 milestone review done 2026-11-12: blockers fixed, PR ready for review. Next: Dev merges PR #1 → start M1 (`/start-milestone M1`). Draft PR #1 open, CI green.
 
 ## Done
 - [x] M0-T1 Monorepo scaffold (2026-11-04)
@@ -28,6 +28,20 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
   - same-origin `/api` proxy; the API gains `EMAIL_DRIVER=file` and `TRUST_PROXY`;
   - consumers now skip events whose tenant was deleted;
   - tests: Playwright e2e (6 tests), web unit tests (25), CI `e2e` job.
+
+- [x] M0 milestone review (2026-11-12). Fixed:
+  - reset-password per-IP limit before argon2;
+  - per-account login and email limits independent of the (spoofable) IP;
+  - per-IP limits on resend/forgot before enqueue;
+  - member cursor validated as a uuid (400, not 500);
+  - an admin can no longer reactivate a disabled owner by re-inviting them;
+  - names reject control characters;
+  - open redirect via `?next=/%09/…`;
+  - web proxy body capped at 100 kB (streamed);
+  - web security headers (no framing, nosniff, referrer policy, HSTS);
+  - failed-job errors stored without the message;
+  - worker shutdown stops pg-boss and the relay before closing the DB pool;
+  - job retries no longer consume the user's email allowance.
 
 ## In progress
 
@@ -134,12 +148,21 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - [ ] Dev: install pgvector on the local Postgres 18 before M4 (optional until then)
 
 ## Tech debt
+_M0 milestone review (2026-11-12): non-blocking findings from the code-reviewer and security-auditor subagents. The blockers were fixed in the review commit._
+- **Replace-limit lockout (security MEDIUM-4, needs a product decision).** An attacker can keep a pending unverified signup for someone else's email alive and use up the 3 replaces per day. The real owner's signup then silently does nothing (202, no email) and they can only get in through an invitation. Options: still email the inbox owner a verify / start-over link when a replace is blocked; let the verify link claim the pending account; or make cancel reset the replace bucket.
+- **Login per-IP counts successes (security MEDIUM-6).** `login-ip` (50 per 15 min) also counts successful logins, so 50+ people behind one CGNAT or office IP get 429 at 9am. Count failures only (needs a peek or decrement in the limiter) and tune the ceilings with real traffic.
+- **Per-account lockout is now possible by design:** 20 wrong passwords lock that email out for 15 minutes (`login-email`). This is the standard trade-off against unlimited guessing; revisit with notification-on-trip or CAPTCHA.
+- **One invalid outbox row stops the relay for every tenant (code review #4).** The relay's envelope parse throws for every bad row, so a row with an unversioned type or a non-object payload blocks the whole batch forever. Before M1: one shared `insertOutboxEvent` (and `insertAudit`) helper that validates the type and payload at write time, and dead-letter or skip per event in the relay.
+- **Expired invitations count as pending (code review #7).** They show in the list with a past date, block a new invite with `invitation_exists`, and the list is unbounded. Show an "Expired" status or supersede them on invite, and paginate.
+- **No-env production run fails open (security L2).** `NODE_ENV` defaults to `development`, so a prod deploy that forgets it gets `/docs`, open `/metrics` and the console email driver (live reset links in logs). M8: require NODE_ENV explicitly outside local dev.
+- **Session and token retention (security L6).** Revoked or expired `sessions` (with IP and user agent) and used `auth_tokens` rows are never purged. Add a purge cron next to the rate-limit purge (DPDP).
+- **API and worker bind 0.0.0.0 (security L7).** In dev, `/metrics` and `/docs` are reachable from the LAN. Bind to 127.0.0.1 by default, or require `METRICS_TOKEN` when bound to a non-loopback address.
 - Published `outbox_events` and `processed_events` rows are never purged. Add a retention job when volumes matter (M6/M8).
 - The minimatch moderate advisory (transitive) is still reported by `pnpm audit`; it is dev-tooling only.
 - Worker jobs have no per-job log context (the job id is in the failure log only); add an AsyncLocalStorage child logger when consumers multiply.
 - `InMemoryJobQueue` is not transactional: a job sent with `tx` stays queued in tests even if the transaction rolls back. Real pg-boss behaviour is covered by `test/queue.int.test.ts`.
 _(non-blocking review findings)_
-- M8: set `TRUST_PROXY` (M0-T7, default `loopback`) to the real hop count / proxy CIDRs before deploying behind a load balancer. Note: Next.js keeps a client-supplied `X-Forwarded-For` instead of appending to it, so behind the web proxy a client can choose the IP the API sees (rate-limit evasion per IP; the per-email limits still hold). M8 must put a trusted LB in front that overwrites XFF, or have the web proxy set it from the socket address.
+- M8: set `TRUST_PROXY` (M0-T7, default `loopback`) to the real hop count / proxy CIDRs before deploying behind a load balancer. Note: Next.js keeps a client-supplied `X-Forwarded-For` instead of appending to it, so behind the web proxy a client can choose the IP the API sees (rate-limit evasion per IP). Since the M0 review, per-account keys that ignore the IP bound the damage: `login-email` (20 per 15 min) and `email-<kind>-addr` (5 per hour). Still open: a spoofed IP can lock out a real shared IP (50 logins per 15 min), and per-IP ceilings are evadable. M8 must put a trusted LB in front that overwrites XFF, or have the web proxy set it from the socket address.
 - M0-T6: discarding an unverified account deletes its tenant's outbox rows, including `user.signed_up.v1`. Once the relay ships, consider a compensating `user.discarded.v1` (also needed for DPDP deletion propagation).
 - Tenant switch: `POST /v1/session/tenant` only sets an active membership, and the session guard re-resolves the membership per request, so a stale or bogus `active_tenant_id` grants nothing. A SQL WITH CHECK on sessions was not added: the touch-on-request update would then fail for disabled members.
 - Slug-collision retry in signup has no test (random 24-bit suffix can't be forced to collide without a seam).

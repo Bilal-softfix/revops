@@ -36,8 +36,8 @@ Extra context: this is a greenfield repo; the kit files (CLAUDE.md, docs/, .clau
 ```
 
 ## Review checklist
-- [ ] Removing an RLS policy makes the leak test fail
-- [ ] App DB user is NOT table owner and cannot bypass RLS
-- [ ] No secrets in repo; `.env.example` complete
+- [x] Removing an RLS policy makes the leak test fail (packages/db/test/rls-meta.int.test.ts drops a policy and asserts violations; manual check 2026-11-05)
+- [x] App DB user is NOT table owner and cannot bypass RLS (rls-catalog.int.test.ts “app_user can’t bypass RLS”; `pnpm run doctor` role checks)
+- [x] No secrets in repo; `.env.example` complete (M0 review secret scan; scripts/src/env-example.test.ts checks every schema var is documented)
 - [x] Logs mask emails/phones; request id on every log line (M0-T6: logger/mask unit tests + smoke run)
-- [ ] Fresh clone → running app in < 10 min following README (to verify at milestone review)
+- [ ] Fresh clone → running app in < 10 min following README. Partly verified: every step ran on this machine and CI builds from scratch in ~2 min per job; Dev to time a real fresh clone

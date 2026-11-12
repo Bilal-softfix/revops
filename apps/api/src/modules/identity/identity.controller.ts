@@ -117,7 +117,10 @@ export class IdentityController {
 
   @Post('reset-password')
   @HttpCode(204)
-  resetPassword(@Body(new ZodBodyPipe(resetPasswordRequestSchema)) body: ResetPasswordRequest) {
-    return this.identity.resetPassword(body);
+  resetPassword(
+    @Body(new ZodBodyPipe(resetPasswordRequestSchema)) body: ResetPasswordRequest,
+    @Req() req: Request,
+  ) {
+    return this.identity.resetPassword(body, meta(req));
   }
 }

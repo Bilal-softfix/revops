@@ -180,6 +180,10 @@ export class TenancyService {
       .withContext({ tenantId: auth.tenantId, userId: auth.userId }, async (tx) => {
         const member = await this.repository.findMemberByEmail(tx, input.email);
         if (member && member.status === 'active') throw alreadyMember();
+        // Accepting would overwrite this membership's role and status, so a disabled member is
+        // only re-invitable by someone who may manage their current role (an admin can't
+        // reactivate a disabled owner this way — M0 security review L3).
+        if (member && !canManageRole(auth.role, member.role)) throw forbidden();
         if (await this.repository.findOpenInvitationByEmail(tx, input.email)) {
           throw invitationExists();
         }

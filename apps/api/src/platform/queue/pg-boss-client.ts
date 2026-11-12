@@ -1,4 +1,4 @@
-import { Logger, type OnApplicationShutdown } from '@nestjs/common';
+import { type BeforeApplicationShutdown, Logger } from '@nestjs/common';
 import { PgBoss } from 'pg-boss';
 import { safeErrorSummary } from '../errors/safe-error';
 import type { JobDefinition } from './job';
@@ -17,7 +17,7 @@ export interface PgBossClientOptions {
  * /health even if the queue is briefly unavailable, and tests that swap in the fake never
  * connect). Queues are created on first use; createQueue is idempotent DML (non-partitioned).
  */
-export class PgBossClient implements OnApplicationShutdown {
+export class PgBossClient implements BeforeApplicationShutdown {
   private readonly logger = new Logger('PgBoss');
   private readonly boss: PgBoss;
   private started: Promise<PgBoss> | undefined;
@@ -75,7 +75,11 @@ export class PgBossClient implements OnApplicationShutdown {
     return boss;
   }
 
-  async onApplicationShutdown(): Promise<void> {
+  /**
+   * Before (not during) onApplicationShutdown: Nest closes every provider of a module in parallel
+   * there, so the DB pool would end under in-flight jobs. Graceful stop lets them finish first.
+   */
+  async beforeApplicationShutdown(): Promise<void> {
     if (!this.started) return;
     try {
       await this.started;

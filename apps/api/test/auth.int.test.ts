@@ -17,6 +17,11 @@ import {
   LOGIN_MAX_FAILURES,
   LOGIN_WINDOW_MS,
   SIGNUPS_PER_IP_PER_HOUR,
+  EMAILS_PER_ADDRESS_ANY_IP_PER_HOUR,
+  EMAIL_REQUESTS_PER_IP_PER_HOUR,
+  IdentityService,
+  LOGIN_PER_EMAIL,
+  RESETS_PER_IP,
   VERIFY_MAX_ATTEMPTS,
 } from '../src/modules/identity/identity.service';
 import { PasswordService } from '../src/modules/identity/password.service';
@@ -725,8 +730,97 @@ describe('security review of 83bdfb8: replace, forgot and cancel hardening', () 
       .expect(429);
     expect(res.body).toMatchObject({ code: 'rate_limited' });
   });
+
+  it('reset-password is rate-limited per IP before any argon2 work (M0 review blocker)', async () => {
+    const reset = () =>
+      request(t.server)
+        .post('/v1/auth/reset-password')
+        .send({ token: newFakeToken(), password: 'a brand new passphrase' });
+    for (let i = 0; i < RESETS_PER_IP; i++) await reset().expect(400);
+    const hashes = vi.spyOn(t.app.get(PasswordService), 'hash');
+    try {
+      const res = await reset().expect(429);
+      expect(res.body).toMatchObject({ code: 'rate_limited' });
+      expect(res.headers['retry-after']).toMatch(/^\d+$/);
+      expect(hashes).not.toHaveBeenCalled();
+    } finally {
+      hashes.mockRestore();
+    }
+  });
 });
 
 function newFakeToken(): string {
   return Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
 }
+
+describe('M0 milestone review: limits that a spoofed client IP cannot reset', () => {
+  freshApp();
+  /** A different client IP per request, as X-Forwarded-For through the trusted loopback proxy. */
+  let n = 0;
+  const fromNewIp = (req: request.Test) =>
+    req.set('x-forwarded-for', `198.51.100.${(n++ % 250) + 1}`);
+
+  it('login: an account gets at most LOGIN_PER_EMAIL attempts per window, from any number of IPs', async () => {
+    const email = uniqueEmail('guessed');
+    await signupVerified(t, email);
+    for (let i = 0; i < LOGIN_PER_EMAIL; i++) {
+      await fromNewIp(request(t.server).post('/v1/auth/login'))
+        .send({ email, password: 'wrong guess ' + i })
+        .expect(401);
+    }
+    const locked = await fromNewIp(request(t.server).post('/v1/auth/login'))
+      .send({ email, password: PASSWORD })
+      .expect(429);
+    expect(locked.body).toMatchObject({ code: 'rate_limited' });
+  });
+
+  it('forgot-password: one address gets at most N emails per hour, however many IPs ask', async () => {
+    const email = uniqueEmail('bombed');
+    await signupVerified(t, email);
+    t.email.sent.length = 0;
+    for (let i = 0; i < EMAILS_PER_ADDRESS_ANY_IP_PER_HOUR + 3; i++) {
+      await fromNewIp(request(t.server).post('/v1/auth/forgot-password'))
+        .send({ email })
+        .expect(202);
+    }
+    await t.drain();
+    expect(t.email.sent.filter((m) => m.to === email)).toHaveLength(
+      EMAILS_PER_ADDRESS_ANY_IP_PER_HOUR,
+    );
+  });
+
+  it.each(['resend-verification', 'forgot-password'] as const)(
+    '%s is limited per IP before anything is enqueued',
+    async (endpoint) => {
+      const ip = `203.0.113.${endpoint.length}`;
+      for (let i = 0; i < EMAIL_REQUESTS_PER_IP_PER_HOUR; i++) {
+        await request(t.server)
+          .post(`/v1/auth/${endpoint}`)
+          .set('x-forwarded-for', ip)
+          .send({ email: uniqueEmail('flood') })
+          .expect(202);
+      }
+      const queued = t.jobs.jobs.length;
+      await request(t.server)
+        .post(`/v1/auth/${endpoint}`)
+        .set('x-forwarded-for', ip)
+        .send({ email: uniqueEmail('flood') })
+        .expect(429);
+      expect(t.jobs.jobs.length).toBe(queued);
+      t.jobs.jobs.length = 0;
+    },
+  );
+
+  it('a retried email job still sends after the first attempt used the allowance', async () => {
+    const email = uniqueEmail('retry');
+    await signupVerified(t, email);
+    t.email.sent.length = 0;
+    const identity = t.app.get(IdentityService);
+    const job = { email, meta: { ip: '192.0.2.9', userAgent: null } };
+    for (let i = 0; i < 3; i++) await identity.sendPasswordResetEmail(job, 0);
+    await identity.sendPasswordResetEmail(job, 0); // over the (IP, email) allowance: dropped
+    expect(t.email.sent.filter((m) => m.to === email)).toHaveLength(3);
+    await identity.sendPasswordResetEmail(job, 1); // a retry of an already-counted request
+    expect(t.email.sent.filter((m) => m.to === email)).toHaveLength(4);
+  });
+});

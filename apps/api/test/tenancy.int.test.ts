@@ -348,6 +348,18 @@ describe('changing roles and disabling members', () => {
     ({ tenantId, sessions } = await team());
   });
 
+  it('an admin can’t re-invite (and so reactivate or re-role) a disabled owner (M0 review L3)', async () => {
+    const second = await addMember(t, tenantId, 'owner', 'disabled');
+    const res = await withSession(request(t.server).post('/v1/invitations'), sessions.admin)
+      .send({ email: second.email, role: 'admin' })
+      .expect(403);
+    expect(res.body).toMatchObject({ code: 'forbidden' });
+    // The owner may: owners manage owners.
+    await withSession(request(t.server).post('/v1/invitations'), sessions.owner)
+      .send({ email: second.email, role: 'owner' })
+      .expect(201);
+  });
+
   it('M0-T5 AC: the last owner can’t be demoted or disabled; nobody disables themselves', async () => {
     const ownerId = sessions.owner.body.user.id;
     const demote = await patch(sessions.owner, ownerId, { role: 'admin' }).expect(409);
@@ -434,6 +446,16 @@ describe('members list', () => {
     } while (cursor);
     expect(seen).toHaveLength(7); // owner + admin + manager + agent + 3 agents
     expect(new Set(seen).size).toBe(7);
+  });
+
+  it('a malformed cursor is a 400 validation error, not a 500 (M0 review)', async () => {
+    const { sessions } = await team();
+    for (const cursor of ['abc', '00000000-0000', 'x'.repeat(150)]) {
+      const res = await withSession(request(t.server).get('/v1/members'), sessions.owner)
+        .query({ cursor })
+        .expect(400);
+      expect(res.body).toMatchObject({ code: 'validation_failed' });
+    }
   });
 
   it('never lists another tenant’s members', async () => {

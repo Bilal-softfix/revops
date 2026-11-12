@@ -22,7 +22,7 @@ afterAll(async () => {
     await owner`delete from pgboss.job where name = ${JOB.name}`;
     await owner`delete from pgboss.queue where name = ${JOB.name}`;
   });
-  await client.onApplicationShutdown();
+  await client.beforeApplicationShutdown();
   await app.close();
 });
 

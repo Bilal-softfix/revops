@@ -49,7 +49,7 @@ Consequences:
 - Jobs are transactional with business data.
 - Queue and limiter load lands on the primary database: more writes, more autovacuum churn on the pg-boss and rate-limit tables, and housekeeping jobs purge old rows.
 - Queue lag and table bloat must be monitored (M8-T4).
-- pg-boss brings `pg` (node-postgres) as a transitive dependency next to `postgres` (postgres.js); only the worker opens pg-boss connections.
+- pg-boss brings `pg` (node-postgres) as a transitive dependency next to `postgres` (postgres.js). Both processes open a pg-boss pool: the API (max 3, producer only) and the worker (max 6, workers + maintenance + cron). Count them in the M8 connection-limit planning.
 
 Revisit when:
 - sustained job throughput passes ~500 jobs/s;

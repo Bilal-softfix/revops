@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { JobHandler } from '../../platform/queue/job';
+import { type JobContext, JobHandler } from '../../platform/queue/job';
 import { IdentityService } from './identity.service';
 import {
   type EmailJobData,
@@ -15,8 +15,8 @@ export class SignupJobHandler extends JobHandler<SignupJobData> {
   constructor(private readonly identity: IdentityService) {
     super();
   }
-  handle(data: SignupJobData): Promise<void> {
-    return this.identity.completeSignup(data);
+  handle(data: SignupJobData, context: JobContext): Promise<void> {
+    return this.identity.completeSignup(data, context.attempt);
   }
 }
 
@@ -26,8 +26,8 @@ export class ResendVerificationJobHandler extends JobHandler<EmailJobData> {
   constructor(private readonly identity: IdentityService) {
     super();
   }
-  handle(data: EmailJobData): Promise<void> {
-    return this.identity.sendVerificationEmail(data);
+  handle(data: EmailJobData, context: JobContext): Promise<void> {
+    return this.identity.sendVerificationEmail(data, context.attempt);
   }
 }
 
@@ -37,7 +37,7 @@ export class ForgotPasswordJobHandler extends JobHandler<EmailJobData> {
   constructor(private readonly identity: IdentityService) {
     super();
   }
-  handle(data: EmailJobData): Promise<void> {
-    return this.identity.sendPasswordResetEmail(data);
+  handle(data: EmailJobData, context: JobContext): Promise<void> {
+    return this.identity.sendPasswordResetEmail(data, context.attempt);
   }
 }

@@ -54,7 +54,9 @@ export class JobRunner implements OnApplicationBootstrap {
       this.logger.error(
         `job ${queue} ${job.id} attempt ${job.retryCount} failed: ${safeErrorSummary(error)}`,
       );
-      throw error;
+      // pg-boss stores the thrown error in pgboss.job.output; drizzle messages carry query params
+      // (emails, names), so only the class + SQLSTATE go there (M0 review).
+      throw new Error(`${queue} failed: ${safeErrorSummary(error).split('\n')[0] ?? 'error'}`);
     } finally {
       stop();
     }

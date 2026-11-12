@@ -27,6 +27,8 @@ describe('signupRequestSchema', () => {
     ['huge password', { password: 'x'.repeat(PASSWORD_MAX_LENGTH + 1) }],
     ['bad email', { email: 'not-an-email' }],
     ['blank tenant name', { tenantName: '   ' }],
+    ['a newline in the name (email header injection)', { name: 'Asha\r\nBcc: x@evil.test' }],
+    ['a tab in the tenant name', { tenantName: 'Acme\tCo' }],
   ])('rejects %s', (_label, patch) => {
     expect(signupRequestSchema.safeParse({ ...valid, ...patch }).success).toBe(false);
   });

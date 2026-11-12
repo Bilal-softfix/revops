@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { GET, POST } from './route';
+import { GET, MAX_BODY_BYTES, POST } from './route';
 
 const ctx = (path: string[]) => ({ params: Promise.resolve({ path }) });
 
@@ -64,6 +64,30 @@ describe('/api/[...path] proxy', () => {
       expect(upstream).not.toHaveBeenCalled();
     },
   );
+
+  it.each([
+    ['a declared size over the limit', { 'content-length': String(MAX_BODY_BYTES + 1) }],
+    ['an undeclared (chunked) body over the limit', {}],
+  ])('rejects %s with 413 before calling the API', async (_label, headers) => {
+    const upstream = vi.fn();
+    vi.stubGlobal('fetch', upstream);
+    const big = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let i = 0; i < 3; i++) controller.enqueue(new Uint8Array(MAX_BODY_BYTES / 2));
+        controller.close();
+      },
+    });
+    const req = new NextRequest('http://localhost:3000/api/v1/auth/login', {
+      method: 'POST',
+      body: big,
+      headers,
+      duplex: 'half',
+    });
+    const res = await POST(req, ctx(['v1', 'auth', 'login']));
+    expect(res.status).toBe(413);
+    expect(await res.json()).toMatchObject({ code: 'payload_too_large' });
+    expect(upstream).not.toHaveBeenCalled();
+  });
 
   it('API down → 503 problem+json the client understands', async () => {
     vi.stubGlobal(

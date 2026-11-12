@@ -7,7 +7,8 @@ import { roleSchema } from './enums.js';
 /** Cursor pagination (CLAUDE.md): `?limit=&cursor=`; the response carries `nextCursor`. */
 export const pageQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
-  cursor: z.string().max(200).optional(),
+  /** Opaque to clients; today the last row's id. Validated so a bad cursor is a 400, not a 500. */
+  cursor: z.uuid().optional(),
 });
 export type PageQuery = z.infer<typeof pageQuerySchema>;
 

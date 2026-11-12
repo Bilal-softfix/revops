@@ -7,6 +7,9 @@ import { webEnv } from '@/lib/env';
 
 export const dynamic = 'force-dynamic';
 
+/** Same limit as the API's JSON parser; enforced here so the web server never buffers more. */
+export const MAX_BODY_BYTES = 100 * 1024;
+
 /** Request headers the API needs; everything else (incl. hop-by-hop) is dropped. */
 const FORWARD_REQUEST = [
   'accept',
@@ -27,6 +30,39 @@ const DROP_RESPONSE = new Set([
   'set-cookie',
 ]);
 
+function problem(status: number, code: string, title: string): Response {
+  return Response.json(
+    { type: `/problems/${code}`, title, status, code },
+    { status, headers: { 'content-type': 'application/problem+json' } },
+  );
+}
+
+/** The request body, or null once it exceeds MAX_BODY_BYTES (streamed: never fully buffered). */
+async function readBody(req: NextRequest): Promise<Uint8Array<ArrayBuffer> | null> {
+  if (Number(req.headers.get('content-length') ?? 0) > MAX_BODY_BYTES) return null;
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  const reader = req.body?.getReader();
+  if (!reader) return new Uint8Array(new ArrayBuffer(0));
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > MAX_BODY_BYTES) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const body = new Uint8Array(new ArrayBuffer(size));
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
+}
+
 async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
   const { path } = await ctx.params;
   if (path[0] !== 'v1' || path.some((p) => p === '..' || p === '.')) {
@@ -45,6 +81,8 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
     if (value) headers.set(name, value);
   }
   const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
+  const body = hasBody ? await readBody(req) : undefined;
+  if (body === null) return problem(413, 'payload_too_large', 'Request body too large');
 
   let upstream: Response;
   try {
@@ -53,7 +91,7 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
       headers,
       redirect: 'manual',
       cache: 'no-store',
-      ...(hasBody ? { body: await req.arrayBuffer() } : {}),
+      ...(body ? { body } : {}),
     });
   } catch {
     return Response.json(
