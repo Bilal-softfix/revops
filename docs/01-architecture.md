@@ -126,12 +126,19 @@ Permissions are strings (`lead.read.all`, `lead.read.assigned`, `routing.manage`
 - **UI kit:** shadcn/ui (radix-nova) in `components/ui` with the system font stack, so builds don't download fonts.
 
 ## Events
-Outbox row: `{ id, tenant_id, type, aggregate_id, payload jsonb, occurred_at, published_at }`. The worker's relay (`apps/api/src/platform/outbox`, M0-T6) runs one transaction every `OUTBOX_POLL_INTERVAL_MS`:
+Outbox row: `{ id, tenant_id, type, aggregate_id, payload jsonb, occurred_at, published_at, dead_lettered_at, dead_letter_reason }`.
+
+**Writing (M1-T0):** modules write events and audit rows only through `recordEvent(tx, EVENT, {…})` and `recordAudit(tx, {…})` (`apps/api/src/platform/outbox/record.ts`), inside their own tenant transaction.
+- Every event type is declared once in the shared registry (`packages/shared/src/events/registry.ts`: `defineEvent(type, zodSchema)`), and its payload is validated before insert.
+- DB CHECKs enforce the `<aggregate>.<verb>.v<N>` type format and an object payload.
+- Audit actions must be `<entity>.<verb>` and user actions need an actor.
+
+**Relaying:** The worker's relay (`apps/api/src/platform/outbox`, M0-T6) runs one transaction every `OUTBOX_POLL_INTERVAL_MS`:
 - `outbox_claim_batch(100)` claims up to 100 events (FOR UPDATE SKIP LOCKED);
 - it enqueues one pg-boss job per subscribed consumer queue, with job id = event id, carrying the `outboxEnvelopeSchema` envelope;
 - `outbox_mark_published` marks the batch published.
 
-Concurrent or repeated relay runs never publish an event twice. Consumers extend `OutboxConsumer` (`events` they subscribe to, one queue each) and wrap their side effects in `processOnce`, which records `processed_events(consumer, event_id)` in the same tenant transaction. `platform.demo-event-log` is the template consumer.
+Rows the relay can't validate (a type not in the registry, a payload failing its schema, or a bad envelope) are **dead-lettered** in the same pass, via `outbox_dead_letter` with a reason that has schema paths only and never values. Later claims skip them. They are counted in `outbox_events_dead_lettered_total{type}` and logged, so one bad row never blocks any tenant's delivery. Concurrent or repeated relay runs never publish an event twice. Consumers extend `OutboxConsumer` (`events` they subscribe to, one queue each) and wrap their side effects in `processOnce`, which records `processed_events(consumer, event_id)` in the same tenant transaction. `platform.demo-event-log` is the template consumer.
 
 ### Jobs and processes
 - **API (`main.ts`):** enqueues through `JobQueue` and runs no jobs.

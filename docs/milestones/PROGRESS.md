@@ -1,8 +1,11 @@
 # PROGRESS
 
 ## Current
-Milestone: M0 — Foundation (in progress). Branch: `milestone/m0-foundation`.
-Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-11-05; M0-T5 done 2026-11-11. 2026-11-11: switched to local-first (ADR-011 no Redis/pg-boss, ADR-012 native Postgres). M0-T6, M0-T7 done 2026-11-11. M0 milestone review done 2026-11-12: blockers fixed, PR ready for review. Next: Dev merges PR #1 → start M1 (`/start-milestone M1`). Draft PR #1 open, CI green.
+Milestone: M1 — CRM Core (starting). Branch: `milestone/m1-crm-core` (from main after M0 merged, tag `m0-done`).
+M1-T0 (M0 follow-ups) done 2026-11-12. Next: M1 plan (`/start-milestone M1`).
+
+M0 history:
+Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-11-05; M0-T5 done 2026-11-11. 2026-11-11: switched to local-first (ADR-011 no Redis/pg-boss, ADR-012 native Postgres). M0-T6, M0-T7 done 2026-11-11. M0 milestone review done 2026-11-12: blockers fixed, PR ready for review. Next: Dev merges PR #1 → start M1 (`/start-milestone M1`). PR #1 merged 2026-11-12 (tag `m0-done`).
 
 ## Done
 - [x] M0-T1 Monorepo scaffold (2026-11-04)
@@ -42,6 +45,12 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
   - failed-job errors stored without the message;
   - worker shutdown stops pg-boss and the relay before closing the DB pool;
   - job retries no longer consume the user's email allowance.
+
+- [x] M1-T0 M0 follow-ups (2026-11-12):
+  - **Signup squatting:** when the replace cap blocks a signup, the inbox owner still gets a start-over link (within the per-address email limit). A start-over through such a link (`auth_cancel_signup`, migration 0016) resets that email's replace allowance.
+  - **Shared writer:** `recordEvent` / `recordAudit` validate against the shared event registry; repository copies removed; outbox CHECKs added.
+  - **Relay:** dead-letters bad rows (migrations 0014/0015) instead of blocking every tenant.
+  - **Expired invitations:** no longer pending; re-inviting supersedes them (revoked + `invitation.superseded` audit).
 
 ## In progress
 
@@ -119,6 +128,9 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - 2026-11-11 · db:bootstrap with a superuser creates a dedicated NOSUPERUSER `revops_owner` that owns the DBs and runs migrations. Reason: if the owner were `postgres`, the SECURITY DEFINER functions would run as a superuser and bypass RLS, unlike Neon/CI. Doctor warns if `DATABASE_URL_OWNER` is a superuser.
 - 2026-11-11 · db:bootstrap after `--write-env` deletes `DB_BOOTSTRAP_URL` (the superuser password doesn't stay on disk); reruns connect as `revops_owner` in verify-only mode (create nothing, check everything, reuse passwords proven by login).
 - 2026-11-11 · pgvector is optional (doctor ⚠, bootstrap warns) until M4; CI keeps `pgvector/pgvector:0.8.6-pg18`.
+- 2026-11-12 · M1-T0 (Dev decision: options 1 + 3, not 2): a refused replace emails a start-over link (a fresh verify token for the pending account), and a successful start-over resets `signup-replace:<email>`. Any successful cancel resets it, because verify/start-over links are only ever emailed to that address, so a cancel proves inbox ownership. The old `auth_discard_unverified_by_token` function stays, unused.
+- 2026-11-12 · M1-T0: an unknown event type is now dead-lettered (it was "published with no consumers"): every event must be registered in `packages/shared/src/events/registry.ts`.
+- 2026-11-12 · M1-T0: an expired invitation is superseded (revoked) when the same email is re-invited, since the open-email unique index has no notion of time. Resending an expired invitation by id still works and gives it a fresh 7-day expiry. The pending list stays unpaginated (small per tenant); paginate when needed.
 - 2026-11-11 · M0-T7: the web never calls the API from the browser directly. A Next route handler proxies `/api/v1/*` → `API_INTERNAL_URL` (a runtime setting, not baked into the build by a next.config rewrite). Only `/v1` is exposed.
 - 2026-11-11 · M0-T7: "restricted nav" today means:
   - every role sees Dashboard + Team, because all four roles have `member.read` (the T5 permission map);
@@ -149,11 +161,10 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 
 ## Tech debt
 _M0 milestone review (2026-11-12): non-blocking findings from the code-reviewer and security-auditor subagents. The blockers were fixed in the review commit._
-- **Replace-limit lockout (security MEDIUM-4, needs a product decision).** An attacker can keep a pending unverified signup for someone else's email alive and use up the 3 replaces per day. The real owner's signup then silently does nothing (202, no email) and they can only get in through an invitation. Options: still email the inbox owner a verify / start-over link when a replace is blocked; let the verify link claim the pending account; or make cancel reset the replace bucket.
+- **Signup squatting (residual after M1-T0).** A fast attacker can re-squat right after the owner's start-over, but the reset allowance (3 replaces) lets the owner's next signup win, and every refusal emails the owner. The per-address email limit (5/h) can delay the owner by up to an hour under a sustained attack.
 - **Login per-IP counts successes (security MEDIUM-6).** `login-ip` (50 per 15 min) also counts successful logins, so 50+ people behind one CGNAT or office IP get 429 at 9am. Count failures only (needs a peek or decrement in the limiter) and tune the ceilings with real traffic.
 - **Per-account lockout is now possible by design:** 20 wrong passwords lock that email out for 15 minutes (`login-email`). This is the standard trade-off against unlimited guessing; revisit with notification-on-trip or CAPTCHA.
-- **One invalid outbox row stops the relay for every tenant (code review #4).** The relay's envelope parse throws for every bad row, so a row with an unversioned type or a non-object payload blocks the whole batch forever. Before M1: one shared `insertOutboxEvent` (and `insertAudit`) helper that validates the type and payload at write time, and dead-letter or skip per event in the relay.
-- **Expired invitations count as pending (code review #7).** They show in the list with a past date, block a new invite with `invitation_exists`, and the list is unbounded. Show an "Expired" status or supersede them on invite, and paginate.
+- **Dead-lettered outbox events** need an operator view or replay tool (M6/M8); for now they are found via the metric, the logs and `select … where dead_lettered_at is not null`.
 - **No-env production run fails open (security L2).** `NODE_ENV` defaults to `development`, so a prod deploy that forgets it gets `/docs`, open `/metrics` and the console email driver (live reset links in logs). M8: require NODE_ENV explicitly outside local dev.
 - **Session and token retention (security L6).** Revoked or expired `sessions` (with IP and user agent) and used `auth_tokens` rows are never purged. Add a purge cron next to the rate-limit purge (DPDP).
 - **API and worker bind 0.0.0.0 (security L7).** In dev, `/metrics` and `/docs` are reachable from the LAN. Bind to 127.0.0.1 by default, or require `METRICS_TOKEN` when bound to a non-loopback address.

@@ -3,6 +3,7 @@
 export * from './auth/schemas.js';
 export * from './events/identity.js';
 export * from './events/outbox.js';
+export * from './events/registry.js';
 export * from './tenancy/enums.js';
 export * from './tenancy/rbac.js';
 export * from './tenancy/schemas.js';

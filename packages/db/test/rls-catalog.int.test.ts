@@ -36,6 +36,7 @@ const DEFINER_FUNCTIONS: Record<string, boolean> = {
   auth_discard_unverified_by_email: true,
   auth_discard_unverified_by_token: true,
   auth_discard_unverified_user: false, // internal: only via the wrappers above
+  auth_cancel_signup: true,
   auth_find_user_by_email: true,
   auth_peek_verify_token: true,
   auth_purge_expired_unverified: true,
@@ -43,6 +44,7 @@ const DEFINER_FUNCTIONS: Record<string, boolean> = {
   auth_session_lookup: true,
   auth_verify_email: true,
   outbox_claim_batch: true,
+  outbox_dead_letter: true,
   outbox_mark_published: true,
   rate_limit_consume: true,
   rate_limit_purge: true,

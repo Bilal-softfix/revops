@@ -99,6 +99,27 @@
       "when": 1794385939480,
       "tag": "0013_pgboss_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1794477895494,
+      "tag": "0014_outbox_dead_letter",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1794477899234,
+      "tag": "0015_outbox_dead_letter_functions",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1794478131863,
+      "tag": "0016_auth_cancel_signup",
+      "breakpoints": true
     }
   ]
 }
