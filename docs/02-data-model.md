@@ -4,10 +4,13 @@ All tables: `id uuid pk default gen_random_uuid()`, `created_at`, `updated_at ti
 
 ## Identity & tenancy
 - **tenants** — name, slug, timezone (default Asia/Kolkata), locale, industry_template, parent_tenant_id (nullable, future agency), settings jsonb, status
-- **users** — email (unique, citext), name, phone, password_hash (argon2id), email_verified_at
+- **users** (global, no tenant_id; RLS: self + members of the current tenant; unverified accounts expire 48 h after created_at and are purged with their sole-owned tenants) — email (unique, citext), name, phone_e164, password_hash (argon2id, nullable until set), email_verified_at
 - **memberships** — tenant_id, user_id, role, status (invited/active/disabled); unique(tenant_id,user_id)
+- **sessions** (global, user-scoped RLS) — user_id, token_hash (sha256, unique), active_tenant_id, ip, user_agent, created_at, last_seen_at, expires_at (created + 30d), revoked_at
+- **auth_tokens** (global, user-scoped RLS) — user_id, purpose (email_verify/password_reset), token_hash (unique), expires_at, used_at (single use, consumed atomically inside `auth_verify_email` / `auth_reset_password`)
+- **invitations** (tenant, FORCE RLS) — email (citext), role, token_hash (sha256 of `<tenant_id>.<random>`, unique), invited_by, expires_at (7 d), accepted_at, revoked_at; unique(tenant_id, email) where open
 - **business_hours** — tenant_id, weekday, open_time, close_time; **holidays** — tenant_id, date
-- **audit_logs** — tenant_id, actor_type (user/ai/system), actor_id, action, entity, entity_id, before/after jsonb, ip
+- **audit_logs** (append-only: app_user has SELECT + INSERT only; created_at, no updated_at) — tenant_id, actor_type (user/ai/system), actor_id, action, entity, entity_id (text), before/after jsonb, ip inet
 
 ## CRM
 - **contacts** — name, phone_e164, alt_phones text[], email, city, custom_fields jsonb, consent jsonb (whatsapp/sms/call/recording with timestamps + source), deleted_at. Index: unique(tenant_id, phone_e164) where deleted_at is null; (tenant_id, email)
@@ -42,4 +45,10 @@ All tables: `id uuid pk default gen_random_uuid()`, `created_at`, `updated_at ti
 - **tenant_limits** — type, monthly_cap, alert_threshold_pct
 - **integration_accounts** — provider (meta/google_ads), external_account_id, encrypted_tokens bytea, scopes, status, expires_at, last_sync_at
 - **ad_insights_daily** — integration_account_id, level (campaign/adset/ad), external_id, name, date, spend_paise, impressions, clicks (M7)
-- **outbox_events** — see architecture
+- **rate_limit_buckets** (system table, ADR-011: no tenant_id; RLS enabled with no policies and no app_user grants, reached only via the definer functions `rate_limit_consume/reset/purge`) — key_hash (sha256 hex of the logical key, pk), count, reset_at. Index on reset_at for purging
+- **pgboss.*** (M0-T6, migration 0013: separate `pgboss` schema installed and owned by the owner role, pg-boss 12.38.0 schema v46). Holds the pg-boss job, queue and schedule tables. The app never queries them directly, so there is no RLS. `app_user` has USAGE plus DML and EXECUTE only, and no DDL. Payloads carry ids such as tenantId and never secrets.
+- **processed_events** (M0-T6, tenant table, FORCE RLS, append-only for app_user)
+  - Columns: consumer, event_id, tenant_id, processed_at.
+  - PK (consumer, event_id); index on tenant_id; cascades with the tenant.
+  - Consumer idempotency: inserted in the same transaction as the consumer's side effects (`processOnce`).
+- **outbox_events** (created/occurred_at only) — tenant_id, type (versioned, e.g. `lead.created.v1`), aggregate_id, payload jsonb, occurred_at, published_at; partial index on unpublished rows. The relay reads it across tenants only via `outbox_claim_batch` / `outbox_mark_published` (SECURITY DEFINER, migration 0012) and two owner-only policies (`outbox_relay_select` / `outbox_relay_update`, `TO` the owner role). See architecture

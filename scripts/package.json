@@ -5,13 +5,14 @@
   "type": "module",
   "scripts": {
     "doctor": "tsx src/doctor.ts",
+    "db:bootstrap": "tsx src/db-bootstrap.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
     "@revops/shared": "workspace:*",
-    "ioredis": "catalog:",
     "postgres": "catalog:",
     "zod": "catalog:"
   },

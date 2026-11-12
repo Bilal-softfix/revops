@@ -1,13 +1,17 @@
+// Tracing must load before anything requires http.
+import './instrument-worker';
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import { loadWorkerEnv, nestLogLevels } from './config/env';
+import { Logger } from 'nestjs-pino';
+import { loadWorkerEnv } from './config/env';
 import { WorkerModule } from './worker/worker.module';
 
 async function bootstrap(): Promise<void> {
   const env = loadWorkerEnv();
-  const app = await NestFactory.createApplicationContext(WorkerModule, {
-    logger: nestLogLevels(env.LOG_LEVEL),
+  const app = await NestFactory.createApplicationContext(WorkerModule.register(env), {
+    bufferLogs: true,
   });
+  app.useLogger(app.get(Logger));
   app.enableShutdownHooks();
 }
 

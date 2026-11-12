@@ -5,6 +5,8 @@ import {
   apiEnvSchema,
   findRepoRoot,
   migrationEnvSchema,
+  bootstrapEnvSchema,
+  seedEnvSchema,
   testDatabaseEnvSchema,
   workerEnvSchema,
 } from '@revops/shared/env';
@@ -23,6 +25,8 @@ const schemas = {
   worker: workerEnvSchema,
   migrations: migrationEnvSchema,
   tests: testDatabaseEnvSchema,
+  bootstrap: bootstrapEnvSchema,
+  seed: seedEnvSchema,
 };
 
 describe('.env.example files', () => {
@@ -42,7 +46,7 @@ describe('.env.example files', () => {
 
   it('contain only placeholder secrets', () => {
     for (const [key, value] of Object.entries(apiExample)) {
-      if (!/URL$/.test(key)) continue;
+      if (!/URL$/.test(key) || !value) continue; // blank = optional and unset
       expect(new URL(value ?? '').password, key).toMatch(/^(change-me)?$/);
     }
   });

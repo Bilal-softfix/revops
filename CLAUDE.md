@@ -11,19 +11,19 @@ AI Revenue Operations Platform for Indian lead-driven SMBs: lead capture → hum
 ## Stack (do not change without an ADR in docs/04-decisions.md)
 - Monorepo: pnpm workspaces + Turborepo. Node 22 LTS. TypeScript strict.
 - `apps/web` — Next.js (App Router), React, Tailwind, shadcn/ui, TanStack Query, React Hook Form + Zod
-- `apps/api` — NestJS. Two entrypoints: `main.ts` (HTTP) and `worker.ts` (BullMQ consumers, outbox relay, schedulers)
+- `apps/api` — NestJS. Two entrypoints: `main.ts` (HTTP) and `worker.ts` (pg-boss consumers, outbox relay, schedulers)
 - `apps/voice-agent` — Python 3.12, LiveKit Agents, uv for deps, ruff + mypy + pytest
-- `packages/db` — Drizzle ORM + drizzle-kit migrations, PostgreSQL 16 with RLS and pgvector
+- `packages/db` — Drizzle ORM + drizzle-kit migrations, PostgreSQL 18 (ADR-010) with RLS and pgvector
 - `packages/shared` — Zod schemas, DTO types, event contracts, enums (single source of truth for web + api)
 - `packages/config` — eslint, tsconfig, prettier presets
-- Redis 7 (BullMQ, rate limits, cache). Object storage behind a `StorageProvider` adapter: `LocalDiskStorage` in dev, S3 (ap-south-1) in prod.
-- **NO DOCKER on the dev machine.** Local dev uses cloud dev services (Neon Postgres, Redis Cloud) via env vars — see `docs/05-local-dev-setup.md`. Never add docker-compose or Testcontainers as a requirement for local work. CI (GitHub Actions) may use service containers.
+- **No Redis** (ADR-011): jobs, delayed jobs and cron via **pg-boss** on Postgres behind our queue interface; rate limits in Postgres (`rate_limit_buckets` via definer functions). Object storage behind a `StorageProvider` adapter: `LocalDiskStorage` in dev, S3 (ap-south-1) in prod.
+- **Local-first, NO DOCKER on the dev machine** (ADR-009, ADR-012). Dev/test use a natively installed PostgreSQL 18 (`localhost:5432`, owner role `revops_owner`, app role `app_user`) — zero paid/cloud services in dev; see `docs/05-local-dev-setup.md`. pgvector is optional locally until M4 (CI has it). Never add docker-compose or Testcontainers as a requirement for local work. CI (GitHub Actions) may use service containers.
 - Observability: pino structured logs, OpenTelemetry traces, Prometheus metrics.
 
 ## Commands
-- `pnpm i` · `pnpm dev` (all apps) · `pnpm run doctor` (checks env vars + DB/Redis connectivity; plain `pnpm doctor` is a pnpm built-in)
+- `pnpm i` · `pnpm dev` (all apps) · `pnpm run doctor` (checks env vars + DB connectivity/roles; plain `pnpm doctor` is a pnpm built-in)
 - `pnpm typecheck` · `pnpm lint` · `pnpm test` · `pnpm test:e2e` · `pnpm build`
-- `pnpm db:generate` (new migration) · `pnpm db:migrate` · `pnpm db:seed`
+- `pnpm run db:bootstrap --write-env` (one-off setup from `DB_BOOTSTRAP_URL`: DBs, extensions, revops_owner, app_user) · `pnpm db:generate` (new migration) · `pnpm db:migrate` · `pnpm db:seed`
 - Voice agent: `cd apps/voice-agent && uv run pytest && uv run ruff check . && uv run mypy .`
 
 ## Non-negotiable rules

@@ -8,7 +8,6 @@ catalog:
   '@types/node': 22.20.5
   '@vitest/coverage-v8': 4.1.12
   eslint: 9.39.5
-  ioredis: 5.11.1
   postgres: 3.4.9
   prettier: 3.9.10
   tsx: 4.23.15
@@ -23,3 +22,11 @@ onlyBuiltDependencies:
   - esbuild
   - sharp
   - unrs-resolver
+# Install scripts we deliberately never run: swagger-ui telemetry (scarf), protobufjs version check.
+ignoredBuiltDependencies:
+  - '@scarf/scarf'
+  - protobufjs
+
+# Security pins for transitive deps (pnpm audit): multer <2.5.0 GHSA-q7qp-rjg7-q26m via @nestjs/platform-express.
+overrides:
+  multer: 2.5.0

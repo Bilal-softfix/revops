@@ -18,12 +18,12 @@ Launch market: **India**. Stack: **lean modular monolith**. Segment: **abhi deci
 | `.claude/commands/` | `/start-milestone`, `/implement-task`, `/review-milestone`, `/adr` |
 | `.claude/agents/` | Subagents: code-reviewer, test-writer, security-auditor |
 | `.claude/settings.json` + `hooks/` | Auto format/lint after edits (Node hook, cross-platform), secrets ko read hone se roko |
-| `docs/05-local-dev-setup.md` | Bina Docker ke local setup — cloud Postgres/Redis |
+| `docs/05-local-dev-setup.md` | Bina Docker ke local setup — native PostgreSQL 18, Redis nahi |
 
 ## Kaise use karein (pehli baar)
 
 1. Naya repo banao, ye poora kit uske root mein copy karo, `git init && git add . && git commit -m "chore: execution kit"`.
-2. `docs/05-local-dev-setup.md` follow karke Neon Postgres + Redis Cloud setup karo (Docker ki zaroorat nahi). Hook Node.js mein hai — koi extra tool nahi chahiye.
+2. `docs/05-local-dev-setup.md` follow karke local PostgreSQL 18 setup karo (`pnpm run db:bootstrap --write-env`; Docker, Redis ya cloud services ki zaroorat nahi). Hook Node.js mein hai — koi extra tool nahi chahiye.
 3. `claude` start karo aur run karo: `/start-milestone M0`
 4. Claude plan dikhayega → tum approve karo → woh task-by-task implement karega.
 5. Milestone khatam hone par: `/review-milestone M0` → tum review karo → merge → next milestone.

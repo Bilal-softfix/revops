@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { EnvValidationError, parseEnv } from './load.js';
-import { apiEnvSchema, testDatabaseEnvSchema } from './schemas.js';
+import {
+  apiEnvSchema,
+  productionEnvProblems,
+  testDatabaseEnvSchema,
+  workerEnvSchema,
+} from './schemas.js';
 
 const validApiEnv = {
   DATABASE_URL: 'postgresql://app_user:pw@localhost:5432/revops_dev',
-  REDIS_URL: 'redis://localhost:6379',
 };
 
 describe('apiEnvSchema', () => {
@@ -29,28 +33,24 @@ describe('apiEnvSchema', () => {
     );
   });
 
-  it('accepts both postgres:// and postgresql:// and redis:// / rediss://', () => {
+  it('accepts both postgres:// and postgresql://, incl. sslmode=disable for a local server', () => {
+    expect(() => parseEnv(apiEnvSchema, { DATABASE_URL: 'postgres://u:p@h/db' })).not.toThrow();
     expect(() =>
       parseEnv(apiEnvSchema, {
-        DATABASE_URL: 'postgres://u:p@h/db',
-        REDIS_URL: 'rediss://default:p@h:1234',
+        DATABASE_URL: 'postgresql://app_user:p@localhost:5432/revops_dev?sslmode=disable',
       }),
     ).not.toThrow();
   });
 
-  it('rejects a non-postgres DATABASE_URL and a non-redis REDIS_URL', () => {
+  it('rejects a non-postgres DATABASE_URL', () => {
     try {
-      parseEnv(apiEnvSchema, { DATABASE_URL: 'mysql://u:p@h/db', REDIS_URL: 'http://h' });
+      parseEnv(apiEnvSchema, { DATABASE_URL: 'mysql://u:p@h/db' });
       expect.unreachable();
     } catch (error) {
       expect(error).toBeInstanceOf(EnvValidationError);
-      const issues = (error as EnvValidationError).issues;
-      expect(issues).toEqual(
-        expect.arrayContaining([
-          expect.stringMatching(/^DATABASE_URL: /),
-          expect.stringMatching(/^REDIS_URL: /),
-        ]),
-      );
+      expect((error as EnvValidationError).issues).toEqual([
+        expect.stringMatching(/^DATABASE_URL: /),
+      ]);
     }
   });
 
@@ -65,9 +65,11 @@ describe('apiEnvSchema', () => {
   });
 
   it('reports missing required vars by name as "is required"', () => {
-    expect(() => parseEnv(apiEnvSchema, {})).toThrow(
-      /DATABASE_URL: is required[\s\S]*REDIS_URL: is required/,
-    );
+    expect(() => parseEnv(apiEnvSchema, {})).toThrow(/DATABASE_URL: is required/);
+  });
+
+  it('has no Redis setting any more (ADR-011)', () => {
+    expect(Object.keys(apiEnvSchema.shape)).not.toContain('REDIS_URL');
   });
 
   it('treats a blank required var as missing', () => {
@@ -88,5 +90,85 @@ describe('testDatabaseEnvSchema', () => {
     expect(() =>
       parseEnv(testDatabaseEnvSchema, { DATABASE_URL_TEST: 'postgres://u:p@h/revops_test' }),
     ).toThrow(/DATABASE_URL_TEST_OWNER/);
+  });
+});
+
+describe('productionEnvProblems', () => {
+  const prod = (patch: Record<string, string>) =>
+    productionEnvProblems(
+      parseEnv(apiEnvSchema, {
+        ...validApiEnv,
+        NODE_ENV: 'production',
+        EMAIL_DRIVER: 'console',
+        APP_URL: 'https://app.revops.in',
+        METRICS_TOKEN: 'a-long-metrics-token-value',
+        ...patch,
+      }),
+    );
+
+  it('ignores non-production environments', () => {
+    expect(productionEnvProblems(parseEnv(apiEnvSchema, validApiEnv))).toEqual([]);
+  });
+
+  it('rejects the console/fake email drivers (they would log or drop live reset links)', () => {
+    expect(prod({})).toEqual([expect.stringMatching(/^EMAIL_DRIVER: /)]);
+    expect(prod({ EMAIL_DRIVER: 'fake' })).toEqual([expect.stringMatching(/^EMAIL_DRIVER: /)]);
+  });
+
+  it('rejects http or localhost APP_URL and insecure cookies, independently of the driver', () => {
+    const problems = prod({ APP_URL: 'http://localhost:3000', COOKIE_SECURE: 'false' });
+    expect(problems).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^APP_URL: /),
+        expect.stringMatching(/^COOKIE_SECURE: /),
+      ]),
+    );
+  });
+
+  it('rejects the file email driver in production', () => {
+    expect(prod({ EMAIL_DRIVER: 'file' })).toEqual([expect.stringMatching(/^EMAIL_DRIVER: /)]);
+  });
+
+  it('requires METRICS_TOKEN in production (metrics are not public)', () => {
+    expect(prod({ EMAIL_DRIVER: 'fake', METRICS_TOKEN: '' })).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^METRICS_TOKEN: /)]),
+    );
+  });
+});
+
+describe('TRUST_PROXY', () => {
+  it.each(['loopback', 'false', '1', '10.0.0.0/8,172.16.0.0/12'])('accepts %s', (value) => {
+    expect(parseEnv(apiEnvSchema, { ...validApiEnv, TRUST_PROXY: value }).TRUST_PROXY).toBe(value);
+  });
+
+  it('rejects `true` (would let any client spoof its IP) and junk', () => {
+    for (const value of ['true', 'everyone']) {
+      expect(() => parseEnv(apiEnvSchema, { ...validApiEnv, TRUST_PROXY: value })).toThrow(
+        /TRUST_PROXY/,
+      );
+    }
+  });
+});
+
+describe('observability + worker env', () => {
+  it('tracing is off unless an OTLP endpoint is set; a short METRICS_TOKEN is rejected', () => {
+    expect(parseEnv(apiEnvSchema, validApiEnv).OTEL_EXPORTER_OTLP_ENDPOINT).toBeUndefined();
+    expect(() => parseEnv(apiEnvSchema, { ...validApiEnv, METRICS_TOKEN: 'short' })).toThrow(
+      /METRICS_TOKEN/,
+    );
+    expect(() =>
+      parseEnv(apiEnvSchema, { ...validApiEnv, OTEL_EXPORTER_OTLP_ENDPOINT: 'ftp://x' }),
+    ).toThrow(/OTEL_EXPORTER_OTLP_ENDPOINT/);
+  });
+
+  it('worker env = API env + worker port and outbox poll interval (bounded)', () => {
+    expect(parseEnv(workerEnvSchema, validApiEnv)).toMatchObject({
+      WORKER_PORT: 4001,
+      OUTBOX_POLL_INTERVAL_MS: 1000,
+      EMAIL_DRIVER: 'console',
+    });
+    expect(() =>
+      parseEnv(workerEnvSchema, { ...validApiEnv, OUTBOX_POLL_INTERVAL_MS: '10' }),
+    ).toThrow(/OUTBOX_POLL_INTERVAL_MS/);
   });
 });
