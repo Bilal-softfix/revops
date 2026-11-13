@@ -2,7 +2,7 @@ import { verify } from '@node-rs/argon2';
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createDb } from '../src/client.js';
-import { memberships, users } from '../src/schema/index.js';
+import { memberships, pipelines, tenants, users } from '../src/schema/index.js';
 import { DEMO_TENANT_2_ID, DEMO_TENANT_ID, DEMO_TENANTS, seedDemo } from '../src/seed.js';
 import { loadTestDatabaseEnv } from '../src/testing/index.js';
 import { withContext, withTenant } from '../src/with-tenant.js';
@@ -34,6 +34,21 @@ describe('seedDemo (as app_user, through RLS)', () => {
         tenant.members.map((m) => ({ ...m, status: 'active' })).sort(byEmail),
       );
     }
+  });
+
+  it('M1: each demo tenant gets its template’s CRM setup and contact-visibility default', async () => {
+    const setupOf = (tenantId: string) =>
+      withTenant(app.db, tenantId, async (tx) => ({
+        tenant: (await tx.select().from(tenants))[0],
+        pipelines: (await tx.select({ key: pipelines.key }).from(pipelines)).map((p) => p.key),
+      }));
+    const realty = await setupOf(DEMO_TENANT_ID);
+    expect(realty.tenant?.industryTemplate).toBe('real-estate');
+    expect(realty.tenant?.settings).toMatchObject({ agentContactVisibility: 'assigned' });
+    expect(realty.pipelines).toEqual(['property_sales']);
+    const clinic = await setupOf(DEMO_TENANT_2_ID);
+    expect(clinic.tenant?.settings).toMatchObject({ agentContactVisibility: 'all' });
+    expect(clinic.pipelines).toEqual(['patient_enquiries']);
   });
 
   it('the first tenant has owner/admin/manager/agent; the second its own owner + agent', async () => {

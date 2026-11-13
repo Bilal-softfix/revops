@@ -113,6 +113,42 @@ Permissions are strings (`lead.read.all`, `lead.read.assigned`, `routing.manage`
   - The invitation is claimed atomically in the same transaction as the membership insert, the audit row and `member.joined.v1`.
 - **Tenant switcher:** `GET /v1/tenants` and `POST /v1/session/tenant` work only for the caller's own active memberships (user-only context, `self_select`).
 
+## CRM setup and industry templates (M1-T3a)
+- **Templates are data, not code:** `packages/shared/src/templates/data/*.json`, validated at import by `industryTemplateSchema`. The six templates are `generic`, `real-estate`, `education`, `clinic`, `software-agency` and `repair-shop`. Each one defines:
+  - one or more pipelines (exactly one default), with stages (category open/won/lost, probability) and lost-reason presets;
+  - suggested custom fields;
+  - lead sources.
+- **Provisioning:** `provisionCrm(tx, tenantId, templateKey)` (`packages/db`) copies a template into the tenant's own pipelines, stages, custom field definitions and lead sources.
+  - It runs once: a per-tenant advisory lock, and a tenant that already has a pipeline is left alone. Later template edits never change existing tenants.
+  - Signup's "Business type" (`industry`, default `generic`) provisions in the same transaction as the tenant.
+  - Tenants created earlier are provisioned lazily from `tenants.industry_template` by `CrmService.withCrm` on first CRM access.
+- **Cross-tenant references are impossible:** CRM child rows reference their parent through composite foreign keys on `(tenant_id, parent_id)` against `unique(tenant_id, id)`. FK checks bypass RLS, so a plain `pipeline_id` FK would let one tenant point at another tenant's row by its uuid. Every M1 table follows this rule.
+
+## Contacts and visibility (M1-T1)
+- **Phones:** normalised to E.164 by `normalizePhone` (libphonenumber-js, region IN) in `@revops/shared`, so the browser preview and the API agree. Phones and emails (citext) are each unique per tenant among non-deleted contacts.
+- **Agent visibility is a per-tenant setting:** `tenants.settings.agentContactVisibility`, `all` | `assigned`.
+  - The default comes from the industry template: repair-shop and clinic `all`; the others `assigned`.
+  - Owners and admins change it with `PATCH /v1/crm/settings` (`crm.settings.manage`, audited).
+  - Owner, admin and manager (`lead.read.all`) always see every contact.
+  - In `assigned` mode an agent sees contacts they created, plus (from M1-T4) contacts linked to leads assigned to them.
+  - The scope is built once (`ContactsRepository.visible`) and applied to list, get, search, update and delete. An invisible contact is a 404, not a 403.
+- **Duplicate phone or email → 409 `contact_exists`** with `conflict: { field, ownerName, contact? }`.
+  - `contact` (id + name) is included only if the caller can see it; otherwise the caller learns only that it exists and who is working it.
+  - `ownerName` is the creator for now; from M1-T4 it's the owner of the latest lead.
+  - A unique-index race maps to the same 409.
+
+## Custom fields (M1-T2)
+- **Definitions:** per tenant and entity (contact/lead), seeded from the industry template and edited in Settings → Custom fields (`customfield.manage`: owner, admin). Everyone can read them, because forms need them.
+  - Key and type are immutable (the update schema is strict).
+  - Select options can be relabelled or added, never removed, because stored values reference them.
+  - Keys are never reused, even after deletion.
+- **Values** live in `custom_fields` jsonb on the record and are validated by `buildCustomFieldsSchema(defs, 'create' | 'patch')` from `@revops/shared`. The API (authoritative) and the web forms share it, and errors land on `customFields.<key>`.
+  - Unknown keys are rejected, including keys of deleted fields.
+  - Required fields are enforced on create and can't be cleared with `null`.
+  - A patch only touches the keys it carries, merged in SQL with `||` and `-`.
+- **Deleting a definition** is a soft delete. Responses include only values of active definitions (`visibleCustomFields`), so old values are hidden but never destroyed.
+- **Web:** `CustomFieldInputs` renders any definition list (text, number, date, choice, multi-choice, yes/no). The contact form sends only changed fields on edit.
+
 ## Web app (apps/web, M0-T7)
 - **The browser never calls the API directly.** It calls same-origin `/api/v1/*`, and the route handler `app/api/[...path]/route.ts` forwards that to `API_INTERNAL_URL`, which is read at runtime.
   - Only `/v1` is exposed: `/metrics`, `/docs` and the probes stay internal.
@@ -126,12 +162,19 @@ Permissions are strings (`lead.read.all`, `lead.read.assigned`, `routing.manage`
 - **UI kit:** shadcn/ui (radix-nova) in `components/ui` with the system font stack, so builds don't download fonts.
 
 ## Events
-Outbox row: `{ id, tenant_id, type, aggregate_id, payload jsonb, occurred_at, published_at }`. The worker's relay (`apps/api/src/platform/outbox`, M0-T6) runs one transaction every `OUTBOX_POLL_INTERVAL_MS`:
+Outbox row: `{ id, tenant_id, type, aggregate_id, payload jsonb, occurred_at, published_at, dead_lettered_at, dead_letter_reason }`.
+
+**Writing (M1-T0):** modules write events and audit rows only through `recordEvent(tx, EVENT, {…})` and `recordAudit(tx, {…})` (`apps/api/src/platform/outbox/record.ts`), inside their own tenant transaction.
+- Every event type is declared once in the shared registry (`packages/shared/src/events/registry.ts`: `defineEvent(type, zodSchema)`), and its payload is validated before insert.
+- DB CHECKs enforce the `<aggregate>.<verb>.v<N>` type format and an object payload.
+- Audit actions must be `<entity>.<verb>` and user actions need an actor.
+
+**Relaying:** The worker's relay (`apps/api/src/platform/outbox`, M0-T6) runs one transaction every `OUTBOX_POLL_INTERVAL_MS`:
 - `outbox_claim_batch(100)` claims up to 100 events (FOR UPDATE SKIP LOCKED);
 - it enqueues one pg-boss job per subscribed consumer queue, with job id = event id, carrying the `outboxEnvelopeSchema` envelope;
 - `outbox_mark_published` marks the batch published.
 
-Concurrent or repeated relay runs never publish an event twice. Consumers extend `OutboxConsumer` (`events` they subscribe to, one queue each) and wrap their side effects in `processOnce`, which records `processed_events(consumer, event_id)` in the same tenant transaction. `platform.demo-event-log` is the template consumer.
+Rows the relay can't validate (a type not in the registry, a payload failing its schema, or a bad envelope) are **dead-lettered** in the same pass, via `outbox_dead_letter` with a reason that has schema paths only and never values. Later claims skip them. They are counted in `outbox_events_dead_lettered_total{type}` and logged, so one bad row never blocks any tenant's delivery. Concurrent or repeated relay runs never publish an event twice. Consumers extend `OutboxConsumer` (`events` they subscribe to, one queue each) and wrap their side effects in `processOnce`, which records `processed_events(consumer, event_id)` in the same tenant transaction. `platform.demo-event-log` is the template consumer.
 
 ### Jobs and processes
 - **API (`main.ts`):** enqueues through `JobQueue` and runs no jobs.

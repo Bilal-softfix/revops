@@ -3,19 +3,17 @@ import {
   type Tx,
   and,
   asc,
-  auditLogs,
   eq,
   gt,
   invitations,
   isNull,
   memberships,
-  outboxEvents,
   sessions,
   sql,
   tenants,
   users,
 } from '@revops/db';
-import type { ActorType, Member, Role } from '@revops/shared';
+import type { Member, Role } from '@revops/shared';
 import { Database } from '../../platform/database/database';
 
 export interface MemberRow {
@@ -162,14 +160,25 @@ export class TenancyRepository {
 
   // --- invitations (tenant context) ---
 
-  async listOpenInvitations(tx: Tx): Promise<InvitationRow[]> {
+  /** Pending = not accepted, not revoked and not expired (M1-T0: expired ones aren't pending). */
+  async listPendingInvitations(tx: Tx, now: Date): Promise<InvitationRow[]> {
     return tx
       .select(invitationColumns)
       .from(invitations)
-      .where(and(isNull(invitations.acceptedAt), isNull(invitations.revokedAt)))
+      .where(
+        and(
+          isNull(invitations.acceptedAt),
+          isNull(invitations.revokedAt),
+          gt(invitations.expiresAt, now),
+        ),
+      )
       .orderBy(asc(invitations.createdAt));
   }
 
+  /**
+   * The open (not accepted, not revoked) invitation for an email — possibly expired. It holds the
+   * invitations_open_email_unique slot until it is revoked or superseded.
+   */
   async findOpenInvitationByEmail(tx: Tx, email: string): Promise<InvitationRow | undefined> {
     const [row] = await tx
       .select(invitationColumns)
@@ -284,35 +293,6 @@ export class TenancyRepository {
 
   async setSessionTenant(tx: Tx, sessionId: string, tenantId: string): Promise<void> {
     await tx.update(sessions).set({ activeTenantId: tenantId }).where(eq(sessions.id, sessionId));
-  }
-
-  async insertAudit(
-    tx: Tx,
-    entry: {
-      tenantId: string;
-      actorType: ActorType;
-      actorId: string | null;
-      action: string;
-      entity: string;
-      entityId: string | null;
-      before?: Record<string, unknown>;
-      after?: Record<string, unknown>;
-      ip: string | null;
-    },
-  ): Promise<void> {
-    await tx.insert(auditLogs).values(entry);
-  }
-
-  async insertOutboxEvent(
-    tx: Tx,
-    event: {
-      tenantId: string;
-      type: string;
-      aggregateId: string;
-      payload: Record<string, unknown>;
-    },
-  ): Promise<void> {
-    await tx.insert(outboxEvents).values(event);
   }
 }
 

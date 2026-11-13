@@ -26,7 +26,8 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/bin/migrate.ts",
-    "db:seed": "tsx src/bin/seed.ts"
+    "db:seed": "tsx src/bin/seed.ts",
+    "db:reset:dev": "tsx src/bin/reset-dev.ts"
   },
   "dependencies": {
     "@node-rs/argon2": "2.2.2",

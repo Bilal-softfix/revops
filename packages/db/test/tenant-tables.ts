@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import type { Db } from '../src/client.js';
+import type { Db, Tx } from '../src/client.js';
 import {
   auditLogs,
+  contacts,
+  customFieldDefs,
+  leadSources,
+  pipelineStages,
+  pipelines,
   invitations,
   memberships,
   outboxEvents,
@@ -92,7 +97,81 @@ export const TENANT_TABLES: readonly TenantTableFixture[] = [
       return eventId;
     },
   },
+  {
+    table: 'pipelines',
+    tenantColumn: 'tenant_id',
+    privileges: ['SELECT', 'INSERT', 'UPDATE'],
+    insert: async (tx, tenantId) => (await insertPipeline(tx, tenantId)).id,
+  },
+  {
+    table: 'pipeline_stages',
+    tenantColumn: 'tenant_id',
+    privileges: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
+    insert: async (tx, tenantId) => {
+      const pipeline = await insertPipeline(tx, tenantId);
+      const [row] = await tx
+        .insert(pipelineStages)
+        .values({ tenantId, pipelineId: pipeline.id, name: 'S', position: 0, category: 'open' })
+        .returning({ id: pipelineStages.id });
+      return row?.id ?? '';
+    },
+  },
+  {
+    table: 'custom_field_defs',
+    tenantColumn: 'tenant_id',
+    privileges: ['SELECT', 'INSERT', 'UPDATE'],
+    insert: async (tx, tenantId) => {
+      const [row] = await tx
+        .insert(customFieldDefs)
+        .values({
+          tenantId,
+          entity: 'lead',
+          key: `k_${randomUUID().slice(0, 8)}`,
+          label: 'K',
+          type: 'text',
+        })
+        .returning({ id: customFieldDefs.id });
+      return row?.id ?? '';
+    },
+  },
+  {
+    table: 'lead_sources',
+    tenantColumn: 'tenant_id',
+    privileges: ['SELECT', 'INSERT', 'UPDATE'],
+    insert: async (tx, tenantId) => {
+      const [row] = await tx
+        .insert(leadSources)
+        .values({ tenantId, name: 'Walk-in', type: 'walk_in' })
+        .returning({ id: leadSources.id });
+      return row?.id ?? '';
+    },
+  },
+  {
+    table: 'contacts',
+    tenantColumn: 'tenant_id',
+    privileges: ['SELECT', 'INSERT', 'UPDATE'],
+    insert: async (tx, tenantId) => {
+      const [row] = await tx
+        .insert(contacts)
+        .values({
+          tenantId,
+          name: 'C',
+          phoneE164: `+9198${String(Math.floor(Math.random() * 1e8)).padStart(8, '0')}`,
+        })
+        .returning({ id: contacts.id });
+      return row?.id ?? '';
+    },
+  },
 ];
+
+async function insertPipeline(tx: Tx, tenantId: string): Promise<{ id: string }> {
+  const [row] = await tx
+    .insert(pipelines)
+    .values({ tenantId, name: 'P' })
+    .returning({ id: pipelines.id });
+  if (!row) throw new Error('no pipeline');
+  return row;
+}
 
 /** Creates a tenant inside its own context (the tenants policy is on `id`). */
 export async function createTenant(db: Db, name = 'Tenant'): Promise<string> {

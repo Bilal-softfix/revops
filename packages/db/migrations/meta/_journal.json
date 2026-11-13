@@ -99,6 +99,55 @@
       "when": 1794385939480,
       "tag": "0013_pgboss_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1794477895494,
+      "tag": "0014_outbox_dead_letter",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1794477899234,
+      "tag": "0015_outbox_dead_letter_functions",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1794478131863,
+      "tag": "0016_auth_cancel_signup",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1794481112989,
+      "tag": "0017_crm_setup",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1794481129285,
+      "tag": "0018_crm_setup_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1794547610077,
+      "tag": "0019_contacts",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1794547640124,
+      "tag": "0020_contacts_rls",
+      "breakpoints": true
     }
   ]
 }

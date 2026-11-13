@@ -10,7 +10,7 @@ test.describe('M0-T7 AC: invite → accept as agent → restricted nav', () => {
     const ownerEmail = uniqueEmail('owner');
     await signupAndVerify(page, ownerEmail, 'Ravi Clinic', 'Ravi Owner');
     await login(page, ownerEmail);
-    expect(await navLabels(page)).toEqual(['Dashboard', 'Team']);
+    expect(await navLabels(page)).toEqual(['Dashboard', 'Contacts', 'Team', 'Custom fields']);
     await page
       .getByRole('navigation', { name: 'Main' })
       .getByRole('link', { name: 'Team' })
@@ -42,7 +42,7 @@ test.describe('M0-T7 AC: invite → accept as agent → restricted nav', () => {
     await expect(agent.getByText('Agent', { exact: true }).first()).toBeVisible();
 
     // Restricted: the agent sees the team read-only — no invite, no invitations, no controls
-    expect(await navLabels(agent)).toEqual(['Dashboard', 'Team']);
+    expect(await navLabels(agent)).toEqual(['Dashboard', 'Contacts', 'Team']);
     await agent
       .getByRole('navigation', { name: 'Main' })
       .getByRole('link', { name: 'Team' })

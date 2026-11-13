@@ -3,18 +3,16 @@ import {
   type Tx,
   and,
   asc,
-  auditLogs,
   authTokens,
   eq,
   isNull,
   memberships,
-  outboxEvents,
   sessions,
   sql,
   tenants,
   users,
 } from '@revops/db';
-import type { ActorType, AuthTenant, Role } from '@revops/shared';
+import type { AuthTenant, Role } from '@revops/shared';
 import { Database } from '../../platform/database/database';
 
 function pgCode(error: unknown): unknown {
@@ -123,11 +121,15 @@ export class IdentityRepository {
   }
 
   /** Deletes the unverified account a live verify token belongs to ("this wasn't me"). */
-  async discardUnverifiedByToken(tokenHash: string): Promise<boolean> {
-    const [row] = await this.database.db.execute<{ ok: boolean }>(
-      sql`select auth_discard_unverified_by_token(${tokenHash}) as ok`,
+  /**
+   * "This wasn't me / start over": discards the unverified account a verify link belongs to and
+   * returns its email (lower-cased), or null if the link isn't valid. Atomic (auth_cancel_signup).
+   */
+  async cancelSignupByToken(tokenHash: string): Promise<string | null> {
+    const [row] = await this.database.db.execute<{ email: string | null }>(
+      sql`select auth_cancel_signup(${tokenHash}) as email`,
     );
-    return row?.ok ?? false;
+    return row?.email ?? null;
   }
 
   /** Deletes every unverified account past the 48 h cutoff; returns how many. */
@@ -147,7 +149,10 @@ export class IdentityRepository {
     await tx.insert(users).values(user);
   }
 
-  async insertTenant(tx: Tx, tenant: { id: string; name: string; slug: string }): Promise<void> {
+  async insertTenant(
+    tx: Tx,
+    tenant: { id: string; name: string; slug: string; industryTemplate: string },
+  ): Promise<void> {
     await tx.insert(tenants).values(tenant);
   }
 
@@ -247,32 +252,5 @@ export class IdentityRepository {
       .update(sessions)
       .set({ revokedAt: now })
       .where(and(eq(sessions.id, sessionId), isNull(sessions.revokedAt)));
-  }
-
-  async insertAudit(
-    tx: Tx,
-    entry: {
-      tenantId: string;
-      actorType: ActorType;
-      actorId: string | null;
-      action: string;
-      entity: string;
-      entityId: string | null;
-      ip: string | null;
-    },
-  ): Promise<void> {
-    await tx.insert(auditLogs).values(entry);
-  }
-
-  async insertOutboxEvent(
-    tx: Tx,
-    event: {
-      tenantId: string;
-      type: string;
-      aggregateId: string;
-      payload: Record<string, unknown>;
-    },
-  ): Promise<void> {
-    await tx.insert(outboxEvents).values(event);
   }
 }

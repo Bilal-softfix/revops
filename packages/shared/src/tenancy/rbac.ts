@@ -11,14 +11,52 @@ export const PERMISSIONS = [
   'member.invite',
   /** Change members' roles; disable / re-enable members. */
   'member.manage',
+  /** Work with own/assigned leads and the CRM setup they need (pipelines, sources, fields). */
+  'lead.read.assigned',
+  /** See every lead and contact in the tenant (not just own/assigned). */
+  'lead.read.all',
+  /** Create and edit contacts the member can see. */
+  'contact.write',
+  /** Delete (soft) contacts. */
+  'contact.delete',
+  /** Change the tenant's CRM settings (e.g. agent contact visibility). */
+  'crm.settings.manage',
+  /** Create, edit and delete custom field definitions. */
+  'customfield.manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
 export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
-  owner: ['member.read', 'member.invite', 'member.manage'],
-  admin: ['member.read', 'member.invite', 'member.manage'],
-  manager: ['member.read'],
-  agent: ['member.read'],
+  owner: [
+    'member.read',
+    'member.invite',
+    'member.manage',
+    'lead.read.assigned',
+    'lead.read.all',
+    'contact.write',
+    'contact.delete',
+    'crm.settings.manage',
+    'customfield.manage',
+  ],
+  admin: [
+    'member.read',
+    'member.invite',
+    'member.manage',
+    'lead.read.assigned',
+    'lead.read.all',
+    'contact.write',
+    'contact.delete',
+    'crm.settings.manage',
+    'customfield.manage',
+  ],
+  manager: [
+    'member.read',
+    'lead.read.assigned',
+    'lead.read.all',
+    'contact.write',
+    'contact.delete',
+  ],
+  agent: ['member.read', 'lead.read.assigned', 'contact.write'],
 };
 
 export function hasPermission(role: Role | null | undefined, permission: Permission): boolean {

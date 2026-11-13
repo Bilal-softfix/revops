@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { hash } from '@node-rs/argon2';
-import type { Role } from '@revops/shared';
+import type { IndustryTemplateKey, Role } from '@revops/shared';
 import { sql } from 'drizzle-orm';
 import type { Db } from './client.js';
+import { provisionCrm } from './crm-provisioning.js';
 import { memberships, tenants, users } from './schema/index.js';
 import { withContext } from './with-tenant.js';
 
@@ -16,6 +17,8 @@ export interface DemoTenant {
   id: string;
   slug: string;
   name: string;
+  /** Seeds the CRM setup (pipelines, fields, sources, agentContactVisibility default). */
+  industryTemplate: IndustryTemplateKey;
   members: readonly { email: string; role: Role }[];
 }
 
@@ -37,6 +40,7 @@ export const DEMO_TENANTS: readonly DemoTenant[] = [
     id: DEMO_TENANT_ID,
     slug: DEMO_TENANT_SLUG,
     name: 'Demo Realty',
+    industryTemplate: 'real-estate', // agents see only their contacts (assigned)
     members: [
       { email: 'owner@demo.revops.test', role: 'owner' },
       { email: 'admin@demo.revops.test', role: 'admin' },
@@ -48,6 +52,7 @@ export const DEMO_TENANTS: readonly DemoTenant[] = [
     id: DEMO_TENANT_2_ID,
     slug: DEMO_TENANT_2_SLUG,
     name: 'Demo Clinic',
+    industryTemplate: 'clinic', // front desk: agents see all contacts
     members: [
       { email: 'owner2@demo.revops.test', role: 'owner' },
       { email: 'manager@demo.revops.test', role: 'manager' },
@@ -66,12 +71,22 @@ export async function seedDemo(db: Db, password: string): Promise<{ tenantIds: s
   const passwordHash = await hash(password); // argon2id by default
 
   for (const tenant of DEMO_TENANTS) {
-    await withContext(db, { tenantId: tenant.id }, (tx) =>
-      tx
+    await withContext(db, { tenantId: tenant.id }, async (tx) => {
+      await tx
         .insert(tenants)
-        .values({ id: tenant.id, name: tenant.name, slug: tenant.slug })
-        .onConflictDoNothing({ target: tenants.id }),
-    );
+        .values({
+          id: tenant.id,
+          name: tenant.name,
+          slug: tenant.slug,
+          industryTemplate: tenant.industryTemplate,
+        })
+        .onConflictDoUpdate({
+          target: tenants.id,
+          set: { industryTemplate: tenant.industryTemplate },
+        });
+      // Once: a tenant that already has a CRM setup keeps it (and its settings).
+      await provisionCrm(tx, tenant.id, tenant.industryTemplate);
+    });
   }
 
   const userIds = new Map<string, string>();

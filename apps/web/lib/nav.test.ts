@@ -7,8 +7,12 @@ const labels = (role: Parameters<typeof navFor>[0]) =>
   navFor(role).flatMap((section) => section.items.map((item) => item.label));
 
 describe('role-based navigation', () => {
-  it('every role sees Dashboard and Team today (all have member.read)', () => {
-    for (const role of ROLES) expect(labels(role)).toEqual(['Dashboard', 'Team']);
+  it('every role sees Dashboard, Contacts and Team; owners/admins also Custom fields', () => {
+    for (const role of ROLES) {
+      const expected = ['Dashboard', 'Contacts', 'Team'];
+      if (role === 'owner' || role === 'admin') expected.push('Custom fields');
+      expect(labels(role)).toEqual(expected);
+    }
   });
 
   it('items with a permission are hidden from a member without a role', () => {

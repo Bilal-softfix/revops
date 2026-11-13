@@ -1,14 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { provisionCrm } from '@revops/db';
 import {
   type CancelSignupRequest,
+  DEFAULT_INDUSTRY_TEMPLATE,
+  type IndustryTemplateKey,
   type EmailOnlyRequest,
   type LoginRequest,
   type ResetPasswordRequest,
   type SessionResponse,
   type SignupRequest,
   type SignupResponse,
-  USER_SIGNED_UP_V1,
+  USER_SIGNED_UP,
   type UserSignedUpV1,
   type VerifyEmailRequest,
 } from '@revops/shared';
@@ -16,11 +19,17 @@ import type { ApiEnv } from '@revops/shared/env';
 import { API_ENV } from '../../config/env';
 import { Clock } from '../../platform/clock';
 import { Database } from '../../platform/database/database';
+import { recordAudit, recordEvent } from '../../platform/outbox/record';
 import { JobQueue } from '../../platform/queue/job-queue';
 import { RateLimiter } from '../../platform/rate-limit/rate-limiter';
 import type { RequestMeta } from '../../platform/request-meta';
 import { EmailProvider, maskEmail } from '../../providers/email';
-import { accountExistsMessage, resetPasswordMessage, verifyEmailMessage } from './emails';
+import {
+  accountExistsMessage,
+  resetPasswordMessage,
+  startOverMessage,
+  verifyEmailMessage,
+} from './emails';
 import {
   invalidCredentials,
   invalidToken,
@@ -127,6 +136,7 @@ export class IdentityService {
       name: input.name,
       email: input.email,
       tenantName: input.tenantName,
+      industry: input.industry ?? DEFAULT_INDUSTRY_TEMPLATE,
       passwordHash,
       meta,
     });
@@ -150,7 +160,14 @@ export class IdentityService {
         REPLACES_PER_EMAIL_PER_DAY,
         24 * HOUR,
       );
-      if (blocked > 0) return; // the current pending signup stays; the request already got 202
+      if (blocked > 0) {
+        // The pending sign-up stays (the request already got 202), but the inbox owner still hears
+        // about it: a start-over link, so a squatter can't block the address (M1-T0). Already
+        // counted against the per-address email limits by allowEmail above.
+        const token = await this.issueToken(existing.id, 'email_verify', EMAIL_VERIFY_TTL_MS);
+        await this.email.send(startOverMessage(input.email, this.env.APP_URL, token));
+        return;
+      }
     }
     if (await this.repository.discardUnverifiedByEmail(input.email)) {
       const ip = meta.ip ?? 'unknown';
@@ -176,7 +193,7 @@ export class IdentityService {
 
   /** Returns the verification token to email. */
   private async createAccount(
-    input: Pick<SignupRequest, 'name' | 'email' | 'tenantName'>,
+    input: Pick<SignupRequest, 'name' | 'email' | 'tenantName'> & { industry: IndustryTemplateKey },
     passwordHash: string,
     meta: RequestMeta,
   ): Promise<string> {
@@ -196,9 +213,13 @@ export class IdentityService {
         id: tenantId,
         name: input.tenantName,
         slug: tenantSlug(input.tenantName),
+        industryTemplate: input.industry,
       });
       await this.repository.insertMembership(tx, { tenantId, userId, role: 'owner' });
-      await this.repository.insertAudit(tx, {
+      // The CRM setup (pipelines, fields, sources) comes from the chosen industry template, in
+      // the same transaction: a new tenant never exists without one (M1-T3a).
+      await provisionCrm(tx, tenantId, input.industry);
+      await recordAudit(tx, {
         tenantId,
         actorType: 'user',
         actorId: userId,
@@ -208,9 +229,8 @@ export class IdentityService {
         ip: meta.ip,
       });
       const payload: UserSignedUpV1 = { userId, tenantId };
-      await this.repository.insertOutboxEvent(tx, {
+      await recordEvent(tx, USER_SIGNED_UP, {
         tenantId,
-        type: USER_SIGNED_UP_V1,
         aggregateId: userId,
         payload,
       });
@@ -271,9 +291,11 @@ export class IdentityService {
       LOGIN_WINDOW_MS,
     );
     if (retryAfter > 0) throw rateLimited(retryAfter);
-    if (!(await this.repository.discardUnverifiedByToken(hashToken(input.token)))) {
-      throw invalidToken();
-    }
+    const email = await this.repository.cancelSignupByToken(hashToken(input.token));
+    if (!email) throw invalidToken();
+    // The link was only ever emailed to that address, so this proves inbox ownership: give the
+    // owner back the full replace allowance (M1-T0), so a squatter can't keep them blocked.
+    await this.rateLimiter.reset(`signup-replace:${email}`);
     this.logger.log(`discarded an unverified account via its "this wasn't me" link (from ${ip})`);
   }
 
@@ -330,7 +352,7 @@ export class IdentityService {
     const session = await this.sessions.create({ userId: user.id, tenantId, ...meta });
     if (tenantId) {
       await this.database.withContext({ tenantId, userId: user.id }, (tx) =>
-        this.repository.insertAudit(tx, {
+        recordAudit(tx, {
           tenantId,
           actorType: 'user',
           actorId: user.id,
@@ -356,7 +378,7 @@ export class IdentityService {
     if (auth.tenantId) {
       const tenantId = auth.tenantId;
       await this.database.withContext({ tenantId, userId: auth.userId }, (tx) =>
-        this.repository.insertAudit(tx, {
+        recordAudit(tx, {
           tenantId,
           actorType: 'user',
           actorId: auth.userId,
