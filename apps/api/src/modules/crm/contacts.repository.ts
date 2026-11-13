@@ -30,7 +30,8 @@ export type ContactScope = { all: true } | { all: false; userId: string };
 
 type ContactRow = typeof contacts.$inferSelect;
 
-export function toContact(row: ContactRow): Contact {
+/** API shape. `customFields` must already be filtered to active definitions by the caller. */
+export function toContact(row: ContactRow, customFields: Record<string, unknown>): Contact {
   return {
     id: row.id,
     name: row.name,
@@ -39,7 +40,7 @@ export function toContact(row: ContactRow): Contact {
     email: row.email,
     city: row.city,
     consent: row.consent,
-    customFields: row.customFields,
+    customFields,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -170,6 +171,7 @@ export class ContactsRepository {
       email: string | null;
       city: string | null;
       consent: Consent;
+      customFields: Record<string, unknown>;
       createdBy: string;
     },
   ): Promise<ContactRow> {
@@ -184,10 +186,28 @@ export class ContactsRepository {
     patch: Partial<
       Pick<ContactRow, 'name' | 'phoneE164' | 'altPhones' | 'email' | 'city' | 'consent'>
     >,
+    customFields: Record<string, unknown> = {},
   ): Promise<ContactRow> {
+    // Custom fields: merge in SQL (no lost update); null in the patch removes the key.
+    const set = Object.fromEntries(Object.entries(customFields).filter(([, v]) => v !== null));
+    const clear = Object.keys(customFields).filter((k) => customFields[k] === null);
     const [row] = await tx
       .update(contacts)
-      .set({ ...patch, updatedAt: new Date() })
+      .set({
+        ...patch,
+        ...(Object.keys(customFields).length > 0
+          ? {
+              customFields:
+                clear.length > 0
+                  ? sql`(${contacts.customFields} || ${JSON.stringify(set)}::jsonb) - array[${sql.join(
+                      clear.map((key) => sql`${key}`),
+                      sql`, `,
+                    )}]::text[]`
+                  : sql`${contacts.customFields} || ${JSON.stringify(set)}::jsonb`,
+            }
+          : {}),
+        updatedAt: new Date(),
+      })
       .where(eq(contacts.id, id))
       .returning();
     if (!row) throw new Error('contact update returned nothing');

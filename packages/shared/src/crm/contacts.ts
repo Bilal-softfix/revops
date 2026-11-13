@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { emailSchema, nameSchema } from '../auth/schemas.js';
+import { customFieldValuesInputSchema } from './custom-fields.js';
 import { phoneSchema } from './phone.js';
 
 // Contacts API contracts (/v1/contacts). Phones are stored and deduplicated as E.164.
@@ -46,6 +47,8 @@ export const createContactRequestSchema = z
     email: contactFields.email.optional(),
     city: contactFields.city.optional(),
     consent: contactFields.consent.optional(),
+    /** Validated against the tenant's contact field definitions by the API. */
+    customFields: customFieldValuesInputSchema.optional(),
   })
   .refine((body) => body.phone !== undefined || body.email !== undefined, {
     message: PHONE_OR_EMAIL_MESSAGE,
@@ -65,6 +68,8 @@ export const updateContactRequestSchema = z
     email: contactFields.email.nullable(),
     city: contactFields.city.nullable(),
     consent: contactFields.consent,
+    /** Patch: only the keys given change; null clears a value. */
+    customFields: customFieldValuesInputSchema,
   })
   .partial()
   .refine((body) => Object.keys(body).length > 0, { message: 'nothing to update' });

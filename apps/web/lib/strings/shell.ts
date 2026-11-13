@@ -7,6 +7,7 @@ export const shellStrings = {
     dashboard: 'Dashboard',
     contacts: 'Contacts',
     team: 'Team',
+    customFields: 'Custom fields',
   },
   tenantSwitcher: {
     label: 'Switch workspace',

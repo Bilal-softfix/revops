@@ -9,12 +9,14 @@ import {
   type CreateContactRequest,
   type UpdateContactRequest,
   hasPermission,
+  visibleCustomFields,
 } from '@revops/shared';
 import { Clock } from '../../platform/clock';
-import { Database } from '../../platform/database/database';
 import { DomainError } from '../../platform/errors/domain-error';
 import { recordAudit, recordEvent } from '../../platform/outbox/record';
 import type { RequestMeta } from '../../platform/request-meta';
+import { CrmService } from './crm.service';
+import { CustomFieldsService } from './custom-fields.service';
 import type { CrmAuth } from './crm.service';
 import { type ContactScope, ContactsRepository, toContact } from './contacts.repository';
 import { contactExists, crmNotFound } from './errors';
@@ -35,13 +37,21 @@ function duplicateField(error: unknown): 'phone' | 'email' | undefined {
 @Injectable()
 export class ContactsService {
   constructor(
-    private readonly database: Database,
+    private readonly crm: CrmService,
+    private readonly fields: CustomFieldsService,
     private readonly repository: ContactsRepository,
     private readonly clock: Clock,
   ) {}
 
+  /** Tenant transaction with the CRM setup in place (field definitions, settings). */
   private inTenant<T>(auth: CrmAuth, fn: (tx: Tx) => Promise<T>): Promise<T> {
-    return this.database.withContext({ tenantId: auth.tenantId, userId: auth.userId }, fn);
+    return this.crm.withCrm(auth, fn);
+  }
+
+  /** Rows → API, with values of deleted custom fields hidden. */
+  private async present(tx: Tx, rows: ContactRow[]): Promise<Contact[]> {
+    const defs = await this.fields.definitions(tx, 'contact');
+    return rows.map((row) => toContact(row, visibleCustomFields(row.customFields, defs)));
   }
 
   /** Owners/admins/managers: all. Agents: per the tenant's agentContactVisibility setting. */
@@ -52,22 +62,27 @@ export class ContactsService {
   }
 
   async list(auth: CrmAuth, query: ContactQuery): Promise<ContactPage> {
-    const rows = await this.inTenant(auth, async (tx) =>
-      this.repository.list(tx, await this.scope(tx, auth), { ...query, limit: query.limit + 1 }),
-    );
-    const page = rows.slice(0, query.limit);
-    return {
-      items: page.map(toContact),
-      nextCursor: rows.length > query.limit ? (page.at(-1)?.id ?? null) : null,
-    };
+    return this.inTenant(auth, async (tx) => {
+      const rows = await this.repository.list(tx, await this.scope(tx, auth), {
+        ...query,
+        limit: query.limit + 1,
+      });
+      const page = rows.slice(0, query.limit);
+      return {
+        items: await this.present(tx, page),
+        nextCursor: rows.length > query.limit ? (page.at(-1)?.id ?? null) : null,
+      };
+    });
   }
 
   async get(auth: CrmAuth, id: string): Promise<Contact> {
-    const row = await this.inTenant(auth, async (tx) =>
-      this.repository.findVisible(tx, await this.scope(tx, auth), id),
-    );
-    if (!row) throw crmNotFound();
-    return toContact(row);
+    return this.inTenant(auth, async (tx) => {
+      const row = await this.repository.findVisible(tx, await this.scope(tx, auth), id);
+      if (!row) throw crmNotFound();
+      const [contact] = await this.present(tx, [row]);
+      if (!contact) throw crmNotFound();
+      return contact;
+    });
   }
 
   async create(auth: CrmAuth, input: CreateContactRequest, meta: RequestMeta): Promise<Contact> {
@@ -75,6 +90,11 @@ export class ContactsService {
     const phoneE164 = input.phone ?? null;
     return this.mapDuplicate(auth, { phoneE164, email }, undefined, () =>
       this.inTenant(auth, async (tx) => {
+        const values = this.fields.validateValues(
+          await this.fields.definitions(tx, 'contact'),
+          input.customFields,
+          'create',
+        );
         await this.assertUnique(tx, auth, { phoneE164, email });
         const row = await this.repository.insert(tx, {
           tenantId: auth.tenantId,
@@ -84,6 +104,7 @@ export class ContactsService {
           email,
           city: input.city ?? null,
           consent: input.consent ?? {},
+          customFields: Object.fromEntries(Object.entries(values).filter(([, v]) => v !== null)),
           createdBy: auth.userId,
         });
         await recordAudit(tx, {
@@ -102,7 +123,9 @@ export class ContactsService {
           aggregateId: row.id,
           payload: { contactId: row.id, tenantId: auth.tenantId },
         });
-        return toContact(row);
+        const [contact] = await this.present(tx, [row]);
+        if (!contact) throw crmNotFound();
+        return contact;
       }),
     );
   }
@@ -125,12 +148,19 @@ export class ContactsService {
             extensions: { errors: [{ path: 'phone', message: PHONE_OR_EMAIL_MESSAGE }] },
           });
         }
+        const values = this.fields.validateValues(
+          await this.fields.definitions(tx, 'contact'),
+          input.customFields,
+          'patch',
+        );
         await this.assertUnique(tx, auth, { phoneE164: input.phone, email: input.email }, id);
-        const { phone, ...rest } = input;
-        const row = await this.repository.update(tx, id, {
-          ...rest,
-          ...(phone !== undefined ? { phoneE164: phone } : {}),
-        });
+        const { phone, customFields: _customFields, ...rest } = input;
+        const row = await this.repository.update(
+          tx,
+          id,
+          { ...rest, ...(phone !== undefined ? { phoneE164: phone } : {}) },
+          values,
+        );
         await recordAudit(tx, {
           tenantId: auth.tenantId,
           actorType: 'user',
@@ -138,10 +168,15 @@ export class ContactsService {
           action: 'contact.updated',
           entity: 'contact',
           entityId: id,
-          after: { fields: Object.keys(input).sort() },
+          after: {
+            fields: Object.keys(input).sort(),
+            ...(input.customFields ? { customFields: Object.keys(input.customFields).sort() } : {}),
+          },
           ip: meta.ip,
         });
-        return toContact(row);
+        const [contact] = await this.present(tx, [row]);
+        if (!contact) throw crmNotFound();
+        return contact;
       }),
     );
   }

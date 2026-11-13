@@ -21,6 +21,8 @@ export const PERMISSIONS = [
   'contact.delete',
   /** Change the tenant's CRM settings (e.g. agent contact visibility). */
   'crm.settings.manage',
+  /** Create, edit and delete custom field definitions. */
+  'customfield.manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -34,6 +36,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     'contact.write',
     'contact.delete',
     'crm.settings.manage',
+    'customfield.manage',
   ],
   admin: [
     'member.read',
@@ -44,6 +47,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     'contact.write',
     'contact.delete',
     'crm.settings.manage',
+    'customfield.manage',
   ],
   manager: [
     'member.read',

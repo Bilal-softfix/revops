@@ -67,8 +67,15 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
   - `contact.created.v1` event; audit rows store field names only;
   - migrations 0019/0020.
 
+- [x] M1-T2 Custom fields (2026-11-13):
+  - definitions API (`GET`/`POST`/`PATCH`/`DELETE /v1/custom-fields`; read: all roles, write: owner/admin; audited);
+  - shared value validation with field-level errors, patch merge, and deleted fields hidden but kept;
+  - contacts read and write custom fields;
+  - web: Settings → Custom fields, plus the fields rendered in the contact form;
+  - leads reuse all of it in M1-T4.
+- [x] M1-T1 follow-up (2026-11-13): contacts need a phone OR an email; `pnpm db:reset:dev`.
+
 ## In progress
-- [ ] M1-T2 Custom fields (defs CRUD, validation, dynamic form inputs)
 - [ ] M1-T3b Pipelines & stages (CRUD, reorder, delete-with-move)
 - [ ] M1-T4 Leads (list/filters/saved views, kanban, stage change + events, agent visibility)
 - [ ] M1-T5 Notes, tasks, timeline (My tasks)
@@ -149,6 +156,12 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - 2026-11-11 · db:bootstrap with a superuser creates a dedicated NOSUPERUSER `revops_owner` that owns the DBs and runs migrations. Reason: if the owner were `postgres`, the SECURITY DEFINER functions would run as a superuser and bypass RLS, unlike Neon/CI. Doctor warns if `DATABASE_URL_OWNER` is a superuser.
 - 2026-11-11 · db:bootstrap after `--write-env` deletes `DB_BOOTSTRAP_URL` (the superuser password doesn't stay on disk); reruns connect as `revops_owner` in verify-only mode (create nothing, check everything, reuse passwords proven by login).
 - 2026-11-11 · pgvector is optional (doctor ⚠, bootstrap warns) until M4; CI keeps `pgvector/pgvector:0.8.6-pg18`.
+- 2026-11-13 · M1-T2:
+  - select options can be relabelled or added but not removed (400 lists the removed values), so stored values stay valid; the web form sends only changed fields, so untouched old values are never re-validated;
+  - a required field added later doesn't block editing older records unless that field is in the edit;
+  - unticked optional yes/no fields count as "not set" on create;
+  - number fields accept decimals (₹ values typed as rupees); dates are `YYYY-MM-DD`;
+  - no per-pipeline scoping of lead fields yet (all lead fields apply to every pipeline).
 - 2026-11-13 · M1-T1 follow-up (Dev):
   - a contact needs a phone OR an email (create: 400 on the phone field if neither; PATCH can clear one but not both); dedupe on whichever is present. This replaces the T1 assumption "a contact needs a phone";
   - `pnpm db:reset:dev` added (guarded dev-only reset + migrate + seed).

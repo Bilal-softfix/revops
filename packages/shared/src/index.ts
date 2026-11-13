@@ -2,6 +2,7 @@
 // Node-only helpers live in subpath exports such as `@revops/shared/env`.
 export * from './auth/schemas.js';
 export * from './crm/contacts.js';
+export * from './crm/custom-fields.js';
 export * from './crm/enums.js';
 export * from './crm/phone.js';
 export * from './crm/settings.js';

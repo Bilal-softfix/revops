@@ -1,5 +1,5 @@
 import { type Permission, type Role, hasPermission } from '@revops/shared';
-import { Contact, LayoutDashboard, type LucideIcon, Users } from 'lucide-react';
+import { Contact, LayoutDashboard, ListPlus, type LucideIcon, Users } from 'lucide-react';
 import { shellStrings } from '@/lib/strings/shell';
 
 export interface NavItem {
@@ -40,6 +40,12 @@ export const NAV: readonly NavSection[] = [
         label: shellStrings.nav.team,
         icon: Users,
         permission: 'member.read',
+      },
+      {
+        href: '/settings/custom-fields',
+        label: shellStrings.nav.customFields,
+        icon: ListPlus,
+        permission: 'customfield.manage',
       },
     ],
   },

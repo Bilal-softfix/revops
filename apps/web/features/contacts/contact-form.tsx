@@ -4,6 +4,8 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import {
   type Contact,
   type ContactConflict,
+  type CustomFieldValue,
+  buildCustomFieldsSchema,
   contactConflictSchema,
   createContactRequestSchema,
   formatPhone,
@@ -13,9 +15,17 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { z } from 'zod';
+import { CustomFieldInputs } from '@/components/form/custom-field-inputs';
 import { FormError, TextField } from '@/components/form/text-field';
+import { useCustomFields } from '@/features/custom-fields/queries';
 import { Button } from '@/components/ui/button';
 import { ApiError } from '@/lib/api/problem';
+import {
+  type CustomFieldFormValues,
+  type CustomFieldInputValue,
+  customFieldsPayload,
+  initialInputs,
+} from '@/lib/custom-fields';
 import { applyApiError } from '@/lib/forms';
 import { contactStrings as s } from '@/lib/strings/contacts';
 
@@ -33,6 +43,8 @@ export interface ContactFormValues {
   phone?: string | undefined;
   email?: string | undefined;
   city?: string | undefined;
+  /** Only what changed (update) or what is set (create); null clears. */
+  customFields?: Record<string, CustomFieldValue> | undefined;
 }
 
 /** A conflict the user can act on: open the existing contact, or ask its owner/a manager. */
@@ -66,6 +78,13 @@ export function ContactForm({
 }) {
   const [formError, setFormError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<ContactConflict | null>(null);
+  const defs = useCustomFields('contact').data?.items ?? [];
+  // Custom field inputs: stored values, overlaid with what the user edited.
+  const [edited, setEdited] = useState<CustomFieldFormValues>({});
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const cfInputs = { ...initialInputs(defs, initial?.customFields), ...edited };
+  const setCustomField = (key: string, value: CustomFieldInputValue) =>
+    setEdited((current) => ({ ...current, [key]: value }));
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -81,6 +100,18 @@ export function ContactForm({
   const submit = form.handleSubmit(async (values) => {
     setFormError(null);
     setConflict(null);
+    setFieldErrors({});
+    // Custom fields: same shared validation as the API (create: all set values; edit: changes).
+    const customFields = customFieldsPayload(defs, cfInputs, initial?.customFields);
+    const cfCheck = buildCustomFieldsSchema(defs, initial ? 'patch' : 'create').safeParse(
+      customFields,
+    );
+    if (!cfCheck.success) {
+      setFieldErrors(
+        Object.fromEntries(cfCheck.error.issues.map((i) => [String(i.path[0] ?? ''), i.message])),
+      );
+      return;
+    }
     // Validate with the shared request schema, so the browser and the API agree on every rule.
     const parsed = createContactRequestSchema.safeParse({
       name: values.name,
@@ -103,8 +134,22 @@ export function ContactForm({
         phone: values.phone.trim() || undefined,
         email: values.email.trim() || undefined,
         city: values.city.trim() || undefined,
+        ...(Object.keys(customFields).length > 0 ? { customFields } : {}),
       });
     } catch (error) {
+      if (error instanceof ApiError) {
+        const cf = Object.entries(error.fieldErrors).filter(([path]) =>
+          path.startsWith('customFields.'),
+        );
+        if (cf.length > 0) {
+          setFieldErrors(
+            Object.fromEntries(
+              cf.map(([path, message]) => [path.slice('customFields.'.length), message]),
+            ),
+          );
+          return;
+        }
+      }
       const found =
         error instanceof ApiError && error.code === 'contact_exists'
           ? contactConflictSchema.safeParse(error.problem.conflict)
@@ -149,6 +194,12 @@ export function ContactForm({
         autoComplete="off"
         error={errors.city?.message}
         {...form.register('city')}
+      />
+      <CustomFieldInputs
+        defs={defs}
+        values={cfInputs}
+        errors={fieldErrors}
+        onChange={setCustomField}
       />
       <Button type="submit" disabled={isSubmitting} className="justify-self-start">
         {submitLabel}

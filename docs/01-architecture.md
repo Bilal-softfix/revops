@@ -137,6 +137,18 @@ Permissions are strings (`lead.read.all`, `lead.read.assigned`, `routing.manage`
   - `ownerName` is the creator for now; from M1-T4 it's the owner of the latest lead.
   - A unique-index race maps to the same 409.
 
+## Custom fields (M1-T2)
+- **Definitions:** per tenant and entity (contact/lead), seeded from the industry template and edited in Settings → Custom fields (`customfield.manage`: owner, admin). Everyone can read them, because forms need them.
+  - Key and type are immutable (the update schema is strict).
+  - Select options can be relabelled or added, never removed, because stored values reference them.
+  - Keys are never reused, even after deletion.
+- **Values** live in `custom_fields` jsonb on the record and are validated by `buildCustomFieldsSchema(defs, 'create' | 'patch')` from `@revops/shared`. The API (authoritative) and the web forms share it, and errors land on `customFields.<key>`.
+  - Unknown keys are rejected, including keys of deleted fields.
+  - Required fields are enforced on create and can't be cleared with `null`.
+  - A patch only touches the keys it carries, merged in SQL with `||` and `-`.
+- **Deleting a definition** is a soft delete. Responses include only values of active definitions (`visibleCustomFields`), so old values are hidden but never destroyed.
+- **Web:** `CustomFieldInputs` renders any definition list (text, number, date, choice, multi-choice, yes/no). The contact form sends only changed fields on edit.
+
 ## Web app (apps/web, M0-T7)
 - **The browser never calls the API directly.** It calls same-origin `/api/v1/*`, and the route handler `app/api/[...path]/route.ts` forwards that to `API_INTERNAL_URL`, which is read at runtime.
   - Only `/v1` is exposed: `/metrics`, `/docs` and the probes stay internal.

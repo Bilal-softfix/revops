@@ -75,6 +75,7 @@ export function ContactDetail({ id }: { id: string }) {
                 phone: values.phone ?? null,
                 email: values.email ?? null,
                 city: values.city ?? null,
+                ...(values.customFields ? { customFields: values.customFields } : {}),
               });
               toast.success(s.saved);
             }}

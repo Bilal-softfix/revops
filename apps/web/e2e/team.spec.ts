@@ -10,7 +10,7 @@ test.describe('M0-T7 AC: invite → accept as agent → restricted nav', () => {
     const ownerEmail = uniqueEmail('owner');
     await signupAndVerify(page, ownerEmail, 'Ravi Clinic', 'Ravi Owner');
     await login(page, ownerEmail);
-    expect(await navLabels(page)).toEqual(['Dashboard', 'Contacts', 'Team']);
+    expect(await navLabels(page)).toEqual(['Dashboard', 'Contacts', 'Team', 'Custom fields']);
     await page
       .getByRole('navigation', { name: 'Main' })
       .getByRole('link', { name: 'Team' })
