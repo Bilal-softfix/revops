@@ -72,7 +72,7 @@ export function ContactDetail({ id }: { id: string }) {
             onSubmit={async (values) => {
               await update.mutateAsync({
                 name: values.name,
-                phone: values.phone,
+                phone: values.phone ?? null,
                 email: values.email ?? null,
                 city: values.city ?? null,
               });

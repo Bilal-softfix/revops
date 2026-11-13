@@ -30,9 +30,9 @@ export const contactStrings = {
   fields: {
     name: 'Name',
     phone: 'Phone',
-    phoneHint: 'Any format: 98765 43210, 098765 43210, +91 98765 43210.',
+    phoneHint: 'Phone or email required. Any format: 98765 43210, +91 98765 43210.',
     phonePreview: (formatted: string) => `Saved as ${formatted}`,
-    email: 'Email (optional)',
+    email: 'Email',
     city: 'City (optional)',
   },
   conflict: {

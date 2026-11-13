@@ -165,7 +165,7 @@ export class ContactsRepository {
     values: {
       tenantId: string;
       name: string;
-      phoneE164: string;
+      phoneE164: string | null;
       altPhones: string[];
       email: string | null;
       city: string | null;

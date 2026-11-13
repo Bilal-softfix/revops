@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { Tx } from '@revops/db';
 import {
   CONTACT_CREATED,
+  PHONE_OR_EMAIL_MESSAGE,
   type Contact,
   type ContactPage,
   type ContactQuery,
@@ -11,6 +12,7 @@ import {
 } from '@revops/shared';
 import { Clock } from '../../platform/clock';
 import { Database } from '../../platform/database/database';
+import { DomainError } from '../../platform/errors/domain-error';
 import { recordAudit, recordEvent } from '../../platform/outbox/record';
 import type { RequestMeta } from '../../platform/request-meta';
 import type { CrmAuth } from './crm.service';
@@ -70,13 +72,14 @@ export class ContactsService {
 
   async create(auth: CrmAuth, input: CreateContactRequest, meta: RequestMeta): Promise<Contact> {
     const email = input.email ?? null;
-    return this.mapDuplicate(auth, { phoneE164: input.phone, email }, undefined, () =>
+    const phoneE164 = input.phone ?? null;
+    return this.mapDuplicate(auth, { phoneE164, email }, undefined, () =>
       this.inTenant(auth, async (tx) => {
-        await this.assertUnique(tx, auth, { phoneE164: input.phone, email });
+        await this.assertUnique(tx, auth, { phoneE164, email });
         const row = await this.repository.insert(tx, {
           tenantId: auth.tenantId,
           name: input.name,
-          phoneE164: input.phone,
+          phoneE164: input.phone ?? null,
           altPhones: input.altPhones ?? [],
           email,
           city: input.city ?? null,
@@ -114,6 +117,14 @@ export class ContactsService {
       this.inTenant(auth, async (tx) => {
         const current = await this.repository.findVisible(tx, await this.scope(tx, auth), id);
         if (!current) throw crmNotFound();
+        const nextPhone = input.phone !== undefined ? input.phone : current.phoneE164;
+        const nextEmail = input.email !== undefined ? input.email : current.email;
+        if (nextPhone === null && nextEmail === null) {
+          // Same rule as create: a contact keeps at least one way to reach them.
+          throw new DomainError('validation_failed', 400, 'Invalid request', {
+            extensions: { errors: [{ path: 'phone', message: PHONE_OR_EMAIL_MESSAGE }] },
+          });
+        }
         await this.assertUnique(tx, auth, { phoneE164: input.phone, email: input.email }, id);
         const { phone, ...rest } = input;
         const row = await this.repository.update(tx, id, {

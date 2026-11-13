@@ -122,6 +122,38 @@ describe('contacts CRUD + normalisation', () => {
     await create(other.owner, { name: 'There', phone: typed }).expect(201);
   });
 
+  it('phone OR email: email-only works, neither is a 400 on the phone field', async () => {
+    const email = uniqueEmail('linkedin');
+    const res = await create(tm.owner, { name: 'LinkedIn lead', email }).expect(201);
+    expect(res.body).toMatchObject({ phoneE164: null, email });
+    const bad = await create(tm.owner, { name: 'Nobody', city: 'Pune' }).expect(400);
+    expect((bad.body as { errors: unknown }).errors).toEqual([
+      { path: 'phone', message: 'Enter a phone number or an email (at least one)' },
+    ]);
+  });
+
+  it('email-only duplicates are caught on the email', async () => {
+    const email = uniqueEmail('mailonly');
+    await create(tm.owner, { name: 'First', email }).expect(201);
+    const res = await create(tm.owner, { name: 'Second', email }).expect(409);
+    expect(res.body).toMatchObject({ conflict: { field: 'email' } });
+  });
+
+  it('PATCH can clear one identifier but never both', async () => {
+    const email = uniqueEmail('both');
+    const c = (await create(tm.owner, { name: 'Both', phone: newPhone(), email }).expect(201))
+      .body as Contact;
+    const patch = (body: Record<string, unknown>) =>
+      withSession(request(t.server).patch(`/v1/contacts/${c.id}`), tm.owner).send(body);
+    await patch({ phone: null }).expect(200);
+    const res = await patch({ email: null }).expect(400);
+    expect(res.body).toMatchObject({
+      code: 'validation_failed',
+      errors: [{ path: 'phone', message: 'Enter a phone number or an email (at least one)' }],
+    });
+    expect((await get(tm.owner, c.id).expect(200)).body).toMatchObject({ phoneE164: null, email });
+  });
+
   it('a duplicate email is a conflict too (case-insensitive)', async () => {
     const email = uniqueEmail('dup');
     await create(tm.owner, { name: 'E1', phone: newPhone(), email }).expect(201);

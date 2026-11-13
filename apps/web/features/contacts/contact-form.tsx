@@ -30,7 +30,7 @@ type FormValues = z.infer<typeof formSchema>;
 
 export interface ContactFormValues {
   name: string;
-  phone: string;
+  phone?: string | undefined;
   email?: string | undefined;
   city?: string | undefined;
 }
@@ -84,7 +84,7 @@ export function ContactForm({
     // Validate with the shared request schema, so the browser and the API agree on every rule.
     const parsed = createContactRequestSchema.safeParse({
       name: values.name,
-      phone: values.phone,
+      ...(values.phone.trim() ? { phone: values.phone } : {}),
       ...(values.email.trim() ? { email: values.email } : {}),
       ...(values.city.trim() ? { city: values.city } : {}),
     });
@@ -100,7 +100,7 @@ export function ContactForm({
     try {
       await onSubmit({
         name: values.name,
-        phone: values.phone,
+        phone: values.phone.trim() || undefined,
         email: values.email.trim() || undefined,
         city: values.city.trim() || undefined,
       });

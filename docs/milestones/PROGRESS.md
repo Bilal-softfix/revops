@@ -149,12 +149,14 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - 2026-11-11 · db:bootstrap with a superuser creates a dedicated NOSUPERUSER `revops_owner` that owns the DBs and runs migrations. Reason: if the owner were `postgres`, the SECURITY DEFINER functions would run as a superuser and bypass RLS, unlike Neon/CI. Doctor warns if `DATABASE_URL_OWNER` is a superuser.
 - 2026-11-11 · db:bootstrap after `--write-env` deletes `DB_BOOTSTRAP_URL` (the superuser password doesn't stay on disk); reruns connect as `revops_owner` in verify-only mode (create nothing, check everything, reuse passwords proven by login).
 - 2026-11-11 · pgvector is optional (doctor ⚠, bootstrap warns) until M4; CI keeps `pgvector/pgvector:0.8.6-pg18`.
+- 2026-11-13 · M1-T1 follow-up (Dev):
+  - a contact needs a phone OR an email (create: 400 on the phone field if neither; PATCH can clear one but not both); dedupe on whichever is present. This replaces the T1 assumption "a contact needs a phone";
+  - `pnpm db:reset:dev` added (guarded dev-only reset + migrate + seed).
 - 2026-11-13 · M1-T1 (Dev decisions):
   - agent contact visibility is a per-tenant setting, defaulting from the template (repair-shop/clinic = all; others = assigned);
   - in `assigned` mode agents also see contacts they created;
   - a duplicate's `ownerName` is the owner of the contact's latest lead (creator until M1-T4 adds leads).
 - 2026-11-13 · M1-T1 assumptions:
-  - a contact needs a phone when created through the API (the DB allows email-only, for M2 capture);
   - email is unique per tenant too, as the Dev request said "duplicate phone/email";
   - contact audit rows record changed field names, not values (no second copy of PII);
   - tenants seeded or provisioned before M1-T1 have no stored setting and read their template's default;

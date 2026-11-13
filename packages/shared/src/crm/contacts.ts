@@ -32,21 +32,35 @@ const contactFields = {
   consent: consentSchema,
 };
 
-export const createContactRequestSchema = z.object({
-  name: contactFields.name,
-  phone: contactFields.phone,
-  altPhones: contactFields.altPhones.optional(),
-  email: contactFields.email.optional(),
-  city: contactFields.city.optional(),
-  consent: contactFields.consent.optional(),
-});
+export const PHONE_OR_EMAIL_MESSAGE = 'Enter a phone number or an email (at least one)';
+
+/**
+ * At least one way to reach them: phone OR email (software-agency inquiries often arrive by email
+ * or LinkedIn with no phone). Duplicates are checked on whichever is present.
+ */
+export const createContactRequestSchema = z
+  .object({
+    name: contactFields.name,
+    phone: contactFields.phone.optional(),
+    altPhones: contactFields.altPhones.optional(),
+    email: contactFields.email.optional(),
+    city: contactFields.city.optional(),
+    consent: contactFields.consent.optional(),
+  })
+  .refine((body) => body.phone !== undefined || body.email !== undefined, {
+    message: PHONE_OR_EMAIL_MESSAGE,
+    path: ['phone'],
+  });
 export type CreateContactRequest = z.infer<typeof createContactRequestSchema>;
 
-/** PATCH: any subset; email/city/phone-less fields can be cleared with null. */
+/**
+ * PATCH: any subset; phone, email and city can be cleared with null — but the contact must keep a
+ * phone or an email (checked against the stored values by the API).
+ */
 export const updateContactRequestSchema = z
   .object({
     name: contactFields.name,
-    phone: contactFields.phone,
+    phone: contactFields.phone.nullable(),
     altPhones: contactFields.altPhones,
     email: contactFields.email.nullable(),
     city: contactFields.city.nullable(),

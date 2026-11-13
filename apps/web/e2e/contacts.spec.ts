@@ -38,3 +38,18 @@ test('M1-T1: create a contact with a local number, find it by search, duplicate 
   await expect(dialog.getByRole('alert')).toContainText('already exists');
   await expect(dialog.getByRole('link', { name: 'Ravi Walk-in' })).toBeVisible();
 });
+
+test('M1-T1: phone OR email — email-only saves; neither shows the rule', async ({ page }) => {
+  const email = uniqueEmail('owner');
+  await signupAndVerify(page, email, 'Code Shop', 'Agency Owner', 'Software agency / IT services');
+  await login(page, email);
+  await page.goto('/contacts');
+  await page.getByRole('button', { name: 'New contact' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Name').fill('Nobody');
+  await dialog.getByRole('button', { name: 'Save contact' }).click();
+  await expect(dialog.getByText('Enter a phone number or an email (at least one)')).toBeVisible();
+  await dialog.getByLabel('Email').fill(uniqueEmail('linkedin'));
+  await dialog.getByRole('button', { name: 'Save contact' }).click();
+  await expect(page.getByRole('heading', { name: 'Nobody' })).toBeVisible();
+});
