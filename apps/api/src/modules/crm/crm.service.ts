@@ -1,6 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { type Tx, provisionCrm } from '@revops/db';
-import type { LeadSourceList, PipelineList } from '@revops/shared';
+import type {
+  CrmSettings,
+  LeadSourceList,
+  PipelineList,
+  UpdateCrmSettingsRequest,
+} from '@revops/shared';
+import { recordAudit } from '../../platform/outbox/record';
+import type { RequestMeta } from '../../platform/request-meta';
+import { ContactsRepository } from './contacts.repository';
 import { Database } from '../../platform/database/database';
 import type { AuthContext } from '../identity';
 import { CrmRepository } from './crm.repository';
@@ -15,7 +23,47 @@ export class CrmService {
   constructor(
     private readonly database: Database,
     private readonly repository: CrmRepository,
+    private readonly contacts: ContactsRepository,
   ) {}
+
+  async getSettings(auth: CrmAuth): Promise<CrmSettings> {
+    return this.database.withContext(
+      { tenantId: auth.tenantId, userId: auth.userId },
+      async (tx) => ({
+        agentContactVisibility: await this.contacts.agentContactVisibility(tx, auth.tenantId),
+      }),
+    );
+  }
+
+  /** Owner/admin (crm.settings.manage); audited with before/after. */
+  async updateSettings(
+    auth: CrmAuth,
+    patch: UpdateCrmSettingsRequest,
+    meta: RequestMeta,
+  ): Promise<CrmSettings> {
+    return this.database.withContext(
+      { tenantId: auth.tenantId, userId: auth.userId },
+      async (tx) => {
+        const before = await this.contacts.agentContactVisibility(tx, auth.tenantId);
+        const after = patch.agentContactVisibility ?? before;
+        if (after !== before) {
+          await this.contacts.setAgentContactVisibility(tx, auth.tenantId, after);
+          await recordAudit(tx, {
+            tenantId: auth.tenantId,
+            actorType: 'user',
+            actorId: auth.userId,
+            action: 'crm_settings.updated',
+            entity: 'tenant',
+            entityId: auth.tenantId,
+            before: { agentContactVisibility: before },
+            after: { agentContactVisibility: after },
+            ip: meta.ip,
+          });
+        }
+        return { agentContactVisibility: after };
+      },
+    );
+  }
 
   /**
    * Runs `fn` in the tenant's context after making sure the tenant has a CRM setup. New tenants

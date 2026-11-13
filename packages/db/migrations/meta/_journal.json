@@ -134,6 +134,20 @@
       "when": 1794481129285,
       "tag": "0018_crm_setup_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1794547610077,
+      "tag": "0019_contacts",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1794547640124,
+      "tag": "0020_contacts_rls",
+      "breakpoints": true
     }
   ]
 }

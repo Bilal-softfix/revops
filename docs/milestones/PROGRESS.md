@@ -59,8 +59,15 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
   - `GET /v1/pipelines` and `GET /v1/lead-sources` (`lead.read.assigned`, all roles);
   - permissions `lead.read.assigned` / `lead.read.all` added.
 
+- [x] M1-T1 Contacts (2026-11-13):
+  - E.164 normalisation (14 formats tested) and phone/email uniqueness per tenant with a visibility-aware 409;
+  - trigram search, cursor paging, soft delete;
+  - per-tenant `agentContactVisibility` (all | assigned; template defaults; `GET`/`PATCH /v1/crm/settings`, owner/admin);
+  - web: Contacts list, search, create dialog with phone preview, detail/edit/delete; seed sets Demo Realty = assigned, Demo Clinic = all;
+  - `contact.created.v1` event; audit rows store field names only;
+  - migrations 0019/0020.
+
 ## In progress
-- [ ] M1-T1 Contacts (E.164 normalisation, duplicate-phone conflict, trigram search, agent visibility)
 - [ ] M1-T2 Custom fields (defs CRUD, validation, dynamic form inputs)
 - [ ] M1-T3b Pipelines & stages (CRUD, reorder, delete-with-move)
 - [ ] M1-T4 Leads (list/filters/saved views, kanban, stage change + events, agent visibility)
@@ -142,6 +149,16 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - 2026-11-11 · db:bootstrap with a superuser creates a dedicated NOSUPERUSER `revops_owner` that owns the DBs and runs migrations. Reason: if the owner were `postgres`, the SECURITY DEFINER functions would run as a superuser and bypass RLS, unlike Neon/CI. Doctor warns if `DATABASE_URL_OWNER` is a superuser.
 - 2026-11-11 · db:bootstrap after `--write-env` deletes `DB_BOOTSTRAP_URL` (the superuser password doesn't stay on disk); reruns connect as `revops_owner` in verify-only mode (create nothing, check everything, reuse passwords proven by login).
 - 2026-11-11 · pgvector is optional (doctor ⚠, bootstrap warns) until M4; CI keeps `pgvector/pgvector:0.8.6-pg18`.
+- 2026-11-13 · M1-T1 (Dev decisions):
+  - agent contact visibility is a per-tenant setting, defaulting from the template (repair-shop/clinic = all; others = assigned);
+  - in `assigned` mode agents also see contacts they created;
+  - a duplicate's `ownerName` is the owner of the contact's latest lead (creator until M1-T4 adds leads).
+- 2026-11-13 · M1-T1 assumptions:
+  - a contact needs a phone when created through the API (the DB allows email-only, for M2 capture);
+  - email is unique per tenant too, as the Dev request said "duplicate phone/email";
+  - contact audit rows record changed field names, not values (no second copy of PII);
+  - tenants seeded or provisioned before M1-T1 have no stored setting and read their template's default;
+  - permissions: `contact.write` all roles, `contact.delete` owner/admin/manager, `crm.settings.manage` owner/admin.
 - 2026-11-12 · M1-T3a:
   - templates live in `packages/shared/src/templates/data/` (not `packages/shared/templates/`), so tsc ships them in `dist` and the web bundle can import them;
   - lost-reason presets are per pipeline (repair cancellations differ from inquiry losses);

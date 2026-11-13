@@ -1,5 +1,5 @@
 import { type Permission, type Role, hasPermission } from '@revops/shared';
-import { LayoutDashboard, type LucideIcon, Users } from 'lucide-react';
+import { Contact, LayoutDashboard, type LucideIcon, Users } from 'lucide-react';
 import { shellStrings } from '@/lib/strings/shell';
 
 export interface NavItem {
@@ -22,7 +22,15 @@ export interface NavSection {
 export const NAV: readonly NavSection[] = [
   {
     label: shellStrings.nav.main,
-    items: [{ href: '/dashboard', label: shellStrings.nav.dashboard, icon: LayoutDashboard }],
+    items: [
+      { href: '/dashboard', label: shellStrings.nav.dashboard, icon: LayoutDashboard },
+      {
+        href: '/contacts',
+        label: shellStrings.nav.contacts,
+        icon: Contact,
+        permission: 'lead.read.assigned',
+      },
+    ],
   },
   {
     label: shellStrings.nav.settings,

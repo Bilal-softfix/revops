@@ -1,10 +1,17 @@
-import { Controller, Get } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Req } from '@nestjs/common';
 import {
+  type CrmSettings,
   type LeadSourceList,
   type PipelineList,
+  type UpdateCrmSettingsRequest,
+  crmSettingsSchema,
   leadSourceListSchema,
   pipelineListSchema,
+  updateCrmSettingsRequestSchema,
 } from '@revops/shared';
+import type { Request } from 'express';
+import { requestMeta } from '../../platform/request-meta';
+import { ZodBodyPipe } from '../../platform/validation/zod-body.pipe';
 import { ZodResponse } from '../../platform/openapi/openapi';
 import { CurrentAuth } from '../identity';
 import { RequirePermission } from '../tenancy';
@@ -20,6 +27,24 @@ export class CrmController {
   @RequirePermission('lead.read.assigned')
   listPipelines(@CurrentAuth() auth: CrmAuth): Promise<PipelineList> {
     return this.crm.listPipelines(auth);
+  }
+
+  @Get('crm/settings')
+  @ZodResponse(200, crmSettingsSchema)
+  @RequirePermission('lead.read.assigned')
+  getSettings(@CurrentAuth() auth: CrmAuth): Promise<CrmSettings> {
+    return this.crm.getSettings(auth);
+  }
+
+  @Patch('crm/settings')
+  @ZodResponse(200, crmSettingsSchema)
+  @RequirePermission('crm.settings.manage')
+  updateSettings(
+    @CurrentAuth() auth: CrmAuth,
+    @Body(new ZodBodyPipe(updateCrmSettingsRequestSchema)) body: UpdateCrmSettingsRequest,
+    @Req() req: Request,
+  ): Promise<CrmSettings> {
+    return this.crm.updateSettings(auth, body, requestMeta(req));
   }
 
   @Get('lead-sources')

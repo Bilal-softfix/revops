@@ -1,5 +1,5 @@
-import type { z } from 'zod';
 import { EVENT_TYPE_PATTERN } from './outbox.js';
+import { z } from 'zod';
 import {
   MEMBER_JOINED_V1,
   USER_SIGNED_UP_V1,
@@ -26,13 +26,19 @@ export function defineEvent<T extends Record<string, unknown>>(
 export const USER_SIGNED_UP = defineEvent(USER_SIGNED_UP_V1, userSignedUpV1Schema);
 export const MEMBER_JOINED = defineEvent(MEMBER_JOINED_V1, memberJoinedV1Schema);
 
+/** A contact was created (manually in M1; capture channels from M2). Ids only. */
+export const CONTACT_CREATED = defineEvent(
+  'contact.created.v1',
+  z.object({ contactId: z.uuid(), tenantId: z.uuid() }),
+);
+
 /**
  * Every event type the system may write. The writer (`recordEvent`) and the relay both use it: an
  * outbox row whose type isn't here, or whose payload fails its schema, is dead-lettered by the
  * relay instead of blocking delivery. Add new events here (M1: lead.*, task.*, …).
  */
 export const EVENT_REGISTRY: ReadonlyMap<string, EventDefinition> = new Map(
-  [USER_SIGNED_UP, MEMBER_JOINED].map((def) => [def.type, def as EventDefinition]),
+  [USER_SIGNED_UP, MEMBER_JOINED, CONTACT_CREATED].map((def) => [def.type, def as EventDefinition]),
 );
 
 export function eventDefinition(type: string): EventDefinition | undefined {

@@ -2,29 +2,57 @@
   "key": "education",
   "name": "Education / coaching",
   "description": "Schools, coaching centres and course providers: enquiry → counselling → admission.",
+  "settings": {
+    "agentContactVisibility": "assigned"
+  },
   "pipelines": [
     {
       "key": "admissions",
       "name": "Admissions",
       "isDefault": true,
       "stages": [
-        { "key": "new_enquiry", "name": "New enquiry", "category": "open", "probability": 10 },
+        {
+          "key": "new_enquiry",
+          "name": "New enquiry",
+          "category": "open",
+          "probability": 10
+        },
         {
           "key": "counselling_scheduled",
           "name": "Counselling scheduled",
           "category": "open",
           "probability": 30
         },
-        { "key": "counselled", "name": "Counselled", "category": "open", "probability": 50 },
+        {
+          "key": "counselled",
+          "name": "Counselled",
+          "category": "open",
+          "probability": 50
+        },
         {
           "key": "application",
           "name": "Application / demo class",
           "category": "open",
           "probability": 70
         },
-        { "key": "fee_pending", "name": "Fee pending", "category": "open", "probability": 85 },
-        { "key": "enrolled", "name": "Enrolled", "category": "won", "probability": 100 },
-        { "key": "lost", "name": "Not joining", "category": "lost", "probability": 0 }
+        {
+          "key": "fee_pending",
+          "name": "Fee pending",
+          "category": "open",
+          "probability": 85
+        },
+        {
+          "key": "enrolled",
+          "name": "Enrolled",
+          "category": "won",
+          "probability": 100
+        },
+        {
+          "key": "lost",
+          "name": "Not joining",
+          "category": "lost",
+          "probability": 0
+        }
       ],
       "lostReasons": [
         "Fees too high",
@@ -35,19 +63,38 @@
     }
   ],
   "customFields": [
-    { "entity": "lead", "key": "course_interest", "label": "Course of interest", "type": "text" },
+    {
+      "entity": "lead",
+      "key": "course_interest",
+      "label": "Course of interest",
+      "type": "text"
+    },
     {
       "entity": "lead",
       "key": "mode",
       "label": "Mode",
       "type": "select",
       "options": [
-        { "value": "classroom", "label": "Classroom" },
-        { "value": "online", "label": "Online" },
-        { "value": "hybrid", "label": "Hybrid" }
+        {
+          "value": "classroom",
+          "label": "Classroom"
+        },
+        {
+          "value": "online",
+          "label": "Online"
+        },
+        {
+          "value": "hybrid",
+          "label": "Hybrid"
+        }
       ]
     },
-    { "entity": "lead", "key": "batch_start", "label": "Preferred batch start", "type": "date" },
+    {
+      "entity": "lead",
+      "key": "batch_start",
+      "label": "Preferred batch start",
+      "type": "date"
+    },
     {
       "entity": "contact",
       "key": "student_name",
@@ -62,10 +109,30 @@
     }
   ],
   "leadSources": [
-    { "key": "website", "name": "Website", "type": "web_form" },
-    { "key": "meta_ads", "name": "Facebook / Instagram ads", "type": "meta" },
-    { "key": "phone", "name": "Phone call", "type": "phone" },
-    { "key": "walk_in", "name": "Walk-in", "type": "walk_in" },
-    { "key": "referral", "name": "Referral", "type": "manual" }
+    {
+      "key": "website",
+      "name": "Website",
+      "type": "web_form"
+    },
+    {
+      "key": "meta_ads",
+      "name": "Facebook / Instagram ads",
+      "type": "meta"
+    },
+    {
+      "key": "phone",
+      "name": "Phone call",
+      "type": "phone"
+    },
+    {
+      "key": "walk_in",
+      "name": "Walk-in",
+      "type": "walk_in"
+    },
+    {
+      "key": "referral",
+      "name": "Referral",
+      "type": "manual"
+    }
   ]
 }

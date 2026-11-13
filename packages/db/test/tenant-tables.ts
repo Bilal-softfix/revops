@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Db, Tx } from '../src/client.js';
 import {
   auditLogs,
+  contacts,
   customFieldDefs,
   leadSources,
   pipelineStages,
@@ -142,6 +143,22 @@ export const TENANT_TABLES: readonly TenantTableFixture[] = [
         .insert(leadSources)
         .values({ tenantId, name: 'Walk-in', type: 'walk_in' })
         .returning({ id: leadSources.id });
+      return row?.id ?? '';
+    },
+  },
+  {
+    table: 'contacts',
+    tenantColumn: 'tenant_id',
+    privileges: ['SELECT', 'INSERT', 'UPDATE'],
+    insert: async (tx, tenantId) => {
+      const [row] = await tx
+        .insert(contacts)
+        .values({
+          tenantId,
+          name: 'C',
+          phoneE164: `+9198${String(Math.floor(Math.random() * 1e8)).padStart(8, '0')}`,
+        })
+        .returning({ id: contacts.id });
       return row?.id ?? '';
     },
   },

@@ -3,7 +3,13 @@ import { asc, eq } from 'drizzle-orm';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createDb } from '../src/client.js';
 import { provisionCrm } from '../src/crm-provisioning.js';
-import { customFieldDefs, leadSources, pipelineStages, pipelines } from '../src/schema/index.js';
+import {
+  customFieldDefs,
+  leadSources,
+  pipelineStages,
+  pipelines,
+  tenants,
+} from '../src/schema/index.js';
 import { loadTestDatabaseEnv } from '../src/testing/index.js';
 import { withTenant } from '../src/with-tenant.js';
 import { createTenant } from './tenant-tables.js';
@@ -48,6 +54,24 @@ describe('provisionCrm', () => {
     expect(got.sources.map((s) => [s.key, s.type]).sort()).toEqual(
       template.leadSources.map((s) => [s.key, s.type]).sort(),
     );
+  });
+
+  it('stores the template’s default CRM settings, without overwriting a value already set', async () => {
+    const settingsOf = async (tenantId: string) =>
+      (await withTenant(app.db, tenantId, (tx) => tx.select().from(tenants)))[0]?.settings;
+    const shop = await createTenant(app.db);
+    await withTenant(app.db, shop, (tx) => provisionCrm(tx, shop, 'repair-shop'));
+    expect(await settingsOf(shop)).toMatchObject({ agentContactVisibility: 'all' });
+
+    const custom = await createTenant(app.db);
+    await withTenant(app.db, custom, (tx) =>
+      tx
+        .update(tenants)
+        .set({ settings: { agentContactVisibility: 'assigned', other: 1 } })
+        .where(eq(tenants.id, custom)),
+    );
+    await withTenant(app.db, custom, (tx) => provisionCrm(tx, custom, 'clinic'));
+    expect(await settingsOf(custom)).toEqual({ agentContactVisibility: 'assigned', other: 1 });
   });
 
   it('runs once: a second call (even with another template) changes nothing', async () => {

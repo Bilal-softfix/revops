@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { agentContactVisibilitySchema } from '../crm/settings.js';
 import {
   customFieldEntitySchema,
   customFieldTypeSchema,
@@ -80,6 +81,8 @@ export const industryTemplateSchema = z
     key: z.string().regex(/^[a-z][a-z0-9-]{0,49}$/),
     name: label,
     description: z.string().trim().max(300),
+    /** Default CRM settings for a tenant provisioned from this template. */
+    settings: z.object({ agentContactVisibility: agentContactVisibilitySchema }),
     pipelines: z.array(templatePipelineSchema).min(1).max(10),
     customFields: z.array(templateCustomFieldSchema).max(100),
     leadSources: z.array(templateLeadSourceSchema).min(1).max(50),

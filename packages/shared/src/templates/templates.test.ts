@@ -63,6 +63,24 @@ describe('industry templates (M1-T3a)', () => {
     expect(t.leadSources.find((s) => s.type === 'walk_in')).toBeDefined();
   });
 
+  it('agent contact visibility defaults: all for counters, assigned elsewhere', () => {
+    expect(
+      Object.fromEntries(
+        INDUSTRY_TEMPLATE_KEYS.map((k) => [
+          k,
+          INDUSTRY_TEMPLATES[k].settings.agentContactVisibility,
+        ]),
+      ),
+    ).toEqual({
+      'software-agency': 'assigned',
+      'repair-shop': 'all',
+      'real-estate': 'assigned',
+      education: 'assigned',
+      clinic: 'all',
+      generic: 'assigned',
+    });
+  });
+
   it('unknown or missing keys fall back to generic', () => {
     expect(industryTemplate(null).key).toBe('generic');
     expect(industryTemplate('spaceships').key).toBe('generic');

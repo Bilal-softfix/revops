@@ -10,7 +10,11 @@ describe('event registry', () => {
   });
 
   it('knows every M0 event and validates its payload', () => {
-    expect([...EVENT_REGISTRY.keys()].sort()).toEqual(['member.joined.v1', 'user.signed_up.v1']);
+    expect([...EVENT_REGISTRY.keys()].sort()).toEqual([
+      'contact.created.v1',
+      'member.joined.v1',
+      'user.signed_up.v1',
+    ]);
     const def = eventDefinition('user.signed_up.v1');
     expect(def).toBe(USER_SIGNED_UP);
     expect(def?.schema.safeParse({ userId: 'x' }).success).toBe(false);

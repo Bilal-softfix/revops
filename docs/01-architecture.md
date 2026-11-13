@@ -124,6 +124,19 @@ Permissions are strings (`lead.read.all`, `lead.read.assigned`, `routing.manage`
   - Tenants created earlier are provisioned lazily from `tenants.industry_template` by `CrmService.withCrm` on first CRM access.
 - **Cross-tenant references are impossible:** CRM child rows reference their parent through composite foreign keys on `(tenant_id, parent_id)` against `unique(tenant_id, id)`. FK checks bypass RLS, so a plain `pipeline_id` FK would let one tenant point at another tenant's row by its uuid. Every M1 table follows this rule.
 
+## Contacts and visibility (M1-T1)
+- **Phones:** normalised to E.164 by `normalizePhone` (libphonenumber-js, region IN) in `@revops/shared`, so the browser preview and the API agree. Phones and emails (citext) are each unique per tenant among non-deleted contacts.
+- **Agent visibility is a per-tenant setting:** `tenants.settings.agentContactVisibility`, `all` | `assigned`.
+  - The default comes from the industry template: repair-shop and clinic `all`; the others `assigned`.
+  - Owners and admins change it with `PATCH /v1/crm/settings` (`crm.settings.manage`, audited).
+  - Owner, admin and manager (`lead.read.all`) always see every contact.
+  - In `assigned` mode an agent sees contacts they created, plus (from M1-T4) contacts linked to leads assigned to them.
+  - The scope is built once (`ContactsRepository.visible`) and applied to list, get, search, update and delete. An invisible contact is a 404, not a 403.
+- **Duplicate phone or email → 409 `contact_exists`** with `conflict: { field, ownerName, contact? }`.
+  - `contact` (id + name) is included only if the caller can see it; otherwise the caller learns only that it exists and who is working it.
+  - `ownerName` is the creator for now; from M1-T4 it's the owner of the latest lead.
+  - A unique-index race maps to the same 409.
+
 ## Web app (apps/web, M0-T7)
 - **The browser never calls the API directly.** It calls same-origin `/api/v1/*`, and the route handler `app/api/[...path]/route.ts` forwards that to `API_INTERNAL_URL`, which is read at runtime.
   - Only `/v1` is exposed: `/metrics`, `/docs` and the probes stay internal.

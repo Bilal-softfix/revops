@@ -3,7 +3,7 @@
 All tables: `id uuid pk default gen_random_uuid()`, `created_at`, `updated_at timestamptz`. Tenant tables also `tenant_id uuid not null references tenants` + RLS. Soft delete (`deleted_at`) only where noted.
 
 ## Identity & tenancy
-- **tenants** — name, slug, timezone (default Asia/Kolkata), locale, industry_template, parent_tenant_id (nullable, future agency), settings jsonb, status
+- **tenants** — name, slug, timezone (default Asia/Kolkata), locale, industry_template, parent_tenant_id (nullable, future agency), settings jsonb (`agentContactVisibility`: all|assigned, M1-T1), status
 - **users** (global, no tenant_id; RLS: self + members of the current tenant; unverified accounts expire 48 h after created_at and are purged with their sole-owned tenants) — email (unique, citext), name, phone_e164, password_hash (argon2id, nullable until set), email_verified_at
 - **memberships** — tenant_id, user_id, role, status (invited/active/disabled); unique(tenant_id,user_id)
 - **sessions** (global, user-scoped RLS) — user_id, token_hash (sha256, unique), active_tenant_id, ip, user_agent, created_at, last_seen_at, expires_at (created + 30d), revoked_at
@@ -13,7 +13,7 @@ All tables: `id uuid pk default gen_random_uuid()`, `created_at`, `updated_at ti
 - **audit_logs** (append-only: app_user has SELECT + INSERT only; created_at, no updated_at) — tenant_id, actor_type (user/ai/system), actor_id, action, entity, entity_id (text), before/after jsonb, ip inet
 
 ## CRM
-- **contacts** — name, phone_e164, alt_phones text[], email, city, custom_fields jsonb, consent jsonb (whatsapp/sms/call/recording with timestamps + source), deleted_at. Index: unique(tenant_id, phone_e164) where deleted_at is null; (tenant_id, email)
+- **contacts** (M1-T1) — name, phone_e164 (E.164 CHECK), alt_phones text[], email (citext), city, custom_fields jsonb, consent jsonb (whatsapp/sms/call/recording: {granted, at, source}), created_by (agents keep sight of contacts they created), deleted_at. CHECK phone or email present. Unique (tenant_id, phone_e164) and (tenant_id, email) where deleted_at is null; trigram GIN on name, phone_e164 and email::text; unique(tenant_id, id) for composite FKs
 - **pipelines** (M1-T3a) — key (template key, null for user-made), name, is_default (one per tenant), position, lost_reasons jsonb (suggested reasons), deleted_at; unique(tenant_id, id) for composite FKs
 - **pipeline_stages** — (tenant_id, pipeline_id) → pipelines, key, name, position, category (open/won/lost), probability 0–100
 - **leads** — contact_id, pipeline_id, stage_id, owner_user_id, status, score (nullable, post-MVP), value_paise bigint, currency default 'INR', source_id, attribution jsonb (utm_*, gclid, fbclid, meta campaign/adset/ad/form ids, landing_url, referrer), first_response_at, qualified_at, won_at, lost_reason, custom_fields jsonb

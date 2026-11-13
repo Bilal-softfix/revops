@@ -1,7 +1,13 @@
 import { type IndustryTemplate, industryTemplate } from '@revops/shared';
 import { eq, sql } from 'drizzle-orm';
 import type { Tx } from './client.js';
-import { customFieldDefs, leadSources, pipelineStages, pipelines } from './schema/index.js';
+import {
+  customFieldDefs,
+  leadSources,
+  pipelineStages,
+  pipelines,
+  tenants,
+} from './schema/index.js';
 
 export interface ProvisionResult {
   /** false = the tenant already had a CRM setup; nothing was written. */
@@ -10,7 +16,8 @@ export interface ProvisionResult {
 }
 
 /**
- * Seeds a tenant's CRM setup (pipelines + stages, custom field definitions, lead sources) from an
+ * Seeds a tenant's CRM setup (pipelines + stages, custom field definitions, lead sources, default
+ * CRM settings such as agentContactVisibility) from an
  * industry template — once. Runs inside the caller's transaction, which must be in that tenant's
  * context (withTenant/withContext). Idempotent and safe under concurrency: a transaction-scoped
  * advisory lock per tenant serialises provisioners, and a tenant that already has any pipeline is
@@ -36,6 +43,11 @@ export async function provisionCrm(
 }
 
 async function writeTemplate(tx: Tx, tenantId: string, template: IndustryTemplate): Promise<void> {
+  // Template default settings; a value the tenant already has wins (jsonb || keeps the right side).
+  await tx
+    .update(tenants)
+    .set({ settings: sql`${JSON.stringify(template.settings)}::jsonb || ${tenants.settings}` })
+    .where(eq(tenants.id, tenantId));
   for (const [position, pipeline] of template.pipelines.entries()) {
     const [row] = await tx
       .insert(pipelines)

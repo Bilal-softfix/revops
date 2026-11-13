@@ -5,6 +5,7 @@ export const shellStrings = {
     main: 'Workspace',
     settings: 'Settings',
     dashboard: 'Dashboard',
+    contacts: 'Contacts',
     team: 'Team',
   },
   tenantSwitcher: {
