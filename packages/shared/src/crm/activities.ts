@@ -127,6 +127,8 @@ export const timelineDataSchema = z.object({
   lostReason: z.string().optional(),
   /** stage_changed because its stage was deleted (M1-T3b decision 4). */
   reason: z.enum(['stage_deleted']).optional(),
+  /** Written by a bulk action (M1-T6). */
+  bulk: z.literal(true).optional(),
   /** task: what happened to it, and its title then. */
   action: z.enum(['completed', 'reopened']).optional(),
   title: z.string().optional(),
@@ -204,4 +206,16 @@ export function dayBounds(
     );
   };
   return { startOfToday: midnight(0), startOfTomorrow: midnight(1) };
+}
+
+/**
+ * The "My tasks" bucket of an open task due at `dueAt`, seen at `now` in `timeZone`. Mirrors the
+ * SQL in ActivitiesRepository.bucketCondition: overdue = due < now; today = now <= due < next
+ * local midnight; upcoming = due >= next local midnight. A task due exactly now is "today".
+ */
+export function taskBucket(dueAt: Date, now: Date, timeZone: string): TaskBucket {
+  if (dueAt.getTime() < now.getTime()) return 'overdue';
+  return dueAt.getTime() < dayBounds(now, timeZone).startOfTomorrow.getTime()
+    ? 'today'
+    : 'upcoming';
 }

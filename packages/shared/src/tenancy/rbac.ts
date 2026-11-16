@@ -21,6 +21,10 @@ export const PERMISSIONS = [
   'lead.assign',
   /** Delete (soft) leads. */
   'lead.delete',
+  /** Bulk actions on leads: bulk assign and bulk stage move (M1-T6). */
+  'lead.bulk',
+  /** Export leads as CSV — only the leads the member can see (M1-T6). */
+  'lead.export',
   /** Create and edit contacts the member can see. */
   'contact.write',
   /** Delete (soft) contacts. */
@@ -44,6 +48,8 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     'lead.write',
     'lead.assign',
     'lead.delete',
+    'lead.bulk',
+    'lead.export',
     'contact.write',
     'contact.delete',
     'crm.settings.manage',
@@ -59,6 +65,8 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     'lead.write',
     'lead.assign',
     'lead.delete',
+    'lead.bulk',
+    'lead.export',
     'contact.write',
     'contact.delete',
     'crm.settings.manage',
@@ -72,10 +80,12 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     'lead.write',
     'lead.assign',
     'lead.delete',
+    'lead.bulk',
+    'lead.export',
     'contact.write',
     'contact.delete',
   ],
-  agent: ['member.read', 'lead.read.assigned', 'lead.write', 'contact.write'],
+  agent: ['member.read', 'lead.read.assigned', 'lead.write', 'lead.export', 'contact.write'],
 };
 
 export function hasPermission(role: Role | null | undefined, permission: Permission): boolean {

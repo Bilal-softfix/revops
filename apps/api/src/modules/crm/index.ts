@@ -14,6 +14,8 @@ import { CustomFieldsController } from './custom-fields.controller';
 import { CustomFieldsRepository } from './custom-fields.repository';
 import { CustomFieldsService } from './custom-fields.service';
 import { LeadViewsRepository, LeadViewsService } from './lead-views.service';
+import { LeadsExportController } from './leads-export.controller';
+import { LeadsExportService } from './leads-export.service';
 import { LeadsController } from './leads.controller';
 import { LeadsRepository } from './leads.repository';
 import { LeadsService } from './leads.service';
@@ -32,6 +34,7 @@ export { type CrmAuth, CrmService } from './crm.service';
     ContactsController,
     CustomFieldsController,
     LeadsController,
+    LeadsExportController,
     ActivitiesController,
   ],
   providers: [
@@ -47,6 +50,7 @@ export { type CrmAuth, CrmService } from './crm.service';
     LeadsService,
     LeadViewsRepository,
     LeadViewsService,
+    LeadsExportService,
     ActivitiesRepository,
     ActivitiesService,
   ],

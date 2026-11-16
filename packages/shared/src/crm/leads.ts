@@ -171,18 +171,22 @@ const jsonParam = z.string().transform((s, ctx) => {
   }
 });
 
+const leadFilterParamsShape = {
+  pipelineId: z.uuid().optional(),
+  stageIds: csvIds.optional(),
+  status: leadStatusSchema.optional(),
+  owner: ownerFilterSchema.optional(),
+  sourceId: z.uuid().optional(),
+  createdFrom: z.iso.datetime({ offset: true }).optional(),
+  createdTo: z.iso.datetime({ offset: true }).optional(),
+  q: z.string().trim().min(1).max(100).optional(),
+  cf: jsonParam.pipe(customFieldFiltersSchema).optional(),
+};
+
 /** Query string form of the filters: `stageIds=a,b` and `cf=<json>` (custom field filters). */
 export const leadQuerySchema = z
   .object({
-    pipelineId: z.uuid().optional(),
-    stageIds: csvIds.optional(),
-    status: leadStatusSchema.optional(),
-    owner: ownerFilterSchema.optional(),
-    sourceId: z.uuid().optional(),
-    createdFrom: z.iso.datetime({ offset: true }).optional(),
-    createdTo: z.iso.datetime({ offset: true }).optional(),
-    q: z.string().trim().min(1).max(100).optional(),
-    cf: jsonParam.pipe(customFieldFiltersSchema).optional(),
+    ...leadFilterParamsShape,
     limit: z.coerce.number().int().min(1).max(100).default(50),
     cursor: z.uuid().optional(),
   })
@@ -192,6 +196,16 @@ export const leadQuerySchema = z
     cursor,
   }));
 export type LeadQuery = z.infer<typeof leadQuerySchema>;
+
+/** CSV export (M1-T6): the list's filters, no paging. Over LEAD_EXPORT_MAX_ROWS → 422. */
+export const leadExportQuerySchema = z
+  .object(leadFilterParamsShape)
+  .transform(({ cf, ...filters }) => ({
+    filters: { ...filters, ...(cf ? { customFields: cf } : {}) },
+  }));
+export type LeadExportQuery = z.infer<typeof leadExportQuerySchema>;
+/** Most rows one export may contain; narrow the filters beyond that. */
+export const LEAD_EXPORT_MAX_ROWS = 10_000;
 
 /** Same filters as the list, minus paging; `pipelineId` is required (one board per pipeline). */
 export const leadBoardQuerySchema = z
@@ -259,3 +273,46 @@ export function leadFiltersToParams(filters: LeadFilters): URLSearchParams {
   }
   return params;
 }
+
+// ---- bulk actions (M1-T6) ----
+
+/** Most leads one bulk request may touch. */
+export const BULK_LEADS_MAX = 500;
+/** Explicit lead ids (the selection); duplicates are dropped. */
+export const bulkLeadIdsSchema = z
+  .array(z.uuid())
+  .min(1, 'select at least one lead')
+  .max(BULK_LEADS_MAX, `at most ${BULK_LEADS_MAX} leads at a time`)
+  .transform((ids) => [...new Set(ids)]);
+
+/** POST /v1/leads/bulk-assign — `lead.bulk` + `lead.assign`. null = unassign. */
+export const bulkAssignLeadsRequestSchema = z.strictObject({
+  leadIds: bulkLeadIdsSchema,
+  ownerUserId: z.uuid().nullable(),
+});
+export type BulkAssignLeadsRequest = z.infer<typeof bulkAssignLeadsRequestSchema>;
+
+/**
+ * POST /v1/leads/bulk-stage — `lead.bulk`. Same rules as a single stage change, per lead: the
+ * stage must belong to `pipelineId` (default: each lead's own pipeline — then every selected lead
+ * must already be in the stage's pipeline); a lost stage needs `lostReason`.
+ */
+export const bulkChangeLeadStageRequestSchema = z.strictObject({
+  leadIds: bulkLeadIdsSchema,
+  pipelineId: z.uuid().optional(),
+  stageId: z.uuid(),
+  lostReason: lostReasonSchema.optional(),
+});
+export type BulkChangeLeadStageRequest = z.infer<typeof bulkChangeLeadStageRequestSchema>;
+
+/**
+ * Outcome of a bulk action, all-or-nothing for the leads found: `updated` changed, `unchanged`
+ * were already in the requested state (no audit/event/timeline), `notFound` are deleted or not
+ * visible to the caller (skipped).
+ */
+export const bulkLeadResultSchema = z.object({
+  updatedIds: z.array(z.uuid()),
+  unchangedIds: z.array(z.uuid()),
+  notFoundIds: z.array(z.uuid()),
+});
+export type BulkLeadResult = z.infer<typeof bulkLeadResultSchema>;
