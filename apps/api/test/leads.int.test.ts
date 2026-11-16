@@ -183,6 +183,115 @@ describe('create', () => {
   });
 });
 
+// Dev decision (M1-T4 review): in `assigned` mode an agent's new lead never links to — or
+// reveals — a contact they can't see; they get the contact-create 409 and nothing is created.
+describe('matching an existing contact on create', () => {
+  const counts = () =>
+    asTestOwner((sql) =>
+      sql.begin(async (tx) => {
+        await tx`select set_config('app.tenant_id', ${tenantId}, true)`;
+        const [row] = await tx<{ leads: number; contacts: number }[]>`
+          select (select count(*)::int from leads) as leads,
+                 (select count(*)::int from contacts) as contacts`;
+        return row;
+      }),
+    );
+  const inMode = async (mode: 'all' | 'assigned', fn: () => Promise<void>) => {
+    await api(owner).patch('/v1/crm/settings', { agentContactVisibility: mode }).expect(200);
+    try {
+      await fn();
+    } finally {
+      await api(owner).patch('/v1/crm/settings', { agentContactVisibility: 'all' }).expect(200);
+    }
+  };
+  /** agent2's lead → a contact `agent` can't see in `assigned` mode. */
+  const hiddenContact = async () => {
+    const email = uniqueEmail('hidden');
+    const lead = (
+      await createLead(agent2, { contact: { name: 'Meera Hidden', phone: phone(), email } }).expect(
+        201,
+      )
+    ).body as Lead;
+    return { ...lead.contact, email };
+  };
+  const expectNoLeak = (
+    res: request.Response,
+    field: 'phone' | 'email',
+    contact: Awaited<ReturnType<typeof hiddenContact>>,
+  ) => {
+    expect(res.body).toMatchObject({
+      code: 'contact_exists',
+      conflict: { field, ownerName: 'agent user' },
+    });
+    expect((res.body as { conflict: object }).conflict).not.toHaveProperty('contact');
+    const raw = JSON.stringify(res.body);
+    for (const secret of [contact.id, contact.name, contact.email, contact.phoneE164 ?? '']) {
+      expect(raw).not.toContain(secret);
+    }
+    expect(raw).not.toContain((contact.phoneE164 ?? '').slice(-8));
+  };
+
+  it('"assigned": an agent matching a hidden contact gets the 409 (no details); nothing created', async () => {
+    await inMode('assigned', async () => {
+      const contact = await hiddenContact();
+      const before = await counts();
+      const byPhone = await createLead(agent, {
+        contact: { name: 'Someone', phone: contact.phoneE164 },
+      }).expect(409);
+      expectNoLeak(byPhone, 'phone', contact);
+      const byEmail = await createLead(agent, {
+        contact: { name: 'Someone', email: contact.email.toUpperCase() },
+      }).expect(409);
+      expectNoLeak(byEmail, 'email', contact);
+      expect(await counts()).toEqual(before);
+      await api(agent).get(`/v1/contacts/${contact.id}`).expect(404);
+    });
+  });
+
+  it('"assigned": editing a visible contact to a hidden one’s phone/email is the same 409', async () => {
+    await inMode('assigned', async () => {
+      const contact = await hiddenContact();
+      const mine = (await createLead(agent).expect(201)).body as Lead;
+      const res = await api(agent)
+        .patch(`/v1/contacts/${mine.contact.id}`, { email: contact.email })
+        .expect(409);
+      expectNoLeak(res, 'email', contact);
+      const after = (await api(agent).get(`/v1/contacts/${mine.contact.id}`).expect(200))
+        .body as Contact;
+      expect(after.email).toBeNull();
+    });
+  });
+
+  it('"assigned": an agent still links to a contact they can see; assign roles link to any', async () => {
+    await inMode('assigned', async () => {
+      const own = (await createLead(agent).expect(201)).body as Lead;
+      const again = (
+        await createLead(agent, { contact: { name: 'x', phone: own.contact.phoneE164 } }).expect(
+          201,
+        )
+      ).body as Lead;
+      expect(again.contact.id).toBe(own.contact.id);
+      for (const s of [owner, manager]) {
+        const contact = await hiddenContact();
+        const linked = (
+          await createLead(s, { contact: { name: 'x', email: contact.email } }).expect(201)
+        ).body as Lead;
+        expect(linked.contact).toMatchObject({ id: contact.id, name: 'Meera Hidden' });
+      }
+    });
+  });
+
+  it('"all": an agent links to another agent’s contact', async () => {
+    await inMode('all', async () => {
+      const contact = await hiddenContact();
+      const linked = (
+        await createLead(agent, { contact: { name: 'x', phone: contact.phoneE164 } }).expect(201)
+      ).body as Lead;
+      expect(linked.contact.id).toBe(contact.id);
+    });
+  });
+});
+
 describe('ownership and agent visibility', () => {
   let agentLead: Lead;
   let agent2Lead: Lead;

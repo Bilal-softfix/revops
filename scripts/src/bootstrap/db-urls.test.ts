@@ -1,4 +1,6 @@
+import { apiEnvSchema, migrationEnvSchema, testDatabaseEnvSchema } from '@revops/shared/env';
 import { describe, expect, it } from 'vitest';
+import { checkTestDbIsolation } from '../checks.js';
 import {
   assertIdentifier,
   buildEnvLines,
@@ -164,10 +166,7 @@ describe('buildEnvLines', () => {
   it.each([
     ['Neon', neon],
     ['local', new URL('postgresql://postgres:x@localhost:5432/postgres')],
-  ])('%s: URLs pass the env schemas and the doctor isolation check', async (_label, serverUrl) => {
-    const { apiEnvSchema, testDatabaseEnvSchema, migrationEnvSchema } =
-      await import('@revops/shared/env');
-    const { checkTestDbIsolation } = await import('../checks.js');
+  ])('%s: URLs pass the env schemas and the doctor isolation check', (_label, serverUrl) => {
     const env = Object.fromEntries(
       buildEnvLines({
         ...base,

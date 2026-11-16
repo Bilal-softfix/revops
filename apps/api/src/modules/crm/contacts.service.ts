@@ -209,7 +209,11 @@ export class ContactsService {
     if (duplicate) throw await this.conflict(tx, auth, duplicate.row, duplicate.field);
   }
 
-  private async conflict(tx: Tx, auth: CrmAuth, row: ContactRow, field: 'phone' | 'email') {
+  /**
+   * The 409 for a duplicate phone/email: names who is working the contact, and identifies the
+   * contact only if the caller may see it (shared by contact create/edit and lead create).
+   */
+  async conflict(tx: Tx, auth: CrmAuth, row: ContactRow, field: 'phone' | 'email') {
     const visible = Boolean(
       await this.repository.findVisible(tx, await this.scope(tx, auth), row.id),
     );

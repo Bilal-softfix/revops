@@ -450,8 +450,9 @@ export class LeadsService {
 
   /**
    * The lead's contact: an existing one the caller can see, or a new one. A new contact whose
-   * phone/email already exists links to that contact (one person, one contact), whoever created
-   * it; the caller then sees it through their lead.
+   * phone/email already exists links to that contact (one person, one contact) if the caller can
+   * see it. If they can't (agent, `assigned` visibility), it's the same 409 as contact create —
+   * who handles it, no contact details — and nothing is created (Dev decision, M1-T4 review).
    */
   private async resolveContact(
     tx: Tx,
@@ -474,7 +475,13 @@ export class LeadsService {
       phoneE164: contact.phone,
       email: contact.email,
     });
-    if (duplicate) return duplicate.row.id;
+    if (duplicate) {
+      const scope = await this.contacts.scope(tx, auth);
+      if (scope.all || (await this.contactsRepository.findVisible(tx, scope, duplicate.row.id))) {
+        return duplicate.row.id;
+      }
+      throw await this.contacts.conflict(tx, auth, duplicate.row, duplicate.field);
+    }
     const row = await this.contactsRepository.insert(tx, {
       tenantId: auth.tenantId,
       name: contact.name,

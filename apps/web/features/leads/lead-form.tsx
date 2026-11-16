@@ -4,6 +4,7 @@ import {
   type Lead,
   type Pipeline,
   buildCustomFieldsSchema,
+  contactConflictSchema,
   createLeadRequestSchema,
   customFieldsForPipeline,
   formatPhone,
@@ -27,6 +28,7 @@ import {
 import { rupeesToPaise } from '@/lib/money';
 import { useSession } from '@/lib/session';
 import { common } from '@/lib/strings/common';
+import { contactStrings } from '@/lib/strings/contacts';
 import { leadStrings as s } from '@/lib/strings/leads';
 import { useCreateLead, useLeadSources } from './queries';
 
@@ -128,7 +130,15 @@ export function LeadForm({
     try {
       onCreated(await create.mutateAsync(parsed.data));
     } catch (error) {
-      if (error instanceof ApiError && Object.keys(error.fieldErrors).length > 0) {
+      const conflict =
+        error instanceof ApiError && error.code === 'contact_exists'
+          ? contactConflictSchema.safeParse(error.problem.conflict)
+          : undefined;
+      if (conflict?.success) {
+        // Only for a contact the user can't see (otherwise the API links to it): who handles it.
+        const field = conflict.data.field === 'phone' ? 'phone number' : 'email';
+        setFormError(contactStrings.conflict.hidden(field, conflict.data.ownerName));
+      } else if (error instanceof ApiError && Object.keys(error.fieldErrors).length > 0) {
         setErrors(error.fieldErrors);
       } else {
         setFormError(errorMessage(error));

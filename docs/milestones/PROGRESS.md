@@ -107,13 +107,15 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
 ## Assumptions made
 _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - 2026-11-16 · M1-T2 decisions 1 (options relabel/add only) and 2 (later-added required fields don't block older records) **approved by Dev**. Decision 3 **replaced** by pipeline scoping of lead fields (done in M1-T3b).
-- 2026-11-16 · M1-T4 assumptions (**Review**):
+- 2026-11-16 · M1-T4 reviewed by Dev. Review decisions 1, 2, 4 **approved**; shared team saved views and member search in the owner picker go to the Backlog. **Decision 3 changed (Dev, security):** in `assigned` mode an agent's new lead whose phone/email matches a contact they can't see is **not** linked: same 409 `contact_exists` as contact create (field + "handled by <name>", no contact details), nothing created. Agents still link to contacts they can see; owners/admins/managers and `all` mode link as before. Lead edits can't change contact data (PATCH /contacts/:id already answers with the same 409, now pinned by a test). Tests: `leads.int.test.ts` "matching an existing contact on create" (both modes, phone + email, response contains no id/name/phone/email of the hidden contact, lead/contact counts unchanged). The new-lead dialog shows the "handled by" message.
+- 2026-11-16 · Flaky `@revops/scripts` unit test fixed: `db-urls.test.ts` "Neon: URLs pass the env schemas…" did a cold `await import('@revops/shared/env')` (zod + all env schemas) inside the test body, so the module load counted against vitest's 5 s timeout; under `pnpm test` (all packages in parallel) it took 5.2 s. Imports are now static (loaded at collection, not timed); 4/4 full `pnpm test` runs green. No other test file imports dynamically inside a test.
+- 2026-11-16 · M1-T4 assumptions (reviewed; 3 superseded above):
   - `status` = the stage's category (open / won / lost), stored and kept in sync; no separate
     status lifecycle.
   - Saved views are private to their creator (no shared team views yet).
   - Stage/pipeline moves only through `POST /leads/:id/stage`; PATCH rejects stageId.
-  - A new lead's contact phone/email matching an existing contact links to it even if the
-    agent couldn't see that contact before (they then see it through their lead).
+  - ~~A new lead's contact phone/email matching an existing contact links to it even if the
+    agent couldn't see that contact before~~ (changed by Dev, see above).
   - Re-entering a won stage from another won stage keeps the original win date; reopening
     clears won/lost data.
   - Owner pickers list the first 50 active members (enough for SMB teams; paginate later).
@@ -263,6 +265,8 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - 2026-11-11 · Rate limiter: `rate_limit_buckets` stores sha256(key) only (no IPs/emails), RLS enabled with no policies and no grants, reached via `rate_limit_consume/reset/purge` (definer). The app passes its Clock's now, so FakeClock tests keep working. RLS catalog meta-test gains a "system tables" class. Purge is scheduled in T6.
 
 ## Backlog
+- Shared team saved views (Dev, 2026-11-16, M1-T4 review): today saved views are private to their creator.
+- Member search in the owner picker (Dev, 2026-11-16, M1-T4 review): today it lists the first 50 active members.
 - Archive pipeline (Dev, 2026-11-16): hide a pipeline that still has leads without deleting it (today a pipeline with leads can't be deleted).
 
 ## Blocked on external
