@@ -4,7 +4,9 @@ import {
   auditLogs,
   contacts,
   customFieldDefs,
+  customFieldPipelines,
   leadSources,
+  leads,
   pipelineStages,
   pipelines,
   invitations,
@@ -159,6 +161,55 @@ export const TENANT_TABLES: readonly TenantTableFixture[] = [
           phoneE164: `+9198${String(Math.floor(Math.random() * 1e8)).padStart(8, '0')}`,
         })
         .returning({ id: contacts.id });
+      return row?.id ?? '';
+    },
+  },
+  {
+    table: 'custom_field_pipelines',
+    tenantColumn: 'tenant_id',
+    privileges: ['SELECT', 'INSERT', 'DELETE'],
+    insert: async (tx, tenantId) => {
+      const pipeline = await insertPipeline(tx, tenantId);
+      const [field] = await tx
+        .insert(customFieldDefs)
+        .values({
+          tenantId,
+          entity: 'lead',
+          key: `k_${randomUUID().slice(0, 8)}`,
+          label: 'K',
+          type: 'text',
+        })
+        .returning({ id: customFieldDefs.id });
+      const [row] = await tx
+        .insert(customFieldPipelines)
+        .values({ tenantId, fieldId: field?.id ?? '', pipelineId: pipeline.id })
+        .returning({ id: customFieldPipelines.id });
+      return row?.id ?? '';
+    },
+  },
+  {
+    table: 'leads',
+    tenantColumn: 'tenant_id',
+    privileges: ['SELECT', 'INSERT', 'UPDATE'],
+    insert: async (tx, tenantId) => {
+      const pipeline = await insertPipeline(tx, tenantId);
+      const [stage] = await tx
+        .insert(pipelineStages)
+        .values({ tenantId, pipelineId: pipeline.id, name: 'S', position: 0, category: 'open' })
+        .returning({ id: pipelineStages.id });
+      const [contact] = await tx
+        .insert(contacts)
+        .values({ tenantId, name: 'L', email: `${randomUUID()}@lead.test` })
+        .returning({ id: contacts.id });
+      const [row] = await tx
+        .insert(leads)
+        .values({
+          tenantId,
+          contactId: contact?.id ?? '',
+          pipelineId: pipeline.id,
+          stageId: stage?.id ?? '',
+        })
+        .returning({ id: leads.id });
       return row?.id ?? '';
     },
   },

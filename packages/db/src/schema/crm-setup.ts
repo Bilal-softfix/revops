@@ -81,6 +81,9 @@ export const pipelineStages = pgTable(
       .on(t.pipelineId, t.key)
       .where(sql`${t.key} is not null`),
     index('pipeline_stages_pipeline_position_idx').on(t.pipelineId, t.position),
+    // M1-T3b: leads reference (tenant_id, pipeline_id, stage_id), so a lead's stage always belongs
+    // to the lead's pipeline.
+    unique('pipeline_stages_tenant_pipeline_id_unique').on(t.tenantId, t.pipelineId, t.id),
     check('pipeline_stages_probability_range', sql`${t.probability} between 0 and 100`),
   ],
 );
@@ -110,6 +113,37 @@ export const customFieldDefs = pgTable(
   (t) => [
     // Including deleted ones: a key is never reused, so old values can't resurface under a new type.
     unique('custom_field_defs_tenant_entity_key_unique').on(t.tenantId, t.entity, t.key),
+    unique('custom_field_defs_tenant_id_id_unique').on(t.tenantId, t.id),
+  ],
+);
+
+/**
+ * M1-T3b: "applies to" for lead fields. No rows = the field applies to every pipeline; rows =
+ * only those pipelines. Both references are composite (tenant_id, …) FKs, so a field can never
+ * point at another tenant's pipeline. Rows of soft-deleted pipelines stay (and are ignored).
+ */
+export const customFieldPipelines = pgTable(
+  'custom_field_pipelines',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    fieldId: uuid('field_id').notNull(),
+    pipelineId: uuid('pipeline_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('custom_field_pipelines_field_pipeline_unique').on(t.fieldId, t.pipelineId),
+    foreignKey({
+      name: 'custom_field_pipelines_field_fk',
+      columns: [t.tenantId, t.fieldId],
+      foreignColumns: [customFieldDefs.tenantId, customFieldDefs.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'custom_field_pipelines_pipeline_fk',
+      columns: [t.tenantId, t.pipelineId],
+      foreignColumns: [pipelines.tenantId, pipelines.id],
+    }).onDelete('cascade'),
+    index('custom_field_pipelines_pipeline_idx').on(t.tenantId, t.pipelineId),
   ],
 );
 

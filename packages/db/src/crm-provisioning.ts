@@ -3,6 +3,7 @@ import { eq, sql } from 'drizzle-orm';
 import type { Tx } from './client.js';
 import {
   customFieldDefs,
+  customFieldPipelines,
   leadSources,
   pipelineStages,
   pipelines,
@@ -48,6 +49,7 @@ async function writeTemplate(tx: Tx, tenantId: string, template: IndustryTemplat
     .update(tenants)
     .set({ settings: sql`${JSON.stringify(template.settings)}::jsonb || ${tenants.settings}` })
     .where(eq(tenants.id, tenantId));
+  const pipelineIds = new Map<string, string>();
   for (const [position, pipeline] of template.pipelines.entries()) {
     const [row] = await tx
       .insert(pipelines)
@@ -61,6 +63,7 @@ async function writeTemplate(tx: Tx, tenantId: string, template: IndustryTemplat
       })
       .returning({ id: pipelines.id });
     if (!row) throw new Error(`could not create pipeline ${pipeline.key}`);
+    pipelineIds.set(pipeline.key, row.id);
     await tx.insert(pipelineStages).values(
       pipeline.stages.map((stage, stagePosition) => ({
         tenantId,
@@ -74,18 +77,35 @@ async function writeTemplate(tx: Tx, tenantId: string, template: IndustryTemplat
     );
   }
   if (template.customFields.length > 0) {
-    await tx.insert(customFieldDefs).values(
-      template.customFields.map((field, position) => ({
-        tenantId,
-        entity: field.entity,
-        key: field.key,
-        label: field.label,
-        type: field.type,
-        options: field.options ?? null,
-        required: field.required,
-        position,
-      })),
-    );
+    const fields = await tx
+      .insert(customFieldDefs)
+      .values(
+        template.customFields.map((field, position) => ({
+          tenantId,
+          entity: field.entity,
+          key: field.key,
+          label: field.label,
+          type: field.type,
+          options: field.options ?? null,
+          required: field.required,
+          position,
+        })),
+      )
+      .returning({
+        id: customFieldDefs.id,
+        entity: customFieldDefs.entity,
+        key: customFieldDefs.key,
+      });
+    // "Applies to" (M1-T3b): template pipeline keys → this tenant's pipeline ids.
+    const scoping = template.customFields.flatMap((field) => {
+      const fieldId = fields.find((f) => f.entity === field.entity && f.key === field.key)?.id;
+      return (field.pipelines ?? []).map((key) => {
+        const pipelineId = pipelineIds.get(key);
+        if (!fieldId || !pipelineId) throw new Error(`bad pipeline scope ${field.key} → ${key}`);
+        return { tenantId, fieldId, pipelineId };
+      });
+    });
+    if (scoping.length > 0) await tx.insert(customFieldPipelines).values(scoping);
   }
   await tx.insert(leadSources).values(
     template.leadSources.map((source) => ({

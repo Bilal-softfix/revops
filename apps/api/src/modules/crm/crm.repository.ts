@@ -30,11 +30,20 @@ export class CrmRepository {
   }
 
   /** Active pipelines in display order, each with its stages in order. */
-  async listPipelines(tx: Tx): Promise<Pipeline[]> {
+  listPipelines(tx: Tx): Promise<Pipeline[]> {
+    return this.pipelinesWithStages(tx);
+  }
+
+  /** One active pipeline with its stages (undefined if missing, deleted or not this tenant's). */
+  async getPipeline(tx: Tx, id: string): Promise<Pipeline | undefined> {
+    return (await this.pipelinesWithStages(tx, id))[0];
+  }
+
+  private async pipelinesWithStages(tx: Tx, id?: string): Promise<Pipeline[]> {
     const rows = await tx
       .select()
       .from(pipelines)
-      .where(isNull(pipelines.deletedAt))
+      .where(and(isNull(pipelines.deletedAt), id ? eq(pipelines.id, id) : undefined))
       .orderBy(asc(pipelines.position), asc(pipelines.createdAt));
     if (rows.length === 0) return [];
     const stages = await tx

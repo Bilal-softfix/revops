@@ -4,8 +4,11 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { createDb } from '../src/client.js';
 import { provisionCrm } from '../src/crm-provisioning.js';
 import {
+  contacts,
   customFieldDefs,
+  customFieldPipelines,
   leadSources,
+  leads,
   pipelineStages,
   pipelines,
   tenants,
@@ -27,6 +30,7 @@ async function setup(tenantId: string) {
       .orderBy(asc(pipelineStages.pipelineId), asc(pipelineStages.position)),
     fields: await tx.select().from(customFieldDefs).orderBy(asc(customFieldDefs.position)),
     sources: await tx.select().from(leadSources),
+    scoping: await tx.select().from(customFieldPipelines),
   }));
 }
 
@@ -50,6 +54,13 @@ describe('provisionCrm', () => {
     }
     expect(got.fields.map((f) => [f.entity, f.key, f.type, f.options])).toEqual(
       template.customFields.map((f) => [f.entity, f.key, f.type, f.options ?? null]),
+    );
+    // "Applies to" (M1-T3b): rows only for scoped fields, mapped to this tenant's pipelines.
+    const keyOf = (pipelineId: string) => got.pipelines.find((p) => p.id === pipelineId)?.key;
+    const scope = (fieldId: string) =>
+      got.scoping.filter((r) => r.fieldId === fieldId).map((r) => keyOf(r.pipelineId));
+    expect(got.fields.map((f) => [f.key, scope(f.id)])).toEqual(
+      template.customFields.map((f) => [f.key, f.pipelines ?? []]),
     );
     expect(got.sources.map((s) => [s.key, s.type]).sort()).toEqual(
       template.leadSources.map((s) => [s.key, s.type]).sort(),
@@ -130,5 +141,54 @@ describe('provisionCrm', () => {
         tx.select().from(pipelines).where(eq(pipelines.tenantId, b)),
       ),
     ).toEqual([]);
+  });
+
+  it('M1-T3b: a field can’t be scoped to another tenant’s pipeline (composite FK)', async () => {
+    const a = await createTenant(app.db);
+    const b = await createTenant(app.db);
+    await withTenant(app.db, a, (tx) => provisionCrm(tx, a, 'repair-shop'));
+    await withTenant(app.db, b, (tx) => provisionCrm(tx, b, 'repair-shop'));
+    const [aField] = (await setup(a)).fields;
+    const [bPipeline] = (await setup(b)).pipelines;
+    await expect(
+      withTenant(app.db, a, (tx) =>
+        tx
+          .insert(customFieldPipelines)
+          .values({ tenantId: a, fieldId: aField?.id ?? '', pipelineId: bPipeline?.id ?? '' }),
+      ),
+    ).rejects.toMatchObject({ cause: { code: '23503' } });
+  });
+
+  it('M1-T3b: a lead’s stage must belong to its pipeline, and a stage with leads can’t be deleted', async () => {
+    const tenantId = await createTenant(app.db);
+    await withTenant(app.db, tenantId, (tx) => provisionCrm(tx, tenantId, 'repair-shop'));
+    const got = await setup(tenantId);
+    const [inquiries, repairs] = got.pipelines;
+    const repairStage = got.stages.find((s) => s.pipelineId === repairs?.id);
+    const inquiryStage = got.stages.find((s) => s.pipelineId === inquiries?.id);
+    await withTenant(app.db, tenantId, async (tx) => {
+      const [contact] = await tx
+        .insert(contacts)
+        .values({ tenantId, name: 'C', email: 'c@lead.test' })
+        .returning({ id: contacts.id });
+      const lead = (pipelineId: string, stageId: string) =>
+        tx.insert(leads).values({ tenantId, contactId: contact?.id ?? '', pipelineId, stageId });
+      await lead(inquiries?.id ?? '', inquiryStage?.id ?? '');
+      await expect(
+        tx.transaction((sp) =>
+          sp.insert(leads).values({
+            tenantId,
+            contactId: contact?.id ?? '',
+            pipelineId: inquiries?.id ?? '',
+            stageId: repairStage?.id ?? '',
+          }),
+        ),
+      ).rejects.toMatchObject({ cause: { code: '23503' } });
+      await expect(
+        tx.transaction((sp) =>
+          sp.delete(pipelineStages).where(eq(pipelineStages.id, inquiryStage?.id ?? '')),
+        ),
+      ).rejects.toMatchObject({ cause: { code: '23503' } });
+    });
   });
 });

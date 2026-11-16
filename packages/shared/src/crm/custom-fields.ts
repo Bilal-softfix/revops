@@ -27,6 +27,11 @@ export const customFieldDefSchema = z.object({
   options: z.array(fieldOptionSchema).nullable(),
   required: z.boolean(),
   position: z.number().int(),
+  /**
+   * Lead fields only: the pipelines the field applies to; `null` = every pipeline (the default).
+   * Only active pipelines are listed. Contact fields are always `null`.
+   */
+  pipelineIds: z.array(z.uuid()).nullable(),
 });
 export type CustomFieldDef = z.infer<typeof customFieldDefSchema>;
 export const customFieldDefListSchema = z.object({ items: z.array(customFieldDefSchema) });
@@ -34,6 +39,14 @@ export type CustomFieldDefList = z.infer<typeof customFieldDefListSchema>;
 
 export const customFieldQuerySchema = z.object({ entity: customFieldEntitySchema.optional() });
 export type CustomFieldQuery = z.infer<typeof customFieldQuerySchema>;
+
+/** "Applies to": `null` = all pipelines; otherwise a non-empty list of the tenant's pipelines. */
+export const pipelineIdsSchema = z
+  .array(z.uuid())
+  .min(1, 'choose at least one pipeline')
+  .max(50)
+  .refine((ids) => new Set(ids).size === ids.length, { message: 'duplicate pipelines' })
+  .nullable();
 
 export const createCustomFieldRequestSchema = z
   .object({
@@ -43,8 +56,16 @@ export const createCustomFieldRequestSchema = z
     type: customFieldTypeSchema,
     options: optionsSchema.optional(),
     required: z.boolean().default(false),
+    pipelineIds: pipelineIdsSchema.default(null),
   })
   .superRefine((def, ctx) => {
+    if (def.entity !== 'lead' && def.pipelineIds !== null) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'only lead fields can be limited to pipelines',
+        path: ['pipelineIds'],
+      });
+    }
     if (isChoice(def.type) && !def.options) {
       ctx.addIssue({ code: 'custom', message: 'add at least one option', path: ['options'] });
     }
@@ -68,6 +89,8 @@ export const updateCustomFieldRequestSchema = z
     options: optionsSchema,
     required: z.boolean(),
     position: z.number().int().min(0).max(10_000),
+    /** Lead fields only (the API rejects it for contact fields). */
+    pipelineIds: pipelineIdsSchema,
   })
   .partial()
   .refine((body) => Object.keys(body).length > 0, { message: 'nothing to update' });
@@ -148,4 +171,25 @@ export function visibleCustomFields(
   const out: Record<string, unknown> = {};
   for (const def of defs) if (def.key in stored) out[def.key] = stored[def.key];
   return out;
+}
+
+/** Whether a (lead) field applies to a pipeline: `pipelineIds: null` means every pipeline. */
+export interface PipelineScoped {
+  pipelineIds: readonly string[] | null;
+}
+
+export function appliesToPipeline(def: PipelineScoped, pipelineId: string): boolean {
+  return def.pipelineIds === null || def.pipelineIds.includes(pipelineId);
+}
+
+/**
+ * The lead fields of one pipeline, in order. Forms render these, validation (incl. required)
+ * uses these, and responses show only their values: a lead moved to another pipeline keeps its
+ * stored values, they are just hidden until it moves back or the field applies again.
+ */
+export function customFieldsForPipeline<T extends PipelineScoped>(
+  defs: readonly T[],
+  pipelineId: string,
+): T[] {
+  return defs.filter((def) => appliesToPipeline(def, pipelineId));
 }

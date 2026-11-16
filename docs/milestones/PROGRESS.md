@@ -2,7 +2,7 @@
 
 ## Current
 Milestone: M1 — CRM Core (starting). Branch: `milestone/m1-crm-core` (from main after M0 merged, tag `m0-done`).
-M1-T0 (M0 follow-ups) done 2026-11-12. M1 plan approved 2026-11-12 (order: T3a → T1 → T2 → T3b → T4 → T5 → T6 → T7, sequential). Draft PR #2 open, CI green.
+M1-T0 (M0 follow-ups) done 2026-11-12. M1 plan approved 2026-11-12 (order: T3a → T1 → T2 → T3b → T4 → T5 → T6 → T7, sequential). Draft PR #2 open. Done: T3a, T1, T2, T3b (2026-11-16). Next: M1-T4 Leads.
 
 M0 history:
 Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-11-05; M0-T5 done 2026-11-11. 2026-11-11: switched to local-first (ADR-011 no Redis/pg-boss, ADR-012 native Postgres). M0-T6, M0-T7 done 2026-11-11. M0 milestone review done 2026-11-12: blockers fixed, PR ready for review. Next: Dev merges PR #1 → start M1 (`/start-milestone M1`). PR #1 merged 2026-11-12 (tag `m0-done`).
@@ -74,9 +74,15 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
   - web: Settings → Custom fields, plus the fields rendered in the contact form;
   - leads reuse all of it in M1-T4.
 - [x] M1-T1 follow-up (2026-11-13): contacts need a phone OR an email; `pnpm db:reset:dev`.
+- [x] M1-T3b Pipelines & stages + pipeline-scoped lead fields + CRM settings UI (2026-11-16):
+  - API under `/v1/pipelines` (`pipeline.manage`: owner/admin; audited): create (default stages unless given), rename / lost reasons / make default, reorder, soft delete; stages add / edit / reorder / delete. Writes return the changed pipeline.
+  - **AC:** deleting a stage with leads → 409 `stage_has_leads` (`leadCount`, `targetStageIds`); with `?moveTo=` (same pipeline + category) the leads are bulk-moved and the stage deleted in one transaction. Pipeline-row + stage-row locks against races; `leads → stages` FK NO ACTION as backstop.
+  - `leads` table created now (schema + RLS + leak test; API in T4) so the move is real; composite FK `(tenant_id, pipeline_id, stage_id)` keeps a lead's stage inside its pipeline.
+  - **Lead field scoping** (revised M1-T2 decision 3): `custom_field_pipelines` (composite FKs); `pipelineIds` on definitions (null = all, default); `customFieldsForPipeline` + `validateValues(…, { pipelineId })` for T4 forms, validation (incl. required) and responses; values of non-applicable fields stay stored, hidden. Other tenants' / unknown / deleted pipeline ids → 400 `unknown pipeline` (tested).
+  - Repair-shop template: Device brand, Device model, Issue → all pipelines; IMEI, Estimate, Advance paid, Promised date, Under warranty → Repair jobs only (template `pipelines` keys, validated).
+  - Web: Settings → Pipelines, Settings → CRM settings (agent contact visibility), "Shown in" picker + Pipelines column for lead fields. Migrations 0021/0022. Tests: shared unit, db leak suite + FK tests, API integration (`pipelines.int.test.ts`), service unit, Playwright `pipelines.spec.ts` (3).
 
 ## In progress
-- [ ] M1-T3b Pipelines & stages (CRUD, reorder, delete-with-move)
 - [ ] M1-T4 Leads (list/filters/saved views, kanban, stage change + events, agent visibility)
 - [ ] M1-T5 Notes, tasks, timeline (My tasks)
 - [ ] M1-T6 Audit + bulk actions + CSV export
@@ -84,6 +90,18 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
 
 ## Assumptions made
 _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
+- 2026-11-16 · M1-T2 decisions 1 (options relabel/add only) and 2 (later-added required fields don't block older records) **approved by Dev**. Decision 3 **replaced** by pipeline scoping of lead fields (done in M1-T3b).
+- 2026-11-16 · M1-T3b assumptions (**Review**):
+  - **Moving a lead to another pipeline does not enforce that pipeline's required fields** (consistent with approved decision 2): they show empty and become required once edited. T4 implements the move this way unless Dev says otherwise.
+  - Bulk-move target on stage delete must have the **same category** (open→open, won→won, lost→lost), so leads never become won/lost without won_at / a lost reason. Deleting the only won/lost stage that has leads is refused until another stage of that category exists.
+  - A stage with leads can't change category (409 `stage_category_locked`); add a new stage instead.
+  - A pipeline with leads can't be deleted (409 `pipeline_has_leads`), no move option in T3b; T6 bulk move covers moving leads between pipelines.
+  - The bulk move on stage delete writes one audit row (`movedLeads`, `movedTo`) and **no** per-lead `lead.stage_changed.v1` / timeline events; T4/T5 decide whether a structural move emits them.
+  - "Device brand / Model / Issue → both pipelines" is stored as **all pipelines** (also covers pipelines added later), not an explicit list of the two.
+  - A field whose selected pipelines are all deleted shows `pipelineIds: []` and applies nowhere until edited (UI: "No active pipeline").
+  - Pipeline names unique per tenant and stage names unique per pipeline (case-insensitive); max 30 stages per pipeline; default probability open 50 / won 100 / lost 0; new pipelines get New / In progress / Won / Lost.
+  - The `leads` table is created in T3b (needed by the AC); T4 may add columns (status, first_response_at, qualified_at, score) in a forward migration.
+  - Existing tenants provisioned from repair-shop before T3b keep all lead fields on all pipelines (templates never migrate existing tenants); fix via Settings → Custom fields.
 - 2026-11-04 · M0: Node 22 LTS kept (machine also has Node 24; use fnm to switch).
 - 2026-11-04 · M0: Dependency policy is the previous mature major when the newest major is < ~4 months old (TS 5.9, NestJS 11, Vitest 4, ESLint 9, postgres.js 3, pnpm 10; BullMQ/ioredis dropped by ADR-011).
 - 2026-11-04 · M0-T4: An unverified email blocks login (403 `email_not_verified` + resend endpoint). **Superseded 2026-11-06** by the security review: same 401 as a wrong password (confirmed by Dev 2026-11-11).
@@ -161,7 +179,7 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
   - a required field added later doesn't block editing older records unless that field is in the edit;
   - unticked optional yes/no fields count as "not set" on create;
   - number fields accept decimals (₹ values typed as rupees); dates are `YYYY-MM-DD`;
-  - no per-pipeline scoping of lead fields yet (all lead fields apply to every pipeline).
+  - ~~no per-pipeline scoping of lead fields yet~~ **Superseded 2026-11-16 (Dev):** lead fields are pipeline-scoped (M1-T3b).
 - 2026-11-13 · M1-T1 follow-up (Dev):
   - a contact needs a phone OR an email (create: 400 on the phone field if neither; PATCH can clear one but not both); dedupe on whichever is present. This replaces the T1 assumption "a contact needs a phone";
   - `pnpm db:reset:dev` added (guarded dev-only reset + migrate + seed).
@@ -235,6 +253,7 @@ _M0 milestone review (2026-11-12): non-blocking findings from the code-reviewer 
 - The minimatch moderate advisory (transitive) is still reported by `pnpm audit`; it is dev-tooling only.
 - Worker jobs have no per-job log context (the job id is in the failure log only); add an AsyncLocalStorage child logger when consumers multiply.
 - `InMemoryJobQueue` is not transactional: a job sent with `tx` stays queued in tests even if the transaction rolls back. Real pg-boss behaviour is covered by `test/queue.int.test.ts`.
+- **E2E is at the signup ceiling (M1-T3b).** The whole Playwright suite runs from one IP and signup allows 10 per IP per hour; it now uses ~10. `pipelines.spec.ts` shares one owner (serial) for this reason. M1-T7 (more Playwright) needs seeded accounts or fewer UI signups — not a limit bypass.
 _(non-blocking review findings)_
 - M8: set `TRUST_PROXY` (M0-T7, default `loopback`) to the real hop count / proxy CIDRs before deploying behind a load balancer. Note: Next.js keeps a client-supplied `X-Forwarded-For` instead of appending to it, so behind the web proxy a client can choose the IP the API sees (rate-limit evasion per IP). Since the M0 review, per-account keys that ignore the IP bound the damage: `login-email` (20 per 15 min) and `email-<kind>-addr` (5 per hour). Still open: a spoofed IP can lock out a real shared IP (50 logins per 15 min), and per-IP ceilings are evadable. M8 must put a trusted LB in front that overwrites XFF, or have the web proxy set it from the socket address.
 - M0-T6: discarding an unverified account deletes its tenant's outbox rows, including `user.signed_up.v1`. Once the relay ships, consider a compensating `user.discarded.v1` (also needed for DPDP deletion propagation).

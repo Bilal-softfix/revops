@@ -9,6 +9,7 @@ import {
   type CustomFieldValuesInput,
   type UpdateCustomFieldRequest,
   buildCustomFieldsSchema,
+  customFieldsForPipeline,
 } from '@revops/shared';
 import { Clock } from '../../platform/clock';
 import { DomainError } from '../../platform/errors/domain-error';
@@ -43,14 +44,21 @@ export class CustomFieldsService {
   /**
    * Validates `customFields` of a contact/lead write against the active definitions and returns
    * the values to store (null = clear). Errors are field-level: `customFields.<key>`.
+   *
+   * Leads pass `pipelineId` (M1-T3b): only fields that apply to that pipeline are accepted and
+   * required there; a value for a field of another pipeline is rejected as "doesn't apply".
    */
   validateValues(
     defs: CustomFieldDef[],
     input: CustomFieldValuesInput | undefined,
     mode: 'create' | 'patch',
+    options: { pipelineId?: string } = {},
   ): CustomFieldValues {
     if (input === undefined && mode === 'patch') return {};
-    const result = buildCustomFieldsSchema(defs, mode).safeParse(input ?? {});
+    const applicable =
+      options.pipelineId === undefined ? defs : customFieldsForPipeline(defs, options.pipelineId);
+    const known = new Set(defs.map((d) => d.key));
+    const result = buildCustomFieldsSchema(applicable, mode).safeParse(input ?? {});
     if (result.success) return result.data;
     throw invalid(
       result.error.issues.flatMap((issue) => {
@@ -59,10 +67,24 @@ export class CustomFieldsService {
           issue.code === 'unrecognized_keys' ? issue.keys : [issue.path.map(String).join('.')];
         return keys.map((key) => ({
           path: `customFields.${key}`,
-          message: issue.code === 'unrecognized_keys' ? 'unknown field' : issue.message,
+          message:
+            issue.code !== 'unrecognized_keys'
+              ? issue.message
+              : known.has(key)
+                ? 'doesn’t apply to this pipeline'
+                : 'unknown field',
         }));
       }),
     );
+  }
+
+  /** 400 unless every id is an active pipeline of this tenant (another tenant's id = unknown). */
+  private async checkPipelines(tx: Tx, ids: readonly string[] | null): Promise<void> {
+    if (!ids) return;
+    const found = await this.repository.activePipelineIds(tx, ids);
+    if (ids.some((id) => !found.has(id))) {
+      throw invalid([{ path: 'pipelineIds', message: 'unknown pipeline' }]);
+    }
   }
 
   async create(
@@ -78,6 +100,7 @@ export class CustomFieldsService {
           'A field with this key exists (or existed) — keys can’t be reused',
         );
       }
+      await this.checkPipelines(tx, input.pipelineIds);
       const row = await this.repository.insert(tx, {
         tenantId: auth.tenantId,
         entity: input.entity,
@@ -88,12 +111,14 @@ export class CustomFieldsService {
         required: input.required,
         position: await this.repository.nextPosition(tx, input.entity),
       });
+      await this.repository.setScope(tx, auth.tenantId, row.id, input.pipelineIds);
       await this.audit(tx, auth, meta, 'custom_field.created', row.id, {
         entity: row.entity,
         key: row.key,
         type: row.type,
+        ...(input.pipelineIds ? { pipelineIds: input.pipelineIds } : {}),
       });
-      return toCustomFieldDef(row);
+      return toCustomFieldDef(row, input.pipelineIds ?? undefined);
     });
   }
 
@@ -122,11 +147,24 @@ export class CustomFieldsService {
           ]);
         }
       }
-      const row = await this.repository.update(tx, id, input);
+      const { pipelineIds, ...columns } = input;
+      if (pipelineIds !== undefined) {
+        if (current.entity !== 'lead' && pipelineIds !== null) {
+          throw invalid([
+            { path: 'pipelineIds', message: 'only lead fields can be limited to pipelines' },
+          ]);
+        }
+        await this.checkPipelines(tx, pipelineIds);
+        await this.repository.setScope(tx, auth.tenantId, id, pipelineIds);
+      }
+      if (Object.keys(columns).length > 0) await this.repository.update(tx, id, columns);
       await this.audit(tx, auth, meta, 'custom_field.updated', id, {
         fields: Object.keys(input).sort(),
+        ...(pipelineIds !== undefined ? { pipelineIds } : {}),
       });
-      return toCustomFieldDef(row);
+      const def = await this.repository.getActive(tx, id);
+      if (!def) throw crmNotFound();
+      return def;
     });
   }
 

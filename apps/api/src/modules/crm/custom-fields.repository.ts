@@ -1,10 +1,21 @@
 import { Injectable } from '@nestjs/common';
-import { type Tx, and, asc, customFieldDefs, eq, isNull } from '@revops/db';
+import {
+  type Tx,
+  and,
+  asc,
+  customFieldDefs,
+  customFieldPipelines,
+  eq,
+  inArray,
+  isNull,
+  pipelines,
+} from '@revops/db';
 import type { CustomFieldDef, CustomFieldEntity, FieldOption } from '@revops/shared';
 
 type DefRow = typeof customFieldDefs.$inferSelect;
 
-export function toCustomFieldDef(row: DefRow): CustomFieldDef {
+/** `scope`: the active pipelines the field is limited to; undefined = all pipelines. */
+export function toCustomFieldDef(row: DefRow, scope?: readonly string[]): CustomFieldDef {
   return {
     id: row.id,
     entity: row.entity,
@@ -14,6 +25,7 @@ export function toCustomFieldDef(row: DefRow): CustomFieldDef {
     options: row.options,
     required: row.required,
     position: row.position,
+    pipelineIds: scope ? [...scope] : null,
   };
 }
 
@@ -35,7 +47,68 @@ export class CustomFieldsRepository {
         asc(customFieldDefs.position),
         asc(customFieldDefs.createdAt),
       );
-    return rows.map(toCustomFieldDef);
+    const scopes = await this.scopes(
+      tx,
+      rows.map((r) => r.id),
+    );
+    return rows.map((row) => toCustomFieldDef(row, scopes.get(row.id)));
+  }
+
+  /** One active definition as the API shows it. */
+  async getActive(tx: Tx, id: string): Promise<CustomFieldDef | undefined> {
+    const row = await this.findActive(tx, id);
+    return row ? toCustomFieldDef(row, (await this.scopes(tx, [id])).get(id)) : undefined;
+  }
+
+  /**
+   * "Applies to" per field: field id -> ids of the ACTIVE pipelines it is limited to, in pipeline
+   * order. A field whose rows all point at deleted pipelines maps to [] (it applies nowhere until
+   * edited); a field with no rows is absent (= all pipelines).
+   */
+  async scopes(tx: Tx, fieldIds: readonly string[]): Promise<Map<string, string[]>> {
+    const out = new Map<string, string[]>();
+    if (fieldIds.length === 0) return out;
+    const rows = await tx
+      .select({
+        fieldId: customFieldPipelines.fieldId,
+        pipelineId: customFieldPipelines.pipelineId,
+        deletedAt: pipelines.deletedAt,
+      })
+      .from(customFieldPipelines)
+      .innerJoin(pipelines, eq(pipelines.id, customFieldPipelines.pipelineId))
+      .where(inArray(customFieldPipelines.fieldId, [...fieldIds]))
+      .orderBy(asc(pipelines.position), asc(pipelines.createdAt));
+    for (const row of rows) {
+      const list = out.get(row.fieldId) ?? [];
+      if (row.deletedAt === null) list.push(row.pipelineId);
+      out.set(row.fieldId, list);
+    }
+    return out;
+  }
+
+  /** Replaces a field's scope: null = all pipelines (no rows). */
+  async setScope(
+    tx: Tx,
+    tenantId: string,
+    fieldId: string,
+    pipelineIds: readonly string[] | null,
+  ): Promise<void> {
+    await tx.delete(customFieldPipelines).where(eq(customFieldPipelines.fieldId, fieldId));
+    if (pipelineIds && pipelineIds.length > 0) {
+      await tx
+        .insert(customFieldPipelines)
+        .values(pipelineIds.map((pipelineId) => ({ tenantId, fieldId, pipelineId })));
+    }
+  }
+
+  /** The given ids that are active pipelines of this tenant (RLS hides other tenants' rows). */
+  async activePipelineIds(tx: Tx, ids: readonly string[]): Promise<Set<string>> {
+    if (ids.length === 0) return new Set();
+    const rows = await tx
+      .select({ id: pipelines.id })
+      .from(pipelines)
+      .where(and(inArray(pipelines.id, [...ids]), isNull(pipelines.deletedAt)));
+    return new Set(rows.map((r) => r.id));
   }
 
   async findActive(tx: Tx, id: string): Promise<DefRow | undefined> {

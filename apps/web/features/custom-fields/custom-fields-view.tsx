@@ -8,6 +8,7 @@ import {
   createCustomFieldRequestSchema,
 } from '@revops/shared';
 import { Plus } from 'lucide-react';
+import { usePipelines } from '@/features/pipelines/queries';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { FormError, TextField } from '@/components/form/text-field';
@@ -151,6 +152,7 @@ function FieldSection({
                 <TableHead>{s.columns.key}</TableHead>
                 <TableHead>{s.columns.type}</TableHead>
                 <TableHead>{s.columns.required}</TableHead>
+                {entity === 'lead' ? <TableHead>{s.columns.pipelines}</TableHead> : null}
                 <TableHead className="text-right">{s.columns.actions}</TableHead>
               </TableRow>
             </TableHeader>
@@ -170,6 +172,11 @@ function FieldSection({
                   <TableCell>
                     {def.required ? <Badge variant="secondary">{s.yes}</Badge> : s.no}
                   </TableCell>
+                  {entity === 'lead' ? (
+                    <TableCell>
+                      <ScopeSummary pipelineIds={def.pipelineIds} />
+                    </TableCell>
+                  ) : null}
                   <TableCell className="space-x-2 text-right">
                     <Button variant="outline" size="sm" onClick={() => onEdit(def)}>
                       {s.edit}
@@ -196,6 +203,7 @@ function AddFieldDialog({ entity, onClose }: { entity: CustomFieldEntity; onClos
   const [type, setType] = useState<CustomFieldType>('text');
   const [required, setRequired] = useState(false);
   const [options, setOptions] = useState('');
+  const [pipelineIds, setPipelineIds] = useState<string[] | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const effectiveKey = keyTouched ? key : toKey(label);
@@ -209,6 +217,7 @@ function AddFieldDialog({ entity, onClose }: { entity: CustomFieldEntity; onClos
       label,
       type,
       required,
+      ...(entity === 'lead' ? { pipelineIds } : {}),
       ...(isChoice(type)
         ? {
             options: lines(options).map((l) => ({
@@ -231,6 +240,8 @@ function AddFieldDialog({ entity, onClose }: { entity: CustomFieldEntity; onClos
     } catch (error) {
       if (error instanceof ApiError && error.code === 'custom_field_exists') {
         setErrors({ key: error.message });
+      } else if (error instanceof ApiError && error.fieldErrors.pipelineIds) {
+        setErrors({ pipelineIds: error.fieldErrors.pipelineIds });
       } else {
         setFormError(errorMessage(error));
       }
@@ -294,6 +305,9 @@ function AddFieldDialog({ entity, onClose }: { entity: CustomFieldEntity; onClos
             />
           ) : null}
           <RequiredCheckbox checked={required} onChange={setRequired} />
+          {entity === 'lead' ? (
+            <ScopePicker value={pipelineIds} error={errors.pipelineIds} onChange={setPipelineIds} />
+          ) : null}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>
               {common.cancel}
@@ -314,10 +328,18 @@ function EditFieldDialog({ def, onClose }: { def: CustomFieldDef; onClose: () =>
   const [required, setRequired] = useState(def.required);
   const [optionLabels, setOptionLabels] = useState(def.options?.map((o) => o.label) ?? []);
   const [newOptions, setNewOptions] = useState('');
+  const [pipelineIds, setPipelineIds] = useState<string[] | null>(def.pipelineIds);
+  const [scopeError, setScopeError] = useState<string | undefined>(undefined);
   const [formError, setFormError] = useState<string | null>(null);
 
   const submit = async () => {
     setFormError(null);
+    setScopeError(undefined);
+    if (pipelineIds !== null && pipelineIds.length === 0) {
+      setScopeError(s.scope.pickOne);
+      return;
+    }
+    const scopeChanged = JSON.stringify(pipelineIds) !== JSON.stringify(def.pipelineIds);
     const options = def.options
       ? [
           ...def.options.map((o, i) => ({ value: o.value, label: optionLabels[i] ?? o.label })),
@@ -328,11 +350,21 @@ function EditFieldDialog({ def, onClose }: { def: CustomFieldDef; onClose: () =>
         ]
       : undefined;
     try {
-      await update.mutateAsync({ id: def.id, label, required, ...(options ? { options } : {}) });
+      await update.mutateAsync({
+        id: def.id,
+        label,
+        required,
+        ...(options ? { options } : {}),
+        ...(def.entity === 'lead' && scopeChanged ? { pipelineIds } : {}),
+      });
       toast.success(s.saved);
       onClose();
     } catch (error) {
-      setFormError(errorMessage(error));
+      if (error instanceof ApiError && error.fieldErrors.pipelineIds) {
+        setScopeError(error.fieldErrors.pipelineIds);
+      } else {
+        setFormError(errorMessage(error));
+      }
     }
   };
 
@@ -384,6 +416,9 @@ function EditFieldDialog({ def, onClose }: { def: CustomFieldDef; onClose: () =>
             </>
           ) : null}
           <RequiredCheckbox checked={required} onChange={setRequired} />
+          {def.entity === 'lead' ? (
+            <ScopePicker value={pipelineIds} error={scopeError} onChange={setPipelineIds} />
+          ) : null}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>
               {common.cancel}
@@ -395,6 +430,88 @@ function EditFieldDialog({ def, onClose }: { def: CustomFieldDef; onClose: () =>
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** "All pipelines" or the names of the pipelines a lead field is limited to. */
+function ScopeSummary({ pipelineIds }: { pipelineIds: string[] | null }) {
+  const pipelines = usePipelines();
+  if (pipelineIds === null) return <span className="text-muted-foreground">{s.scope.all}</span>;
+  if (pipelineIds.length === 0) return <span className="text-destructive">{s.scope.none}</span>;
+  const names = pipelineIds.map(
+    (id) => pipelines.data?.items.find((p) => p.id === id)?.name ?? '…',
+  );
+  return <span>{names.join(', ')}</span>;
+}
+
+/**
+ * "Shown in": all pipelines (null, the default) or a chosen set. Forms, validation (incl.
+ * required) and API responses of a lead only include fields shown in its pipeline.
+ */
+function ScopePicker({
+  value,
+  error,
+  onChange,
+}: {
+  value: string[] | null;
+  error?: string | undefined;
+  onChange: (value: string[] | null) => void;
+}) {
+  const pipelines = usePipelines();
+  const items = pipelines.data?.items ?? [];
+  return (
+    <fieldset className="grid gap-2" aria-describedby={error ? 'scope-error' : undefined}>
+      <legend className="mb-1 text-sm font-medium">{s.scope.legend}</legend>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="radio"
+          name="field-scope"
+          className="size-4 accent-primary"
+          checked={value === null}
+          onChange={() => onChange(null)}
+        />
+        {s.scope.all}
+        <span className="text-xs text-muted-foreground">{s.scope.allHint}</span>
+      </label>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="radio"
+          name="field-scope"
+          className="size-4 accent-primary"
+          checked={value !== null}
+          onChange={() => onChange(value ?? [])}
+        />
+        {s.scope.selected}
+      </label>
+      {value !== null ? (
+        <div className="ml-6 grid gap-1.5">
+          {items.map((pipeline) => (
+            <label key={pipeline.id} className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="size-4 accent-primary"
+                checked={value.includes(pipeline.id)}
+                onChange={(event) =>
+                  onChange(
+                    event.target.checked
+                      ? items
+                          .map((p) => p.id)
+                          .filter((id) => id === pipeline.id || value.includes(id))
+                      : value.filter((id) => id !== pipeline.id),
+                  )
+                }
+              />
+              {pipeline.name}
+            </label>
+          ))}
+        </div>
+      ) : null}
+      {error ? (
+        <p id="scope-error" className="text-xs text-destructive">
+          {error}
+        </p>
+      ) : null}
+    </fieldset>
   );
 }
 

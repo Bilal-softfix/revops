@@ -110,5 +110,30 @@ describe('industry templates (M1-T3a)', () => {
       ),
     ).toBe(false); // select without options
     expect(bad((t) => (t.pipelines[0]!.stages[0]!.key = 'Bad Key'))).toBe(false);
+    const field = { key: 'y', label: 'Y', type: 'text', required: false } as const;
+    expect(bad((t) => t.customFields.push({ ...field, entity: 'lead', pipelines: ['nope'] }))).toBe(
+      false,
+    ); // unknown pipeline key
+    expect(
+      bad((t) =>
+        t.customFields.push({ ...field, entity: 'contact', pipelines: [t.pipelines[0]!.key] }),
+      ),
+    ).toBe(false); // contact fields aren't pipeline-scoped
+  });
+
+  it('repair-shop: device basics apply to both pipelines, job details to Repair jobs only', () => {
+    const scope = Object.fromEntries(
+      INDUSTRY_TEMPLATES['repair-shop'].customFields.map((f) => [f.key, f.pipelines ?? 'all']),
+    );
+    expect(scope).toEqual({
+      device_brand: 'all',
+      device_model: 'all',
+      issue: 'all',
+      imei_serial: ['repair_jobs'],
+      estimate_inr: ['repair_jobs'],
+      advance_paid_inr: ['repair_jobs'],
+      promised_date: ['repair_jobs'],
+      under_warranty: ['repair_jobs'],
+    });
   });
 });

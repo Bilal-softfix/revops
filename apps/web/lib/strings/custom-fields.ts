@@ -9,7 +9,22 @@ export const customFieldStrings = {
   add: 'Add field',
   addTitle: 'Add a custom field',
   editTitle: (label: string) => `Edit “${label}”`,
-  columns: { label: 'Label', key: 'Key', type: 'Type', required: 'Required', actions: 'Actions' },
+  columns: {
+    label: 'Label',
+    key: 'Key',
+    type: 'Type',
+    required: 'Required',
+    pipelines: 'Pipelines',
+    actions: 'Actions',
+  },
+  scope: {
+    legend: 'Shown in',
+    all: 'All pipelines',
+    allHint: 'Including pipelines you add later.',
+    selected: 'Selected pipelines',
+    none: 'No active pipeline',
+    pickOne: 'Choose at least one pipeline',
+  },
   types: {
     text: 'Text',
     number: 'Number',

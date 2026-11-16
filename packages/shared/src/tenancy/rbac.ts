@@ -23,6 +23,8 @@ export const PERMISSIONS = [
   'crm.settings.manage',
   /** Create, edit and delete custom field definitions. */
   'customfield.manage',
+  /** Create, edit, reorder and delete pipelines and their stages. */
+  'pipeline.manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -37,6 +39,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     'contact.delete',
     'crm.settings.manage',
     'customfield.manage',
+    'pipeline.manage',
   ],
   admin: [
     'member.read',
@@ -48,6 +51,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     'contact.delete',
     'crm.settings.manage',
     'customfield.manage',
+    'pipeline.manage',
   ],
   manager: [
     'member.read',

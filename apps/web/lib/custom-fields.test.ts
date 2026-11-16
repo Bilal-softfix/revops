@@ -2,18 +2,22 @@ import type { CustomFieldDef } from '@revops/shared';
 import { describe, expect, it } from 'vitest';
 import { customFieldsPayload, initialInputs, toApiValue } from './custom-fields';
 
-const def = (key: string, type: CustomFieldDef['type'], extra: Partial<CustomFieldDef> = {}) =>
-  ({
-    id: '00000000-0000-4000-8000-000000000001',
-    entity: 'contact',
-    key,
-    label: key,
-    type,
-    options: null,
-    required: false,
-    position: 0,
-    ...extra,
-  }) satisfies CustomFieldDef;
+const def = (
+  key: string,
+  type: CustomFieldDef['type'],
+  extra: Partial<CustomFieldDef> = {},
+): CustomFieldDef => ({
+  id: '00000000-0000-4000-8000-000000000001',
+  entity: 'contact',
+  key,
+  label: key,
+  type,
+  options: null,
+  required: false,
+  position: 0,
+  pipelineIds: null,
+  ...extra,
+});
 
 const defs = [
   def('company', 'text'),

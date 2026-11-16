@@ -10,3 +10,4 @@ export * from './rate-limits.js';
 export * from './processed-events.js';
 export * from './crm-setup.js';
 export * from './contacts.js';
+export * from './leads.js';

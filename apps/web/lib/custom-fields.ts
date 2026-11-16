@@ -1,5 +1,8 @@
 import type { CustomFieldDef, CustomFieldValue } from '@revops/shared';
 
+// Lead forms (M1-T4): render `customFieldsForPipeline(defs, lead.pipelineId)` from @revops/shared,
+// so only the fields of the lead's pipeline show (and are required).
+
 /** What a form input holds for each field type. */
 export type CustomFieldInputValue = string | boolean | string[];
 export type CustomFieldFormValues = Record<string, CustomFieldInputValue>;

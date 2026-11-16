@@ -10,13 +10,16 @@ import { CrmService } from './crm.service';
 import { CustomFieldsController } from './custom-fields.controller';
 import { CustomFieldsRepository } from './custom-fields.repository';
 import { CustomFieldsService } from './custom-fields.service';
+import { PipelinesController } from './pipelines.controller';
+import { PipelinesRepository } from './pipelines.repository';
+import { PipelinesService } from './pipelines.service';
 
 // Public API of the CRM module (contacts, leads, pipelines, custom fields — M1).
 export { type CrmAuth, CrmService } from './crm.service';
 
 @Module({
   imports: [IdentityModule, TenancyModule],
-  controllers: [CrmController, ContactsController, CustomFieldsController],
+  controllers: [CrmController, PipelinesController, ContactsController, CustomFieldsController],
   providers: [
     CrmRepository,
     CrmService,
@@ -24,6 +27,8 @@ export { type CrmAuth, CrmService } from './crm.service';
     ContactsService,
     CustomFieldsRepository,
     CustomFieldsService,
+    PipelinesRepository,
+    PipelinesService,
   ],
   exports: [CrmService],
 })

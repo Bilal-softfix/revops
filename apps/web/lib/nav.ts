@@ -1,5 +1,13 @@
 import { type Permission, type Role, hasPermission } from '@revops/shared';
-import { Contact, LayoutDashboard, ListPlus, type LucideIcon, Users } from 'lucide-react';
+import {
+  Contact,
+  KanbanSquare,
+  LayoutDashboard,
+  ListPlus,
+  type LucideIcon,
+  SlidersHorizontal,
+  Users,
+} from 'lucide-react';
 import { shellStrings } from '@/lib/strings/shell';
 
 export interface NavItem {
@@ -46,6 +54,18 @@ export const NAV: readonly NavSection[] = [
         label: shellStrings.nav.customFields,
         icon: ListPlus,
         permission: 'customfield.manage',
+      },
+      {
+        href: '/settings/pipelines',
+        label: shellStrings.nav.pipelines,
+        icon: KanbanSquare,
+        permission: 'pipeline.manage',
+      },
+      {
+        href: '/settings/crm',
+        label: shellStrings.nav.crmSettings,
+        icon: SlidersHorizontal,
+        permission: 'crm.settings.manage',
       },
     ],
   },

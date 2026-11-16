@@ -148,6 +148,20 @@
       "when": 1794547640124,
       "tag": "0020_contacts_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1794805964729,
+      "tag": "0021_crm_pipeline_scoping_and_leads",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1794805978593,
+      "tag": "0022_crm_pipeline_scoping_and_leads_rls",
+      "breakpoints": true
     }
   ]
 }

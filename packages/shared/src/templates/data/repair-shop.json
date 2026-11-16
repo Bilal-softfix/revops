@@ -110,6 +110,7 @@
     {
       "entity": "lead",
       "key": "imei_serial",
+      "pipelines": ["repair_jobs"],
       "label": "IMEI / serial no.",
       "type": "text"
     },
@@ -156,24 +157,28 @@
     {
       "entity": "lead",
       "key": "estimate_inr",
+      "pipelines": ["repair_jobs"],
       "label": "Estimate (₹)",
       "type": "number"
     },
     {
       "entity": "lead",
       "key": "advance_paid_inr",
+      "pipelines": ["repair_jobs"],
       "label": "Advance paid (₹)",
       "type": "number"
     },
     {
       "entity": "lead",
       "key": "promised_date",
+      "pipelines": ["repair_jobs"],
       "label": "Promised delivery date",
       "type": "date"
     },
     {
       "entity": "lead",
       "key": "under_warranty",
+      "pipelines": ["repair_jobs"],
       "label": "Under warranty",
       "type": "bool"
     }

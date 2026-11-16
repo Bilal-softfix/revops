@@ -5,6 +5,7 @@ export * from './crm/contacts.js';
 export * from './crm/custom-fields.js';
 export * from './crm/enums.js';
 export * from './crm/phone.js';
+export * from './crm/pipelines.js';
 export * from './crm/settings.js';
 export * from './crm/schemas.js';
 export * from './events/identity.js';

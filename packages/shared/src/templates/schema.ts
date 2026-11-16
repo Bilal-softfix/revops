@@ -55,8 +55,17 @@ export const templateCustomFieldSchema = z
     type: customFieldTypeSchema,
     options: z.array(fieldOptionSchema).max(100).optional(),
     required: z.boolean().default(false),
+    /** Lead fields only: template pipeline keys it applies to. Omitted = every pipeline. */
+    pipelines: z.array(keySchema).min(1).max(10).optional(),
   })
   .superRefine((field, ctx) => {
+    if (field.pipelines && field.entity !== 'lead') {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'only lead fields can be limited to pipelines',
+        path: ['pipelines'],
+      });
+    }
     const choice = field.type === 'select' || field.type === 'multiselect';
     if (choice && !field.options?.length) {
       ctx.addIssue({ code: 'custom', message: `${field.type} needs options`, path: ['options'] });
@@ -105,6 +114,18 @@ export const industryTemplateSchema = z
       'pipelines',
       template.pipelines.map((p) => p.key),
     );
+    const pipelineKeys = new Set(template.pipelines.map((p) => p.key));
+    template.customFields.forEach((field, i) => {
+      for (const key of field.pipelines ?? []) {
+        if (!pipelineKeys.has(key)) {
+          ctx.addIssue({
+            code: 'custom',
+            message: `unknown pipeline "${key}"`,
+            path: ['customFields', i, 'pipelines'],
+          });
+        }
+      }
+    });
     unique(
       'customFields',
       template.customFields.map((f) => `${f.entity}.${f.key}`),

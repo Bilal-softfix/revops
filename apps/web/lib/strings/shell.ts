@@ -8,6 +8,8 @@ export const shellStrings = {
     contacts: 'Contacts',
     team: 'Team',
     customFields: 'Custom fields',
+    pipelines: 'Pipelines',
+    crmSettings: 'CRM settings',
   },
   tenantSwitcher: {
     label: 'Switch workspace',

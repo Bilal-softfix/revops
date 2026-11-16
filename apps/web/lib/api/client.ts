@@ -3,7 +3,7 @@ import type { z } from 'zod';
 import { NetworkError, toApiError } from './problem';
 
 export interface ApiRequest<S extends z.ZodType | undefined> {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   /** Response schema from @revops/shared; omit for 2xx-without-body endpoints. */
   schema?: S;
