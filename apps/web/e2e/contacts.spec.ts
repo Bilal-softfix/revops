@@ -1,12 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { login, signupAndVerify, uniqueEmail } from './helpers';
+import { FIXTURES } from './fixtures';
+import { loginAsFixture, uniqueEmail } from './helpers';
 
 test('M1-T1: create a contact with a local number, find it by search, duplicate is flagged', async ({
   page,
 }) => {
-  const email = uniqueEmail('owner');
-  await signupAndVerify(page, email, 'Screen Fix', 'Shop Owner', 'Repair shop / service centre');
-  await login(page, email);
+  await loginAsFixture(page, FIXTURES.contactsRepair);
   await page
     .getByRole('navigation', { name: 'Main' })
     .getByRole('link', { name: 'Contacts' })
@@ -40,9 +39,7 @@ test('M1-T1: create a contact with a local number, find it by search, duplicate 
 });
 
 test('M1-T1: phone OR email — email-only saves; neither shows the rule', async ({ page }) => {
-  const email = uniqueEmail('owner');
-  await signupAndVerify(page, email, 'Code Shop', 'Agency Owner', 'Software agency / IT services');
-  await login(page, email);
+  await loginAsFixture(page, FIXTURES.contactsAgency);
   await page.goto('/contacts');
   await page.getByRole('button', { name: 'New contact' }).click();
   const dialog = page.getByRole('dialog');

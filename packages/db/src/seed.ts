@@ -67,10 +67,26 @@ export const DEMO_TENANTS: readonly DemoTenant[] = [
  * is written in that user's own context (users allow self-insert/update only), each membership in
  * its tenant's context.
  */
-export async function seedDemo(db: Db, password: string): Promise<{ tenantIds: string[] }> {
+export function seedDemo(db: Db, password: string): Promise<{ tenantIds: string[] }> {
+  return seedAccounts(db, password, { tenants: DEMO_TENANTS, users: DEMO_USERS });
+}
+
+/**
+ * Seeds the given tenants (with their template's CRM setup) and verified, active users with
+ * `password`. Idempotent. Used by the dev seed and by the e2e global setup (fixture accounts, so
+ * specs don't spend the per-IP signup allowance when signup itself isn't under test).
+ */
+export async function seedAccounts(
+  db: Db,
+  password: string,
+  accounts: {
+    tenants: readonly DemoTenant[];
+    users: readonly { email: string; name: string }[];
+  },
+): Promise<{ tenantIds: string[] }> {
   const passwordHash = await hash(password); // argon2id by default
 
-  for (const tenant of DEMO_TENANTS) {
+  for (const tenant of accounts.tenants) {
     await withContext(db, { tenantId: tenant.id }, async (tx) => {
       await tx
         .insert(tenants)
@@ -90,7 +106,7 @@ export async function seedDemo(db: Db, password: string): Promise<{ tenantIds: s
   }
 
   const userIds = new Map<string, string>();
-  for (const user of DEMO_USERS) {
+  for (const user of accounts.users) {
     const [existing] = await db.execute<{ id: string }>(
       sql`select id from auth_find_user_by_email(${user.email})`,
     );
@@ -111,11 +127,11 @@ export async function seedDemo(db: Db, password: string): Promise<{ tenantIds: s
     );
   }
 
-  for (const tenant of DEMO_TENANTS) {
+  for (const tenant of accounts.tenants) {
     await withContext(db, { tenantId: tenant.id }, async (tx) => {
       for (const member of tenant.members) {
         const userId = userIds.get(member.email);
-        if (!userId) throw new Error(`seed: ${member.email} is not in DEMO_USERS`);
+        if (!userId) throw new Error(`seed: ${member.email} is not in the seeded users`);
         await tx
           .insert(memberships)
           .values({ tenantId: tenant.id, userId, role: member.role, status: 'active' })
@@ -126,5 +142,5 @@ export async function seedDemo(db: Db, password: string): Promise<{ tenantIds: s
       }
     });
   }
-  return { tenantIds: DEMO_TENANTS.map((t) => t.id) };
+  return { tenantIds: accounts.tenants.map((t) => t.id) };
 }

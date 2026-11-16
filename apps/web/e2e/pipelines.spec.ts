@@ -1,20 +1,14 @@
 import { type Page, expect, test } from '@playwright/test';
-import { login, signupAndVerify, uniqueEmail } from './helpers';
+import { FIXTURES } from './fixtures';
+import { loginAsFixture } from './helpers';
 
 // M1-T3b: Settings → Pipelines, Settings → CRM settings, and "Shown in" for lead fields.
 // (Moving leads when deleting a stage is covered by the API tests: leads have no UI until M1-T4.)
 
-// One repair-shop owner for the whole file (signups are rate-limited per IP: 10/hour, and the
-// suite runs from one IP). Serial, in this order: the pipelines test deletes "Inquiries" last.
+// One fixture repair-shop workspace for the whole file. Serial, in this order: the pipelines
+// test deletes "Inquiries" last.
 test.describe.configure({ mode: 'serial' });
-let ownerEmail = '';
-test.beforeAll(async ({ browser }) => {
-  ownerEmail = uniqueEmail('owner');
-  const page = await browser.newPage();
-  await signupAndVerify(page, ownerEmail, 'Fix Fast', 'Shop Owner', 'Repair shop / service centre');
-  await page.close();
-});
-const asRepairShopOwner = (page: Page) => login(page, ownerEmail);
+const asRepairShopOwner = (page: Page) => loginAsFixture(page, FIXTURES.pipelines);
 const nav = (page: Page, name: string) =>
   page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name }).click();
 

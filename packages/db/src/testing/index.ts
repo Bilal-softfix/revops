@@ -60,3 +60,6 @@ export async function truncateAll(ownerUrl: string): Promise<void> {
     await sql.end({ timeout: 5 });
   }
 }
+
+/** Seeds tenants + verified users (dev seed and e2e fixture accounts). */
+export { type DemoTenant, seedAccounts } from '../seed.js';

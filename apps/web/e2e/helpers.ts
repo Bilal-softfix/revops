@@ -80,6 +80,10 @@ export async function signupAndVerify(
   await expect(page.getByRole('heading', { name: 'Email verified' })).toBeVisible();
 }
 
+/** Signs in as a pre-seeded fixture workspace's owner (./fixtures.ts). */
+export const loginAsFixture = (page: Page, fixture: { owner: { email: string } }) =>
+  login(page, fixture.owner.email);
+
 export async function login(page: Page, email: string, password = PASSWORD) {
   await page.goto('/login');
   await page.getByLabel('Work email').fill(email);

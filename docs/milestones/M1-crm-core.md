@@ -22,6 +22,7 @@ Lead capture channels (M2), calls (M3), automation (M5), scoring.
 
 **M1-T5 Notes, tasks, timeline** — notes; tasks with due date/assignee/type and "My tasks" view (overdue/today/upcoming); timeline_events written for create, assignment, stage change, note, task completion; lead detail page with timeline + side panel.
 - AC: timeline is ordered, paginated, and shows actor (user/ai/system).
+- AC (Dev, 2026-11-16): when deleting a stage moves leads (M1-T3b), each moved lead gets a timeline entry "stage changed because <stage> was deleted" in the same transaction; no per-lead `lead.stage_changed.v1`, one audit row.
 
 **M1-T6 Audit + bulk actions** — audit log for assignment/stage/delete; bulk assign, bulk stage move, CSV export (with formula-injection escaping) — permissioned.
 - AC: export respects agent visibility; audit entries created for bulk actions.

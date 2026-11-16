@@ -91,7 +91,8 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
 ## Assumptions made
 _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - 2026-11-16 · M1-T2 decisions 1 (options relabel/add only) and 2 (later-added required fields don't block older records) **approved by Dev**. Decision 3 **replaced** by pipeline scoping of lead fields (done in M1-T3b).
-- 2026-11-16 · M1-T3b assumptions (**Review**):
+- 2026-11-16 · M1-T3b reviewed and **approved by Dev**; CI green on PR #2. Decisions 1, 2, 3, 5, 6 below approved. **Decision 4 changed (Dev):** a stage delete that moves leads also writes one timeline entry per moved lead ("stage changed because <stage> was deleted"); still NO per-lead `lead.stage_changed.v1`, still the single audit row. `timeline_events` arrives in M1-T5, so this is part of M1-T5's AC (milestone file).
+- 2026-11-16 · M1-T3b assumptions (reviewed):
   - **Moving a lead to another pipeline does not enforce that pipeline's required fields** (consistent with approved decision 2): they show empty and become required once edited. T4 implements the move this way unless Dev says otherwise.
   - Bulk-move target on stage delete must have the **same category** (open→open, won→won, lost→lost), so leads never become won/lost without won_at / a lost reason. Deleting the only won/lost stage that has leads is refused until another stage of that category exists.
   - A stage with leads can't change category (409 `stage_category_locked`); add a new stage instead.
@@ -232,6 +233,9 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - 2026-11-11 · M0-T6 deps: pg-boss 12.38.0, nestjs-pino 4.6.1, pino 9.14.0, pino-http 10.5.0, pino-pretty 13.2.0 (dev), prom-client 15.1.3, @nestjs/swagger 11.4.8, @opentelemetry/{api 1.10.0, sdk-node 0.300.0, exporter-trace-otlp-http 0.300.0, instrumentation-http 0.300.0, instrumentation-express 0.72.0}. These were picked as Nest-11 compatible and ≥2 weeks old; the http/express instrumentations replace the heavy auto-instrumentations bundle. The pnpm override `multer: 2.5.0` fixes the high advisory GHSA-q7qp-rjg7-q26m (via @nestjs/platform-express). `@scarf/scarf` and protobufjs install scripts are ignored.
 - 2026-11-11 · Rate limiter: `rate_limit_buckets` stores sha256(key) only (no IPs/emails), RLS enabled with no policies and no grants, reached via `rate_limit_consume/reset/purge` (definer). The app passes its Clock's now, so FakeClock tests keep working. RLS catalog meta-test gains a "system tables" class. Purge is scheduled in T6.
 
+## Backlog
+- Archive pipeline (Dev, 2026-11-16): hide a pipeline that still has leads without deleting it (today a pipeline with leads can't be deleted).
+
 ## Blocked on external
 - [ ] Meta Business Verification + App Review
 - [ ] WhatsApp Cloud API number + templates
@@ -253,7 +257,7 @@ _M0 milestone review (2026-11-12): non-blocking findings from the code-reviewer 
 - The minimatch moderate advisory (transitive) is still reported by `pnpm audit`; it is dev-tooling only.
 - Worker jobs have no per-job log context (the job id is in the failure log only); add an AsyncLocalStorage child logger when consumers multiply.
 - `InMemoryJobQueue` is not transactional: a job sent with `tx` stays queued in tests even if the transaction rolls back. Real pg-boss behaviour is covered by `test/queue.int.test.ts`.
-- **E2E is at the signup ceiling (M1-T3b).** The whole Playwright suite runs from one IP and signup allows 10 per IP per hour; it now uses ~10. `pipelines.spec.ts` shares one owner (serial) for this reason. M1-T7 (more Playwright) needs seeded accounts or fewer UI signups — not a limit bypass.
+- ~~E2E at the signup ceiling~~ **Fixed 2026-11-16 (Dev):** specs use pre-seeded fixture workspaces (`apps/web/e2e/fixtures.ts`, seeded by the e2e global setup via `seedAccounts`), one per spec. Only specs that test signup or invite acceptance create accounts. Rate limits unchanged.
 _(non-blocking review findings)_
 - M8: set `TRUST_PROXY` (M0-T7, default `loopback`) to the real hop count / proxy CIDRs before deploying behind a load balancer. Note: Next.js keeps a client-supplied `X-Forwarded-For` instead of appending to it, so behind the web proxy a client can choose the IP the API sees (rate-limit evasion per IP). Since the M0 review, per-account keys that ignore the IP bound the damage: `login-email` (20 per 15 min) and `email-<kind>-addr` (5 per hour). Still open: a spoofed IP can lock out a real shared IP (50 logins per 15 min), and per-IP ceilings are evadable. M8 must put a trusted LB in front that overwrites XFF, or have the web proxy set it from the socket address.
 - M0-T6: discarding an unverified account deletes its tenant's outbox rows, including `user.signed_up.v1`. Once the relay ships, consider a compensating `user.discarded.v1` (also needed for DPDP deletion propagation).

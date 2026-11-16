@@ -1,12 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { login, signupAndVerify, uniqueEmail } from './helpers';
+import { FIXTURES } from './fixtures';
+import { loginAsFixture, uniqueEmail } from './helpers';
 
 test('M1-T2: template fields are there; a new field shows on the contact form; deleting hides it', async ({
   page,
 }) => {
-  const email = uniqueEmail('owner');
-  await signupAndVerify(page, email, 'Fix It', 'Shop Owner', 'Repair shop / service centre');
-  await login(page, email);
+  await loginAsFixture(page, FIXTURES.customFields);
 
   await page
     .getByRole('navigation', { name: 'Main' })
