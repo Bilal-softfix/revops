@@ -2,7 +2,7 @@
 
 ## Current
 Milestone: M1 — CRM Core (starting). Branch: `milestone/m1-crm-core` (from main after M0 merged, tag `m0-done`).
-M1-T0 (M0 follow-ups) done 2026-11-12. M1 plan approved 2026-11-12 (order: T3a → T1 → T2 → T3b → T4 → T5 → T6 → T7, sequential). Draft PR #2 open. Done: T3a, T1, T2, T3b (2026-11-16). Next: M1-T4 Leads.
+M1-T0 (M0 follow-ups) done 2026-11-12. M1 plan approved 2026-11-12 (order: T3a → T1 → T2 → T3b → T4 → T5 → T6 → T7, sequential). Draft PR #2 open. Done: T3a, T1, T2, T3b, T4 (2026-11-16). Next: M1-T5 Notes, tasks, timeline.
 
 M0 history:
 Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-11-05; M0-T5 done 2026-11-11. 2026-11-11: switched to local-first (ADR-011 no Redis/pg-boss, ADR-012 native Postgres). M0-T6, M0-T7 done 2026-11-11. M0 milestone review done 2026-11-12: blockers fixed, PR ready for review. Next: Dev merges PR #1 → start M1 (`/start-milestone M1`). PR #1 merged 2026-11-12 (tag `m0-done`).
@@ -82,8 +82,24 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
   - Repair-shop template: Device brand, Device model, Issue → all pipelines; IMEI, Estimate, Advance paid, Promised date, Under warranty → Repair jobs only (template `pipelines` keys, validated).
   - Web: Settings → Pipelines, Settings → CRM settings (agent contact visibility), "Shown in" picker + Pipelines column for lead fields. Migrations 0021/0022. Tests: shared unit, db leak suite + FK tests, API integration (`pipelines.int.test.ts`), service unit, Playwright `pipelines.spec.ts` (3).
 
+- [x] M1-T4 Leads (2026-11-16):
+  - API: `GET /v1/leads` (filters incl. custom fields, keyset paging), `GET /v1/leads/board`,
+    `GET/POST/PATCH/DELETE /v1/leads[/:id]`, `POST /v1/leads/:id/stage`, `/v1/lead-views`.
+    Permissions `lead.write` (all), `lead.assign` + `lead.delete` (owner/admin/manager).
+  - **AC:** stage change writes `lead.stage_changed.v1` to the outbox in the same transaction
+    (tested payload, no event on no-op); an agent gets 404 for a lead they don't own (get,
+    edit, move, delete, list, board).
+  - Events `lead.created.v1`, `lead.stage_changed.v1`, `lead.assigned.v1` registered; audit
+    rows for create / update / assign / stage change / delete.
+  - Contacts: agents in `assigned` mode now also see contacts of leads they own; duplicate
+    conflicts name the owner of the contact's latest open lead.
+  - Migrations 0023/0024 (`leads.status`, GIN index, `saved_views` + RLS + leak test).
+  - Web: Leads (list/board toggle, URL filters, field filters per pipeline, saved views, new
+    lead dialog with new/existing contact), lead page (stage, lost-reason dialog, pipeline
+    move, owner, details form). Tests: API `leads.int.test.ts` (18), shared + web unit,
+    Playwright `leads.spec.ts` (drag-and-drop, lost reason, saved view).
+
 ## In progress
-- [ ] M1-T4 Leads (list/filters/saved views, kanban, stage change + events, agent visibility)
 - [ ] M1-T5 Notes, tasks, timeline (My tasks)
 - [ ] M1-T6 Audit + bulk actions + CSV export
 - [ ] M1-T7 Seed (4 demo tenants incl. Demo Software Agency + Demo Repair Shop), 10k-lead volume check, Playwright
@@ -91,6 +107,19 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
 ## Assumptions made
 _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - 2026-11-16 · M1-T2 decisions 1 (options relabel/add only) and 2 (later-added required fields don't block older records) **approved by Dev**. Decision 3 **replaced** by pipeline scoping of lead fields (done in M1-T3b).
+- 2026-11-16 · M1-T4 assumptions (**Review**):
+  - `status` = the stage's category (open / won / lost), stored and kept in sync; no separate
+    status lifecycle.
+  - Saved views are private to their creator (no shared team views yet).
+  - Stage/pipeline moves only through `POST /leads/:id/stage`; PATCH rejects stageId.
+  - A new lead's contact phone/email matching an existing contact links to it even if the
+    agent couldn't see that contact before (they then see it through their lead).
+  - Re-entering a won stage from another won stage keeps the original win date; reopening
+    clears won/lost data.
+  - Owner pickers list the first 50 active members (enough for SMB teams; paginate later).
+  - Board columns show 25 cards each with "Load more"; kanban order is newest first.
+  - `valuePaise` is a JSON number (safe integer, up to ~₹90 lakh crore).
+  - The web shows dates and builds day filters in Asia/Kolkata (no tenant timezone yet).
 - 2026-11-16 · M1-T3b reviewed and **approved by Dev**; CI green on PR #2. Decisions 1, 2, 3, 5, 6 below approved. **Decision 4 changed (Dev):** a stage delete that moves leads also writes one timeline entry per moved lead ("stage changed because <stage> was deleted"); still NO per-lead `lead.stage_changed.v1`, still the single audit row. `timeline_events` arrives in M1-T5, so this is part of M1-T5's AC (milestone file).
 - 2026-11-16 · M1-T3b assumptions (reviewed):
   - **Moving a lead to another pipeline does not enforce that pipeline's required fields** (consistent with approved decision 2): they show empty and become required once edited. T4 implements the move this way unless Dev says otherwise.

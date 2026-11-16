@@ -1,6 +1,7 @@
 import { type Permission, type Role, hasPermission } from '@revops/shared';
 import {
   Contact,
+  Handshake,
   KanbanSquare,
   LayoutDashboard,
   ListPlus,
@@ -32,6 +33,12 @@ export const NAV: readonly NavSection[] = [
     label: shellStrings.nav.main,
     items: [
       { href: '/dashboard', label: shellStrings.nav.dashboard, icon: LayoutDashboard },
+      {
+        href: '/leads',
+        label: shellStrings.nav.leads,
+        icon: Handshake,
+        permission: 'lead.read.assigned',
+      },
       {
         href: '/contacts',
         label: shellStrings.nav.contacts,

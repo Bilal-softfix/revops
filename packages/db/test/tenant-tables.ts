@@ -7,6 +7,7 @@ import {
   customFieldPipelines,
   leadSources,
   leads,
+  savedViews,
   pipelineStages,
   pipelines,
   invitations,
@@ -210,6 +211,19 @@ export const TENANT_TABLES: readonly TenantTableFixture[] = [
           stageId: stage?.id ?? '',
         })
         .returning({ id: leads.id });
+      return row?.id ?? '';
+    },
+  },
+  {
+    table: 'saved_views',
+    tenantColumn: 'tenant_id',
+    privileges: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
+    insert: async (tx, tenantId) => {
+      const userId = await insertUser(tx);
+      const [row] = await tx
+        .insert(savedViews)
+        .values({ tenantId, userId, name: `V ${randomUUID()}` })
+        .returning({ id: savedViews.id });
       return row?.id ?? '';
     },
   },

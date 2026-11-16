@@ -9,9 +9,12 @@ describe('event registry', () => {
     }
   });
 
-  it('knows every M0 event and validates its payload', () => {
+  it('knows every registered event and validates its payload', () => {
     expect([...EVENT_REGISTRY.keys()].sort()).toEqual([
       'contact.created.v1',
+      'lead.assigned.v1',
+      'lead.created.v1',
+      'lead.stage_changed.v1',
       'member.joined.v1',
       'user.signed_up.v1',
     ]);

@@ -15,6 +15,12 @@ export const PERMISSIONS = [
   'lead.read.assigned',
   /** See every lead and contact in the tenant (not just own/assigned). */
   'lead.read.all',
+  /** Create leads and edit / move the leads the member can see. */
+  'lead.write',
+  /** Choose or change a lead's owner (else a creator owns their own leads). */
+  'lead.assign',
+  /** Delete (soft) leads. */
+  'lead.delete',
   /** Create and edit contacts the member can see. */
   'contact.write',
   /** Delete (soft) contacts. */
@@ -35,6 +41,9 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     'member.manage',
     'lead.read.assigned',
     'lead.read.all',
+    'lead.write',
+    'lead.assign',
+    'lead.delete',
     'contact.write',
     'contact.delete',
     'crm.settings.manage',
@@ -47,6 +56,9 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     'member.manage',
     'lead.read.assigned',
     'lead.read.all',
+    'lead.write',
+    'lead.assign',
+    'lead.delete',
     'contact.write',
     'contact.delete',
     'crm.settings.manage',
@@ -57,10 +69,13 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     'member.read',
     'lead.read.assigned',
     'lead.read.all',
+    'lead.write',
+    'lead.assign',
+    'lead.delete',
     'contact.write',
     'contact.delete',
   ],
-  agent: ['member.read', 'lead.read.assigned', 'contact.write'],
+  agent: ['member.read', 'lead.read.assigned', 'lead.write', 'contact.write'],
 };
 
 export function hasPermission(role: Role | null | undefined, permission: Permission): boolean {

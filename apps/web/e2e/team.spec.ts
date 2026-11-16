@@ -11,6 +11,7 @@ test.describe('M0-T7 AC: invite → accept as agent → restricted nav', () => {
     await loginAsFixture(page, FIXTURES.team);
     expect(await navLabels(page)).toEqual([
       'Dashboard',
+      'Leads',
       'Contacts',
       'Team',
       'Custom fields',
@@ -48,7 +49,7 @@ test.describe('M0-T7 AC: invite → accept as agent → restricted nav', () => {
     await expect(agent.getByText('Agent', { exact: true }).first()).toBeVisible();
 
     // Restricted: the agent sees the team read-only — no invite, no invitations, no controls
-    expect(await navLabels(agent)).toEqual(['Dashboard', 'Contacts', 'Team']);
+    expect(await navLabels(agent)).toEqual(['Dashboard', 'Leads', 'Contacts', 'Team']);
     await agent
       .getByRole('navigation', { name: 'Main' })
       .getByRole('link', { name: 'Team' })

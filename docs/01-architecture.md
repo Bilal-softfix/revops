@@ -162,6 +162,39 @@ Permissions are strings (`lead.read.all`, `lead.read.assigned`, `routing.manage`
 - **`leads` table** exists from M1-T3b (so stage deletion has something to move); its API, list, kanban and `lead.stage_changed.v1` arrive in M1-T4. `(tenant_id, pipeline_id, stage_id)` references `pipeline_stages(tenant_id, pipeline_id, id)`, so a lead's stage always belongs to its pipeline.
 - **Web:** Settings → Pipelines (cards per pipeline: stages table with up/down reorder, add/edit/delete dialogs; delete asks for a target stage when the API reports leads) and Settings → CRM settings (agent contact visibility radio).
 
+## Leads (M1-T4)
+- **Visibility is built once** (`LeadsRepository` scope): `lead.read.all` (owner, admin,
+  manager) sees every lead; everyone else only leads they own. Unassigned leads are visible
+  to read-all roles only. An invisible lead is a 404 for get, edit, stage change and delete.
+  Contacts in `assigned` mode are visible to an agent who created them or owns a
+  (non-deleted) lead of theirs.
+- **Ownership:** a new lead belongs to its creator unless a `lead.assign` role (owner, admin,
+  manager) picks someone else or nobody. Owners must be active members of the tenant.
+  Reassignment writes `lead.assigned` audit + `lead.assigned.v1`.
+- **Contact:** `contactId` (one the caller can see) or `contact {name, phone|email}`. A new
+  contact whose phone/email already exists links to that contact (one person, one contact);
+  a concurrent duplicate insert is retried once and then links.
+- **Stage changes** only via `POST /v1/leads/:id/stage {stageId, pipelineId?, lostReason?}`:
+  locks the lead row, keeps `status` (= stage category), `won_at`, `lost_at`, `lost_reason`
+  in sync (reopening clears them; moving within won keeps the win date), writes the audit row
+  and `lead.stage_changed.v1` in the same transaction. A no-op move emits nothing. A stage
+  deleted concurrently answers 409 `stage_gone`. Moving to another pipeline keeps all stored
+  custom values (non-applicable ones hidden) and doesn't enforce the new pipeline's required
+  fields until the next edit.
+- **Money:** `valuePaise` is a safe JSON integer; the column is `bigint`. The web takes rupees
+  and converts with string maths (`lib/money.ts`), never floats.
+- **List:** keyset cursor on `(created_at, id)`; filters pipeline, stage(s), status, owner
+  (`me` / `unassigned` / user), source, created range (the web sends IST day bounds), search
+  on contact name / phone digits / email, and custom fields (`cf=<json>`: text contains, select
+  any-of, multiselect has, bool equals, number/date ranges; unknown fields 400). Containment
+  filters use a GIN `jsonb_path_ops` index on `leads.custom_fields`.
+- **Board:** `GET /v1/leads/board?pipelineId=` returns, per stage, the matching count and the
+  first `perStage` cards; more cards load from the list endpoint with `stageIds=<stage>`.
+  The web board uses native HTML5 drag and drop plus a per-card "Move to" select (keyboard
+  and touch), both through the same stage-change call (lost asks for a reason).
+- **Saved views** (`saved_views`, `/v1/lead-views`): name + layout + filters, private to the
+  user who saved them. Filters live in the URL, so views and links share one encoding.
+
 ## Web app (apps/web, M0-T7)
 - **The browser never calls the API directly.** It calls same-origin `/api/v1/*`, and the route handler `app/api/[...path]/route.ts` forwards that to `API_INTERNAL_URL`, which is read at runtime.
   - Only `/v1` is exposed: `/metrics`, `/docs` and the probes stay internal.

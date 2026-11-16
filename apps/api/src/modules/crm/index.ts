@@ -10,6 +10,10 @@ import { CrmService } from './crm.service';
 import { CustomFieldsController } from './custom-fields.controller';
 import { CustomFieldsRepository } from './custom-fields.repository';
 import { CustomFieldsService } from './custom-fields.service';
+import { LeadViewsRepository, LeadViewsService } from './lead-views.service';
+import { LeadsController } from './leads.controller';
+import { LeadsRepository } from './leads.repository';
+import { LeadsService } from './leads.service';
 import { PipelinesController } from './pipelines.controller';
 import { PipelinesRepository } from './pipelines.repository';
 import { PipelinesService } from './pipelines.service';
@@ -19,7 +23,13 @@ export { type CrmAuth, CrmService } from './crm.service';
 
 @Module({
   imports: [IdentityModule, TenancyModule],
-  controllers: [CrmController, PipelinesController, ContactsController, CustomFieldsController],
+  controllers: [
+    CrmController,
+    PipelinesController,
+    ContactsController,
+    CustomFieldsController,
+    LeadsController,
+  ],
   providers: [
     CrmRepository,
     CrmService,
@@ -29,6 +39,10 @@ export { type CrmAuth, CrmService } from './crm.service';
     CustomFieldsService,
     PipelinesRepository,
     PipelinesService,
+    LeadsRepository,
+    LeadsService,
+    LeadViewsRepository,
+    LeadViewsService,
   ],
   exports: [CrmService],
 })

@@ -162,6 +162,20 @@
       "when": 1794805978593,
       "tag": "0022_crm_pipeline_scoping_and_leads_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1794808953584,
+      "tag": "0023_leads_status_and_saved_views",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794808963131,
+      "tag": "0024_saved_views_rls",
+      "breakpoints": true
     }
   ]
 }

@@ -5,6 +5,7 @@ export const shellStrings = {
     main: 'Workspace',
     settings: 'Settings',
     dashboard: 'Dashboard',
+    leads: 'Leads',
     contacts: 'Contacts',
     team: 'Team',
     customFields: 'Custom fields',

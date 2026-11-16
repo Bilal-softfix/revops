@@ -7,6 +7,7 @@ import {
   desc,
   eq,
   isNull,
+  leads,
   ne,
   or,
   sql,
@@ -24,7 +25,7 @@ import {
 /**
  * Who may see which contacts — built in ONE place and applied to every contact query (M1-T1).
  * `all`: every contact in the tenant. Otherwise (agent + tenant setting `assigned`): contacts the
- * user created, or (from M1-T4) linked to a lead assigned to them.
+ * user created, or linked to a (non-deleted) lead they own (M1-T4).
  */
 export type ContactScope = { all: true } | { all: false; userId: string };
 
@@ -77,8 +78,11 @@ export class ContactsRepository {
 
   private visible(scope: ContactScope): SQL | undefined {
     if (scope.all) return undefined;
-    // M1-T4 adds: or exists (lead of this contact assigned to scope.userId)
-    return eq(contacts.createdBy, scope.userId);
+    return or(
+      eq(contacts.createdBy, scope.userId),
+      sql`exists (select 1 from leads l where l.contact_id = ${contacts.id}
+        and l.owner_user_id = ${scope.userId} and l.deleted_at is null)`,
+    );
   }
 
   async list(
@@ -149,10 +153,18 @@ export class ContactsRepository {
   }
 
   /**
-   * Display name of whoever is working this contact, for duplicate conflicts. M1-T1: its creator.
-   * M1-T4: the owner of its most recently updated open lead (else latest lead), else the creator.
+   * Display name of whoever is working this contact, for duplicate conflicts: the owner of its
+   * most recently updated open lead (else its latest owned lead), else its creator.
    */
   async workingOwnerName(tx: Tx, contact: ContactRow): Promise<string | null> {
+    const [lead] = await tx
+      .select({ name: users.name })
+      .from(leads)
+      .innerJoin(users, eq(users.id, leads.ownerUserId))
+      .where(and(eq(leads.contactId, contact.id), isNull(leads.deletedAt)))
+      .orderBy(sql`(${leads.status} = 'open') desc`, desc(leads.updatedAt))
+      .limit(1);
+    if (lead) return lead.name;
     if (!contact.createdBy) return null;
     const [row] = await tx
       .select({ name: users.name })
