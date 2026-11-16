@@ -27,6 +27,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { LeadTasks } from '@/features/activities/lead-tasks';
+import { LeadTimeline } from '@/features/activities/lead-timeline';
 import { useCustomFields } from '@/features/custom-fields/queries';
 import { usePipelines } from '@/features/pipelines/queries';
 import { useMembers } from '@/features/team/queries';
@@ -45,7 +47,7 @@ import { leadStrings as s } from '@/lib/strings/leads';
 import { useDeleteLead, useLead, useLeadSources, useUpdateLead } from './queries';
 import { useStageChange } from './use-stage-change';
 
-/** Lead page (M1-T4): stage, pipeline move, owner, details. M1-T5 adds the timeline. */
+/** Lead page: timeline (notes) on the left; side panel with stage, owner, tasks and details. */
 export function LeadDetail({ id }: { id: string }) {
   const lead = useLead(id);
   const pipelines = usePipelines();
@@ -81,7 +83,7 @@ function LeadPage({
   const stage = pipeline.stages.find((x) => x.id === lead.stageId);
 
   return (
-    <div className="mx-auto grid max-w-4xl gap-6">
+    <div className="mx-auto grid max-w-6xl gap-6">
       <Link href="/leads" className="flex items-center gap-1 text-sm text-muted-foreground">
         <ArrowLeft className="size-4" aria-hidden />
         {s.detail.back}
@@ -110,62 +112,69 @@ function LeadPage({
         <p className="text-sm">{s.detail.lost(formatDate(lead.lostAt), lead.lostReason)}</p>
       ) : null}
 
-      <section className="grid gap-4 rounded-md border p-4 sm:grid-cols-3">
-        <div className="grid gap-1.5">
-          <span className="text-sm font-medium">{s.detail.pipeline}</span>
-          <span className="text-sm">{pipeline.name}</span>
-          {pipelines.length > 1 ? (
-            <Button
-              variant="link"
-              size="sm"
-              className="justify-start px-0"
-              onClick={() => setMoving(true)}
-            >
-              {s.detail.movePipeline}
-            </Button>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <LeadTimeline leadId={lead.id} />
+        <aside className="grid content-start gap-6" aria-label={s.detail.details}>
+          <section className="grid gap-4 rounded-md border p-4">
+            <div className="grid gap-1.5">
+              <span className="text-sm font-medium">{s.detail.pipeline}</span>
+              <span className="text-sm">{pipeline.name}</span>
+              {pipelines.length > 1 ? (
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="justify-start px-0"
+                  onClick={() => setMoving(true)}
+                >
+                  {s.detail.movePipeline}
+                </Button>
+              ) : null}
+            </div>
+            <SimpleSelect
+              label={s.detail.stage}
+              value={stage?.id ?? ''}
+              disabled={pending}
+              options={pipeline.stages.map((x) => ({ value: x.id, label: x.name }))}
+              onChange={(stageId) => {
+                const target = pipeline.stages.find((x) => x.id === stageId);
+                if (target) void change(lead, pipeline, target);
+              }}
+            />
+            {can('lead.assign') ? (
+              <SimpleSelect
+                label={s.detail.owner}
+                value={lead.owner?.id ?? ''}
+                noneLabel={s.unassigned}
+                options={members.map((m) => ({ value: m.userId, label: m.name }))}
+                disabled={update.isPending}
+                onChange={(ownerUserId) =>
+                  void update
+                    .mutateAsync({ id: lead.id, ownerUserId: ownerUserId || null })
+                    .then(() => toast.success(s.saved))
+                    .catch((e: unknown) => toast.error(errorMessage(e)))
+                }
+              />
+            ) : (
+              <div className="grid gap-1.5">
+                <span className="text-sm font-medium">{s.detail.owner}</span>
+                <span className="text-sm">{lead.owner?.name ?? s.unassigned}</span>
+              </div>
+            )}
+          </section>
+
+          <LeadTasks lead={lead} />
+
+          <LeadDetailsForm key={`${lead.id}:${lead.pipelineId}:${lead.updatedAt}`} lead={lead} />
+
+          {can('lead.delete') ? (
+            <div>
+              <Button variant="outline" onClick={() => setDeleting(true)}>
+                {s.detail.delete}
+              </Button>
+            </div>
           ) : null}
-        </div>
-        <SimpleSelect
-          label={s.detail.stage}
-          value={stage?.id ?? ''}
-          disabled={pending}
-          options={pipeline.stages.map((x) => ({ value: x.id, label: x.name }))}
-          onChange={(stageId) => {
-            const target = pipeline.stages.find((x) => x.id === stageId);
-            if (target) void change(lead, pipeline, target);
-          }}
-        />
-        {can('lead.assign') ? (
-          <SimpleSelect
-            label={s.detail.owner}
-            value={lead.owner?.id ?? ''}
-            noneLabel={s.unassigned}
-            options={members.map((m) => ({ value: m.userId, label: m.name }))}
-            disabled={update.isPending}
-            onChange={(ownerUserId) =>
-              void update
-                .mutateAsync({ id: lead.id, ownerUserId: ownerUserId || null })
-                .then(() => toast.success(s.saved))
-                .catch((e: unknown) => toast.error(errorMessage(e)))
-            }
-          />
-        ) : (
-          <div className="grid gap-1.5">
-            <span className="text-sm font-medium">{s.detail.owner}</span>
-            <span className="text-sm">{lead.owner?.name ?? s.unassigned}</span>
-          </div>
-        )}
-      </section>
-
-      <LeadDetailsForm key={`${lead.id}:${lead.pipelineId}:${lead.updatedAt}`} lead={lead} />
-
-      {can('lead.delete') ? (
-        <div>
-          <Button variant="outline" onClick={() => setDeleting(true)}>
-            {s.detail.delete}
-          </Button>
-        </div>
-      ) : null}
+        </aside>
+      </div>
 
       {moving ? (
         <MovePipelineDialog
@@ -275,7 +284,7 @@ function LeadDetailsForm({ lead }: { lead: Lead }) {
     >
       <h2 className="text-lg font-medium">{s.detail.details}</h2>
       <FormError message={formError} />
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4">
         <SimpleSelect
           label={s.form.source}
           value={sourceId}

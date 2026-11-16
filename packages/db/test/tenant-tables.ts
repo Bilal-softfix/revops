@@ -12,6 +12,9 @@ import {
   pipelines,
   invitations,
   memberships,
+  notes,
+  tasks,
+  timelineEvents,
   outboxEvents,
   processedEvents,
   tenants,
@@ -192,27 +195,7 @@ export const TENANT_TABLES: readonly TenantTableFixture[] = [
     table: 'leads',
     tenantColumn: 'tenant_id',
     privileges: ['SELECT', 'INSERT', 'UPDATE'],
-    insert: async (tx, tenantId) => {
-      const pipeline = await insertPipeline(tx, tenantId);
-      const [stage] = await tx
-        .insert(pipelineStages)
-        .values({ tenantId, pipelineId: pipeline.id, name: 'S', position: 0, category: 'open' })
-        .returning({ id: pipelineStages.id });
-      const [contact] = await tx
-        .insert(contacts)
-        .values({ tenantId, name: 'L', email: `${randomUUID()}@lead.test` })
-        .returning({ id: contacts.id });
-      const [row] = await tx
-        .insert(leads)
-        .values({
-          tenantId,
-          contactId: contact?.id ?? '',
-          pipelineId: pipeline.id,
-          stageId: stage?.id ?? '',
-        })
-        .returning({ id: leads.id });
-      return row?.id ?? '';
-    },
+    insert: async (tx, tenantId) => (await insertLead(tx, tenantId)).id,
   },
   {
     table: 'saved_views',
@@ -227,7 +210,76 @@ export const TENANT_TABLES: readonly TenantTableFixture[] = [
       return row?.id ?? '';
     },
   },
+  {
+    table: 'notes',
+    tenantColumn: 'tenant_id',
+    privileges: ['SELECT', 'INSERT', 'UPDATE'],
+    insert: async (tx, tenantId) => {
+      const lead = await insertLead(tx, tenantId);
+      const [row] = await tx
+        .insert(notes)
+        .values({ tenantId, leadId: lead.id, body: 'N' })
+        .returning({ id: notes.id });
+      return row?.id ?? '';
+    },
+  },
+  {
+    table: 'tasks',
+    tenantColumn: 'tenant_id',
+    privileges: ['SELECT', 'INSERT', 'UPDATE'],
+    insert: async (tx, tenantId) => {
+      const lead = await insertLead(tx, tenantId);
+      const [row] = await tx
+        .insert(tasks)
+        .values({ tenantId, leadId: lead.id, title: 'T', dueAt: new Date() })
+        .returning({ id: tasks.id });
+      return row?.id ?? '';
+    },
+  },
+  {
+    table: 'timeline_events',
+    tenantColumn: 'tenant_id',
+    privileges: ['SELECT', 'INSERT'],
+    insert: async (tx, tenantId) => {
+      const lead = await insertLead(tx, tenantId);
+      const [row] = await tx
+        .insert(timelineEvents)
+        .values({
+          tenantId,
+          leadId: lead.id,
+          contactId: lead.contactId,
+          type: 'created',
+          actorType: 'system',
+          occurredAt: new Date(),
+        })
+        .returning({ id: timelineEvents.id });
+      return row?.id ?? '';
+    },
+  },
 ];
+
+async function insertLead(tx: Tx, tenantId: string): Promise<{ id: string; contactId: string }> {
+  const pipeline = await insertPipeline(tx, tenantId);
+  const [stage] = await tx
+    .insert(pipelineStages)
+    .values({ tenantId, pipelineId: pipeline.id, name: 'S', position: 0, category: 'open' })
+    .returning({ id: pipelineStages.id });
+  const [contact] = await tx
+    .insert(contacts)
+    .values({ tenantId, name: 'L', email: `${randomUUID()}@lead.test` })
+    .returning({ id: contacts.id });
+  const [row] = await tx
+    .insert(leads)
+    .values({
+      tenantId,
+      contactId: contact?.id ?? '',
+      pipelineId: pipeline.id,
+      stageId: stage?.id ?? '',
+    })
+    .returning({ id: leads.id, contactId: leads.contactId });
+  if (!row) throw new Error('no lead');
+  return row;
+}
 
 async function insertPipeline(tx: Tx, tenantId: string): Promise<{ id: string }> {
   const [row] = await tx

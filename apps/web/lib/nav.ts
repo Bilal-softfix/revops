@@ -7,6 +7,7 @@ import {
   ListPlus,
   type LucideIcon,
   SlidersHorizontal,
+  ListTodo,
   Users,
 } from 'lucide-react';
 import { shellStrings } from '@/lib/strings/shell';
@@ -43,6 +44,12 @@ export const NAV: readonly NavSection[] = [
         href: '/contacts',
         label: shellStrings.nav.contacts,
         icon: Contact,
+        permission: 'lead.read.assigned',
+      },
+      {
+        href: '/tasks',
+        label: shellStrings.nav.tasks,
+        icon: ListTodo,
         permission: 'lead.read.assigned',
       },
     ],

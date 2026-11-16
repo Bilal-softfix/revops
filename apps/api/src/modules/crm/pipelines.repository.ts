@@ -168,12 +168,20 @@ export class PipelinesRepository {
    * Moves every lead row of a stage (soft-deleted ones too, or the FK would keep the stage alive)
    * to another stage of the same pipeline. Returns how many non-deleted leads moved.
    */
-  async moveLeads(tx: Tx, fromStageId: string, toStageId: string, now: Date): Promise<number> {
+  /** Moves every lead of a stage (soft-deleted ones too); returns the live ones moved. */
+  async moveLeads(
+    tx: Tx,
+    fromStageId: string,
+    toStageId: string,
+    now: Date,
+  ): Promise<{ id: string; contactId: string }[]> {
     const moved = await tx
       .update(leads)
       .set({ stageId: toStageId, updatedAt: now })
       .where(eq(leads.stageId, fromStageId))
-      .returning({ deletedAt: leads.deletedAt });
-    return moved.filter((l) => l.deletedAt === null).length;
+      .returning({ id: leads.id, contactId: leads.contactId, deletedAt: leads.deletedAt });
+    return moved
+      .filter((l) => l.deletedAt === null)
+      .map((l) => ({ id: l.id, contactId: l.contactId }));
   }
 }

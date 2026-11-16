@@ -172,8 +172,10 @@ Permissions are strings (`lead.read.all`, `lead.read.assigned`, `routing.manage`
   manager) picks someone else or nobody. Owners must be active members of the tenant.
   Reassignment writes `lead.assigned` audit + `lead.assigned.v1`.
 - **Contact:** `contactId` (one the caller can see) or `contact {name, phone|email}`. A new
-  contact whose phone/email already exists links to that contact (one person, one contact);
-  a concurrent duplicate insert is retried once and then links.
+  contact whose phone/email already exists links to that contact (one person, one contact)
+  if the caller can see it; a concurrent duplicate insert is retried once and then links.
+  An agent in `assigned` mode matching a contact they can't see gets the contact-create 409
+  `contact_exists` (field + who handles it, no contact details) and nothing is created.
 - **Stage changes** only via `POST /v1/leads/:id/stage {stageId, pipelineId?, lostReason?}`:
   locks the lead row, keeps `status` (= stage category), `won_at`, `lost_at`, `lost_reason`
   in sync (reopening clears them; moving within won keeps the win date), writes the audit row
@@ -194,6 +196,27 @@ Permissions are strings (`lead.read.all`, `lead.read.assigned`, `routing.manage`
   and touch), both through the same stage-change call (lost asks for a reason).
 - **Saved views** (`saved_views`, `/v1/lead-views`): name + layout + filters, private to the
   user who saved them. Filters live in the URL, so views and links share one encoding.
+
+## Notes, tasks, timeline (M1-T5)
+- **Everything follows the lead's visibility**: a lead the caller can't see makes its notes,
+  tasks and timeline 404 (`ActivitiesService`, `ActivitiesRepository`).
+- **Timeline** (`timeline_events`, append-only: app_user SELECT + INSERT) is written in the
+  same transaction as the change: lead created, assignment, stage change (incl. one entry per
+  lead moved by a stage delete, `data.reason = stage_deleted`, no per-lead event), note, task
+  completed/reopened. `actor_type` user/ai/system + `actor_id`; `data` holds name snapshots
+  (stages, pipelines, owners) so renamed or deleted things read as they were. A note entry shows
+  the live note (`ref_id`) and disappears when the note is deleted. `GET /v1/leads/:id/timeline`:
+  newest first, keyset cursor on `(occurred_at, seq)`; `seq` (identity) keeps write order for
+  events of the same instant.
+- **Notes:** `POST /v1/leads/:id/notes`, `PATCH|DELETE /v1/notes/:id`. Only the author edits;
+  the author or a `lead.delete` role deletes (soft). Audit rows never copy the body.
+- **Tasks:** `GET|POST /v1/leads/:id/tasks`, `PATCH|DELETE /v1/tasks/:id` (PATCH `status`
+  completes/reopens). Assignee defaults to the caller; anyone else needs `lead.assign` and must
+  be an active member who can see the lead (read-all role or the lead's owner).
+- **My tasks:** `GET /v1/tasks?bucket=overdue|today|upcoming` (open tasks assigned to me, on leads
+  I can still see, by due date; cursor on `(due_at, id)`) and `GET /v1/tasks/counts`. Overdue =
+  due before now; today = due before the next local midnight; upcoming = later. Local day =
+  tenant timezone (`Asia/Kolkata` until tenants have one; `dayBounds` in `@revops/shared`).
 
 ## Web app (apps/web, M0-T7)
 - **The browser never calls the API directly.** It calls same-origin `/api/v1/*`, and the route handler `app/api/[...path]/route.ts` forwards that to `API_INTERNAL_URL`, which is read at runtime.

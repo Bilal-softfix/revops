@@ -18,7 +18,7 @@ import {
   sql,
   users,
 } from '@revops/db';
-import type { CustomFieldDef, LeadFilters, StageCategory } from '@revops/shared';
+import type { CustomFieldDef, LeadFilters, Role, StageCategory } from '@revops/shared';
 
 /**
  * Which leads a member may see — built in ONE place and applied to every lead query (M1-T4).
@@ -286,9 +286,12 @@ export class LeadsRepository {
 
   // ---- lookups the service validates against (all RLS-scoped to the tenant) ----
 
-  async activePipeline(tx: Tx, id: string | undefined): Promise<{ id: string } | undefined> {
+  async activePipeline(
+    tx: Tx,
+    id: string | undefined,
+  ): Promise<{ id: string; name: string } | undefined> {
     const [row] = await tx
-      .select({ id: pipelines.id })
+      .select({ id: pipelines.id, name: pipelines.name })
       .from(pipelines)
       .where(
         and(isNull(pipelines.deletedAt), id ? eq(pipelines.id, id) : eq(pipelines.isDefault, true)),
@@ -303,6 +306,34 @@ export class LeadsRepository {
       .from(pipelineStages)
       .where(eq(pipelineStages.pipelineId, pipelineId))
       .orderBy(asc(pipelineStages.position), asc(pipelineStages.createdAt));
+  }
+
+  async pipelineName(tx: Tx, id: string): Promise<string> {
+    const [row] = await tx
+      .select({ name: pipelines.name })
+      .from(pipelines)
+      .where(eq(pipelines.id, id));
+    return row?.name ?? '';
+  }
+
+  /** The member's role if they are an active member of this tenant. */
+  async activeMemberRole(tx: Tx, userId: string): Promise<Role | undefined> {
+    const [row] = await tx
+      .select({ role: memberships.role })
+      .from(memberships)
+      .where(and(eq(memberships.userId, userId), eq(memberships.status, 'active')))
+      .limit(1);
+    return row?.role;
+  }
+
+  /** id → name for users (timeline snapshots). */
+  async userNames(tx: Tx, ids: readonly string[]): Promise<Map<string, string>> {
+    if (ids.length === 0) return new Map();
+    const rows = await tx
+      .select({ id: users.id, name: users.name })
+      .from(users)
+      .where(inArray(users.id, [...ids]));
+    return new Map(rows.map((r) => [r.id, r.name]));
   }
 
   async isActiveMember(tx: Tx, userId: string): Promise<boolean> {

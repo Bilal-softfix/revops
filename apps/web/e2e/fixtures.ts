@@ -36,6 +36,7 @@ export const FIXTURES = {
   switchFirst: fixture(6, 'switch-first', 'First Realty', 'generic', 'First Owner'),
   switchSecond: fixture(7, 'switch-second', 'Second Clinic', 'generic', 'Second Owner'),
   leads: fixture(8, 'leads', 'Lead Desk', 'repair-shop', 'Desk Owner'),
+  activities: fixture(9, 'activities', 'Task Desk', 'repair-shop', 'Task Owner'),
 } as const satisfies Record<string, Fixture>;
 
 /** The seed input for every fixture: one workspace each, its owner as the only member. */

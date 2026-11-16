@@ -1,6 +1,7 @@
 // Browser-safe contracts shared by web + api (Zod schemas, DTOs, events, enums).
 // Node-only helpers live in subpath exports such as `@revops/shared/env`.
 export * from './auth/schemas.js';
+export * from './crm/activities.js';
 export * from './crm/contacts.js';
 export * from './crm/custom-fields.js';
 export * from './crm/enums.js';

@@ -2,7 +2,7 @@
 
 ## Current
 Milestone: M1 — CRM Core (starting). Branch: `milestone/m1-crm-core` (from main after M0 merged, tag `m0-done`).
-M1-T0 (M0 follow-ups) done 2026-11-12. M1 plan approved 2026-11-12 (order: T3a → T1 → T2 → T3b → T4 → T5 → T6 → T7, sequential). Draft PR #2 open. Done: T3a, T1, T2, T3b, T4 (2026-11-16). Next: M1-T5 Notes, tasks, timeline.
+M1-T0 (M0 follow-ups) done 2026-11-12. M1 plan approved 2026-11-12 (order: T3a → T1 → T2 → T3b → T4 → T5 → T6 → T7, sequential). Draft PR #2 open. Done: T3a, T1, T2, T3b, T4, T5 (2026-11-16). Next: M1-T6 Audit + bulk actions + CSV export.
 
 M0 history:
 Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-11-05; M0-T5 done 2026-11-11. 2026-11-11: switched to local-first (ADR-011 no Redis/pg-boss, ADR-012 native Postgres). M0-T6, M0-T7 done 2026-11-11. M0 milestone review done 2026-11-12: blockers fixed, PR ready for review. Next: Dev merges PR #1 → start M1 (`/start-milestone M1`). PR #1 merged 2026-11-12 (tag `m0-done`).
@@ -98,15 +98,43 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
     lead dialog with new/existing contact), lead page (stage, lost-reason dialog, pipeline
     move, owner, details form). Tests: API `leads.int.test.ts` (18), shared + web unit,
     Playwright `leads.spec.ts` (drag-and-drop, lost reason, saved view).
+- [x] M1-T5 Notes, tasks, timeline (2026-11-16):
+  - Migrations 0025/0026: `notes`, `tasks`, `timeline_events` (append-only, `seq` identity
+    for write order) + RLS + leak fixtures. Shared contracts `crm/activities.ts` (+ `dayBounds`).
+  - API: `GET /v1/leads/:id/timeline`, `POST /v1/leads/:id/notes`, `PATCH|DELETE /v1/notes/:id`,
+    `GET|POST /v1/leads/:id/tasks`, `PATCH|DELETE /v1/tasks/:id`, `GET /v1/tasks?bucket=`,
+    `GET /v1/tasks/counts`. Timeline written for create, assignment, stage change, note, task
+    completed/reopened, and (Dev AC) one entry per lead moved by a stage delete (no per-lead event,
+    single audit row).
+  - **AC:** timeline ordered (newest first, ties in write order), cursor-paginated, actor
+    user/ai/system — `activities.int.test.ts` (11).
+  - Web: lead page = timeline with note composer (edit/delete) + side panel (stage/owner, tasks,
+    details); "My tasks" page (`/tasks`, overdue/today/upcoming tabs with counts). Playwright
+    `activities.spec.ts`; new e2e fixture workspace `activities`.
 
 ## In progress
-- [ ] M1-T5 Notes, tasks, timeline (My tasks)
 - [ ] M1-T6 Audit + bulk actions + CSV export
 - [ ] M1-T7 Seed (4 demo tenants incl. Demo Software Agency + Demo Repair Shop), 10k-lead volume check, Playwright
 
 ## Assumptions made
 _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - 2026-11-16 · M1-T2 decisions 1 (options relabel/add only) and 2 (later-added required fields don't block older records) **approved by Dev**. Decision 3 **replaced** by pipeline scoping of lead fields (done in M1-T3b).
+- 2026-11-16 · M1-T5 assumptions (**Review**):
+  - Tasks need a due date (no undated tasks); default in the UI is tomorrow 10:00 IST.
+  - Task assignee: the caller by default; anyone else needs `lead.assign` and must be able to
+    see the lead (owner/admin/manager, or the agent who owns it). Agents only assign themselves.
+  - "My tasks" shows open tasks assigned to me on leads I can still see: a task on a lead later
+    reassigned away from an agent drops off their list (it stays on the lead).
+  - Buckets: overdue = due before now (so 10:00 today is overdue at 15:00); today = due later
+    today; upcoming = after today. Day = Asia/Kolkata (no tenant timezone yet).
+  - Notes: only the author edits; the author or a manager/admin/owner (`lead.delete`) deletes.
+    A deleted note disappears from the timeline. Note bodies are not copied into audit rows.
+  - Timeline entries for tasks: completion **and** reopening (reopen added for consistency);
+    task creation/deletion is audited but not on the timeline (AC lists completion only).
+  - Any member who can see a lead can complete / edit / delete its tasks.
+  - No new outbox events for notes/tasks (M5 automation adds them when it needs them).
+  - Timeline text is rendered by the web from stored name snapshots (`data`), not stored
+    English `summary`, so it can be translated later; `summary` is for AI/system entries.
 - 2026-11-16 · M1-T4 reviewed by Dev. Review decisions 1, 2, 4 **approved**; shared team saved views and member search in the owner picker go to the Backlog. **Decision 3 changed (Dev, security):** in `assigned` mode an agent's new lead whose phone/email matches a contact they can't see is **not** linked: same 409 `contact_exists` as contact create (field + "handled by <name>", no contact details), nothing created. Agents still link to contacts they can see; owners/admins/managers and `all` mode link as before. Lead edits can't change contact data (PATCH /contacts/:id already answers with the same 409, now pinned by a test). Tests: `leads.int.test.ts` "matching an existing contact on create" (both modes, phone + email, response contains no id/name/phone/email of the hidden contact, lead/contact counts unchanged). The new-lead dialog shows the "handled by" message.
 - 2026-11-16 · Flaky `@revops/scripts` unit test fixed: `db-urls.test.ts` "Neon: URLs pass the env schemas…" did a cold `await import('@revops/shared/env')` (zod + all env schemas) inside the test body, so the module load counted against vitest's 5 s timeout; under `pnpm test` (all packages in parallel) it took 5.2 s. Imports are now static (loaded at collection, not timed); 4/4 full `pnpm test` runs green. No other test file imports dynamically inside a test.
 - 2026-11-16 · M1-T4 assumptions (reviewed; 3 superseded above):

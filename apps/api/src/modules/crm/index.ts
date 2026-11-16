@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
 import { IdentityModule } from '../identity';
 import { TenancyModule } from '../tenancy';
+import { ActivitiesController } from './activities.controller';
+import { ActivitiesRepository } from './activities.repository';
+import { ActivitiesService } from './activities.service';
 import { ContactsController } from './contacts.controller';
 import { ContactsRepository } from './contacts.repository';
 import { ContactsService } from './contacts.service';
@@ -29,6 +32,7 @@ export { type CrmAuth, CrmService } from './crm.service';
     ContactsController,
     CustomFieldsController,
     LeadsController,
+    ActivitiesController,
   ],
   providers: [
     CrmRepository,
@@ -43,6 +47,8 @@ export { type CrmAuth, CrmService } from './crm.service';
     LeadsService,
     LeadViewsRepository,
     LeadViewsService,
+    ActivitiesRepository,
+    ActivitiesService,
   ],
   exports: [CrmService],
 })

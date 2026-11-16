@@ -27,6 +27,7 @@ import { ContactsRepository } from './contacts.repository';
 import { ContactsService } from './contacts.service';
 import { type CrmAuth, CrmService } from './crm.service';
 import { CustomFieldsService } from './custom-fields.service';
+import { ActivitiesRepository, type TimelineEntry } from './activities.repository';
 import { crmNotFound } from './errors';
 import {
   type LeadRecord,
@@ -87,6 +88,7 @@ export class LeadsService {
     private readonly contacts: ContactsService,
     private readonly contactsRepository: ContactsRepository,
     private readonly repository: LeadsRepository,
+    private readonly activities: ActivitiesRepository,
     private readonly clock: Clock,
   ) {}
 
@@ -264,6 +266,12 @@ export class LeadsService {
         createdBy: auth.userId,
         ...outcome(stage.category, now, input.lostReason),
       });
+      const names = await this.repository.userNames(tx, ownerUserId ? [ownerUserId] : []);
+      await this.timeline(tx, auth, row, 'created', now, {
+        pipeline: { id: pipeline.id, name: pipeline.name },
+        stage: { id: stage.id, name: stage.name },
+        owner: ownerUserId ? { id: ownerUserId, name: names.get(ownerUserId) ?? '' } : null,
+      });
       await this.audit(tx, auth, meta, 'lead.created', row.id, {
         fields: Object.keys(input).sort(),
         pipelineId: pipeline.id,
@@ -384,6 +392,27 @@ export class LeadsService {
           },
           { pipelineId: current.pipelineId, stageId: current.stageId, status: current.status },
         );
+        const fromStages = await this.repository.stagesOf(tx, current.pipelineId);
+        await this.timeline(tx, auth, current, 'stage_changed', now, {
+          fromStage: {
+            id: current.stageId,
+            name: fromStages.find((s) => s.id === current.stageId)?.name ?? '',
+          },
+          stage: { id: stage.id, name: stage.name },
+          ...(pipelineId !== current.pipelineId
+            ? {
+                fromPipeline: {
+                  id: current.pipelineId,
+                  name: await this.repository.pipelineName(tx, current.pipelineId),
+                },
+                pipeline: {
+                  id: pipelineId,
+                  name: await this.repository.pipelineName(tx, pipelineId),
+                },
+              }
+            : {}),
+          ...(next.lostReason ? { lostReason: next.lostReason } : {}),
+        });
         await recordEvent(tx, LEAD_STAGE_CHANGED, {
           tenantId: auth.tenantId,
           aggregateId: id,
@@ -519,6 +548,15 @@ export class LeadsService {
     to: string | null | undefined,
   ): Promise<void> {
     const toUserId = to ?? null;
+    const names = await this.repository.userNames(
+      tx,
+      [current.ownerUserId, toUserId].filter((x): x is string => x !== null),
+    );
+    const userRef = (id: string | null) => (id ? { id, name: names.get(id) ?? '' } : null);
+    await this.timeline(tx, auth, current, 'assignment', this.clock.now(), {
+      fromOwner: userRef(current.ownerUserId),
+      owner: userRef(toUserId),
+    });
     await this.audit(
       tx,
       auth,
@@ -539,6 +577,29 @@ export class LeadsService {
         actorUserId: auth.userId,
       },
     });
+  }
+
+  /** A timeline entry by the calling user (M1-T5), in the caller's transaction. */
+  private timeline(
+    tx: Tx,
+    auth: CrmAuth,
+    lead: { id: string; contactId: string },
+    type: TimelineEntry['type'],
+    occurredAt: Date,
+    data: Record<string, unknown>,
+  ): Promise<void> {
+    return this.activities.insertTimeline(tx, [
+      {
+        tenantId: auth.tenantId,
+        leadId: lead.id,
+        contactId: lead.contactId,
+        type,
+        actorType: 'user',
+        actorId: auth.userId,
+        data,
+        occurredAt,
+      },
+    ]);
   }
 
   private audit(

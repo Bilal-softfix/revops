@@ -7,9 +7,9 @@ const labels = (role: Parameters<typeof navFor>[0]) =>
   navFor(role).flatMap((section) => section.items.map((item) => item.label));
 
 describe('role-based navigation', () => {
-  it('every role sees Dashboard, Leads, Contacts and Team; owners/admins also the CRM setup pages', () => {
+  it('every role sees Dashboard, Leads, Contacts, My tasks and Team; owners/admins also the CRM setup pages', () => {
     for (const role of ROLES) {
-      const expected = ['Dashboard', 'Leads', 'Contacts', 'Team'];
+      const expected = ['Dashboard', 'Leads', 'Contacts', 'My tasks', 'Team'];
       if (role === 'owner' || role === 'admin') {
         expected.push('Custom fields', 'Pipelines', 'CRM settings');
       }

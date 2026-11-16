@@ -17,6 +17,7 @@ import { recordAudit } from '../../platform/outbox/record';
 import type { RequestMeta } from '../../platform/request-meta';
 import { type CrmAuth, CrmService } from './crm.service';
 import { CrmRepository } from './crm.repository';
+import { ActivitiesRepository } from './activities.repository';
 import { crmNotFound } from './errors';
 import { PipelinesRepository } from './pipelines.repository';
 
@@ -44,6 +45,7 @@ export class PipelinesService {
     private readonly crm: CrmService,
     private readonly read: CrmRepository,
     private readonly repository: PipelinesRepository,
+    private readonly activities: ActivitiesRepository,
     private readonly clock: Clock,
   ) {}
 
@@ -255,9 +257,31 @@ export class PipelinesService {
       }
       // Soft-deleted leads still reference the stage: they go to the target (or any stage left).
       const destination = moveTo ?? targets[0]?.id ?? stages.find((s) => s.id !== stageId)?.id;
-      const moved = destination
-        ? await this.repository.moveLeads(tx, stageId, destination, this.clock.now())
-        : 0;
+      const now = this.clock.now();
+      const movedLeads = destination
+        ? await this.repository.moveLeads(tx, stageId, destination, now)
+        : [];
+      const moved = movedLeads.length;
+      // Dev decision (M1-T3b #4): one timeline entry per moved lead; no per-lead
+      // lead.stage_changed.v1, and the single audit row below.
+      const to = stages.find((s) => s.id === destination);
+      await this.activities.insertTimeline(
+        tx,
+        movedLeads.map((lead) => ({
+          tenantId: auth.tenantId,
+          leadId: lead.id,
+          contactId: lead.contactId,
+          type: 'stage_changed' as const,
+          actorType: 'user' as const,
+          actorId: auth.userId,
+          data: {
+            fromStage: { id: stage.id, name: stage.name },
+            stage: { id: destination ?? '', name: to?.name ?? '' },
+            reason: 'stage_deleted',
+          },
+          occurredAt: now,
+        })),
+      );
       await this.repository.deleteStage(tx, stageId);
       await this.repository.setStagePositions(
         tx,

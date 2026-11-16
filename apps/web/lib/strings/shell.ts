@@ -7,6 +7,7 @@ export const shellStrings = {
     dashboard: 'Dashboard',
     leads: 'Leads',
     contacts: 'Contacts',
+    tasks: 'My tasks',
     team: 'Team',
     customFields: 'Custom fields',
     pipelines: 'Pipelines',
