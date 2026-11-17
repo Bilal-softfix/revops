@@ -11,12 +11,14 @@ import {
   seedEnvSchema,
 } from '@revops/shared/env';
 import { createDb } from '../client.js';
+import { assertSeedableDatabase } from '../reset.js';
 import { DEMO_TENANTS, seedDemo } from '../seed.js';
 
 async function main(): Promise<void> {
   loadEnvFiles([join(findRepoRoot(), '.env')]);
   const env = parseEnv(commonEnvSchema.extend(databaseEnvSchema.shape).extend(seedEnvSchema.shape));
-  if (env.NODE_ENV === 'production') throw new Error('refusing to seed with NODE_ENV=production');
+  // Same guard as db:reset:dev (_dev), plus _test databases.
+  assertSeedableDatabase({ url: env.DATABASE_URL, nodeEnv: env.NODE_ENV });
 
   const handle = createDb(env.DATABASE_URL, { max: 1 });
   try {

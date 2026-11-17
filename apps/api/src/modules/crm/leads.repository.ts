@@ -318,17 +318,26 @@ export class LeadsRepository {
 
   // ---- lookups the service validates against (all RLS-scoped to the tenant) ----
 
+  /**
+   * An active pipeline (by id, else the default). `lock: true` takes FOR SHARE on its row before
+   * a lead is written into it: pipeline and stage deletes hold FOR UPDATE on that row, so either
+   * the delete waits for the write (and then sees the lead), or the write waits and then finds
+   * the pipeline gone (deleted_at is re-checked after the wait). Lead writes take this lock
+   * BEFORE locking lead rows — the order the deletes use — so the two can't deadlock.
+   */
   async activePipeline(
     tx: Tx,
     id: string | undefined,
+    options: { lock?: boolean } = {},
   ): Promise<{ id: string; name: string } | undefined> {
-    const [row] = await tx
+    const query = tx
       .select({ id: pipelines.id, name: pipelines.name })
       .from(pipelines)
       .where(
         and(isNull(pipelines.deletedAt), id ? eq(pipelines.id, id) : eq(pipelines.isDefault, true)),
       )
       .limit(1);
+    const [row] = options.lock ? await query.for('share') : await query;
     return row;
   }
 

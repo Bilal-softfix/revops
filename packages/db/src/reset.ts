@@ -35,6 +35,25 @@ export function assertResettableDevDatabase(input: {
 }
 
 /**
+ * `pnpm db:seed` refuses anything that isn't plainly a local dev or test database (same rule as
+ * the reset guard, but test databases are allowed too): the name must end in `_dev` or `_test`,
+ * and NODE_ENV must not be production.
+ */
+export function assertSeedableDatabase(input: {
+  url: string;
+  nodeEnv: string | undefined;
+}): string {
+  if (input.nodeEnv === 'production') {
+    throw new Error('refusing to seed with NODE_ENV=production');
+  }
+  const name = databaseName(input.url);
+  if (!/_(dev|test)$/.test(name)) {
+    throw new Error(`refusing to seed "${name}": only databases whose name ends in _dev or _test`);
+  }
+  return name;
+}
+
+/**
  * Drops every object the migrations created, as the owner: the `pgboss` and `drizzle` (migration
  * journal) schemas, and all tables, enum types and functions in `public` — except objects that
  * belong to extensions (citext, pg_trgm, vector), which stay installed, so no superuser is needed.

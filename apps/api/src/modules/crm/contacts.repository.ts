@@ -134,12 +134,32 @@ export class ContactsRepository {
       .limit(page.limit);
   }
 
-  async findVisible(tx: Tx, scope: ContactScope, id: string): Promise<ContactRow | undefined> {
-    const [row] = await tx
+  /**
+   * A live contact the scope may see. `lock`: 'share' when a lead is about to reference it (so a
+   * concurrent delete waits and then counts that lead), 'update' for the delete itself. The
+   * deleted_at filter is re-checked after the wait, so a just-deleted contact is not returned.
+   */
+  async findVisible(
+    tx: Tx,
+    scope: ContactScope,
+    id: string,
+    options: { lock?: 'share' | 'update' } = {},
+  ): Promise<ContactRow | undefined> {
+    const query = tx
       .select()
       .from(contacts)
       .where(and(eq(contacts.id, id), isNull(contacts.deletedAt), this.visible(scope)));
+    const [row] = options.lock ? await query.for(options.lock, { of: contacts }) : await query;
     return row;
+  }
+
+  /** Live (not soft-deleted) leads of a contact, whoever owns them. */
+  async liveLeadCount(tx: Tx, contactId: string): Promise<number> {
+    const [row] = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(leads)
+      .where(and(eq(leads.contactId, contactId), isNull(leads.deletedAt)));
+    return row?.n ?? 0;
   }
 
   /**

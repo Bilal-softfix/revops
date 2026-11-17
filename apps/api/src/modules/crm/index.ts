@@ -9,6 +9,7 @@ import { ContactsRepository } from './contacts.repository';
 import { ContactsService } from './contacts.service';
 import { CrmController } from './crm.controller';
 import { CrmRepository } from './crm.repository';
+import { CrmRateLimits } from './crm-rate-limits';
 import { CrmService } from './crm.service';
 import { CustomFieldsController } from './custom-fields.controller';
 import { CustomFieldsRepository } from './custom-fields.repository';
@@ -38,6 +39,7 @@ export { type CrmAuth, CrmService } from './crm.service';
     ActivitiesController,
   ],
   providers: [
+    CrmRateLimits,
     CrmRepository,
     CrmService,
     ContactsRepository,

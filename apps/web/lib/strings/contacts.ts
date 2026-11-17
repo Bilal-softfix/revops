@@ -17,7 +17,8 @@ export const contactStrings = {
   created: (name: string) => `${name} added`,
   delete: 'Delete contact',
   deleteConfirmTitle: (name: string) => `Delete ${name}?`,
-  deleteConfirmBody: 'The contact is hidden from everyone. Its history is kept.',
+  deleteConfirmBody:
+    'The contact is hidden from everyone. Its history is kept. A contact that still has leads can’t be deleted — delete or move its leads first.',
   deleted: (name: string) => `${name} deleted`,
   back: 'All contacts',
   columns: {

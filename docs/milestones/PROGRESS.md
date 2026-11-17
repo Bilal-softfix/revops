@@ -1,7 +1,10 @@
 # PROGRESS
 
 ## Current
-Milestone: M1 — CRM Core (starting). Branch: `milestone/m1-crm-core` (from main after M0 merged, tag `m0-done`).
+Milestone: M2 — Lead Capture & Dedupe. Branch: `milestone/m2-lead-capture`, cut 2026-11-17 from the tip of `milestone/m1-crm-core` (44b37dc): PR #2 was still open and tag `m1-done` points at the M0 merge (5f428c5); `gh pr merge` was denied by permissions. **Dev to do:** merge PR #2, move `m1-done` to the merge commit. M2-T0 done 2026-11-17. Next: `/start-milestone M2` plan.
+
+M1 history:
+Milestone: M1 — CRM Core. Branch: `milestone/m1-crm-core` (from main after M0 merged, tag `m0-done`).
 M1-T0 (M0 follow-ups) done 2026-11-12. M1 plan approved 2026-11-12 (order: T3a → T1 → T2 → T3b → T4 → T5 → T6 → T7, sequential). Draft PR #2 open. Done: T3a, T1, T2, T3b, T4, T5 (2026-11-16), T6 (2026-11-17, Dev-reviewed + allowAgentExport change), T7 (2026-11-17, approved incl. assumptions). Milestone review done 2026-11-17: no blockers (1 privacy fix), suite green, PR #2 marked ready. Next: Dev decides contact-delete behaviour (Tech debt), reviews/merges PR #2 → `/start-milestone M2`.
 
 M0 history:
@@ -148,11 +151,19 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
     global-setup + ANALYZE): list paging, "100 selected on this page", board column counts + load more.
   - `seed.int.test.ts` +3 (four tenants, demo data validity, top-up/isolation).
 
+- [x] M2-T0 Pre-M2 hardening (2026-11-17):
+  - Rate limits (`CrmRateLimits`, Postgres limiter, per user per tenant): contact + lead create 300/h (shared), bulk assign + bulk stage 60/h (shared), export 30/h (after the permission check). 429 + `Retry-After`.
+  - `db:seed` refuses unless the database name ends in `_dev` or `_test` (and NODE_ENV ≠ production): `assertSeedableDatabase` next to the reset guard.
+  - Pipeline-delete race: lead create / stage change / bulk stage lock the target pipeline `FOR SHARE` before any lead row (pipeline → leads, the deletes' order: no deadlock). New 409 `lead_moved` for a lead moved between read and lock.
+  - Contact delete with live leads → 409 `contact_has_leads` (`leadCount`, "delete them or move them to another contact first"); contact `FOR UPDATE` vs `FOR SHARE` in lead create; 409 `contact_gone` on the duplicate-link path.
+  - Tests: `crm-guards.int.test.ts` (9: lock-wait races driven from an owner transaction, a churn test for deadlocks, rate-limit buckets incl. window reset), `reset.test.ts` seed guard (6).
+
 ## In progress
-_(none — M1 reviewed; awaiting merge of PR #2)_
+_(none)_
 
 ## Assumptions made
 _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
+- 2026-11-17 · M2-T0 (**Review**): rate-limit ceilings (300 creates, 60 bulk, 30 exports per user per hour) are my sizing for "normal team use"; refused requests (409 duplicates) count toward the create bucket, so the duplicate-check oracle is bounded too. A 403 export doesn't count.
 - 2026-11-17 · M1-T7 assumptions (**Review**):
   - "4 demo tenants" = the existing Realty + Clinic plus Software Agency + Repair Shop; 60 leads
     each; the 10k volume set is opt-in (`--volume`, Demo Realty only), not part of every seed.
@@ -390,8 +401,8 @@ _(non-blocking review findings)_
 - Turbo `envMode: loose` + `test` uncached: simple and correct for now; tighten env declarations if CI time matters.
 
 _M1 milestone review (2026-11-17): code-reviewer + security-auditor (sonnet) on `main...milestone/m1-crm-core`. No blocking findings. Fixed in the review commit: the `lead.exported` audit row stored the raw search text `q` (often a phone/email) → now `[redacted]` (test in `leads-export.int.test.ts`). Non-blocking:_
-- **Contact soft-delete leaves its leads live (Dev decision needed).** Leads keep listing the deleted contact's name/phone, and the freed phone can be reused by a new contact. Options: refuse with 409 `contact_has_leads`, or soft-delete/detach the leads in the same tx. (`contacts.service.ts` `remove`, `leads.repository.ts` `baseQuery`.)
-- **Pipeline delete race.** `pipelines.service.ts` `remove` locks only the pipeline row; lead create / `changeStage` / bulk move read the pipeline without a lock, so a concurrent move can land a lead in a just-soft-deleted pipeline. Fix: `FOR SHARE` on the pipeline row in `activePipeline`/`activeStage`.
+- ~~**Contact soft-delete leaves its leads live**~~ **Fixed M2-T0 (Dev: 409 `contact_has_leads`; DPDP erasure in M8).** Leads keep listing the deleted contact's name/phone, and the freed phone can be reused by a new contact. Options: refuse with 409 `contact_has_leads`, or soft-delete/detach the leads in the same tx. (`contacts.service.ts` `remove`, `leads.repository.ts` `baseQuery`.)
+- ~~**Pipeline delete race.**~~ **Fixed M2-T0** (target pipeline `FOR SHARE` before lead locks). `pipelines.service.ts` `remove` locks only the pipeline row; lead create / `changeStage` / bulk move read the pipeline without a lock, so a concurrent move can land a lead in a just-soft-deleted pipeline. Fix: `FOR SHARE` on the pipeline row in `activePipeline`/`activeStage`.
 - **Events gaps for M5/M6 consumers.** Stage-delete moves emit no per-lead `lead.stage_changed.v1` (Dev decision M1-T5 AC; consumers must handle `pipeline_stage.deleted`); lead delete writes audit only — no timeline entry or `lead.deleted.v1`.
 - **Bulk actions are N+1 inside the tx.** `recordAssignments`/`applyStageMoves` insert audit + outbox one row at a time (≈1,000 round trips for 500 leads while holding locks). Batch into multi-row inserts.
 - **Visibility rule duplicated** in `activities.repository.ts` (`leadVisible`) and `leads.repository.ts` (`visible`). Share one helper so notes/tasks/timeline can't drift from the lead list.
@@ -399,8 +410,8 @@ _M1 milestone review (2026-11-17): code-reviewer + security-auditor (sonnet) on 
 - `Number(lead.valuePaise)` in the API response: safe under the Zod MAX_SAFE_INTEGER cap, but an import path writing > 2^53 would corrupt silently. Assert or serialise as string.
 - Indexes: `leads_tenant_owner_idx` lacks `created_at desc, id desc` (agent list sorts); `board()` runs one query per stage sequentially. Fine at 10k.
 - Contact-create retry on concurrent duplicate phone (`LeadsService.create`) has no concurrency test.
-- Security LOW: no rate limit on authenticated create/bulk/export endpoints (duplicate-check is a phone/email existence oracle; the agent 409 also returns `ownerName` by Dev decision). Add `rate_limit_buckets` per-user buckets before M2 public capture.
+- ~~Security LOW: no rate limit on authenticated create/bulk/export endpoints~~ **Fixed M2-T0** (duplicate-check is a phone/email existence oracle; the agent 409 also returns `ownerName` by Dev decision). Add `rate_limit_buckets` per-user buckets before M2 public capture.
 - Security LOW: no cap on custom field definitions per tenant/entity (CSV width, jsonb size). Add e.g. ≤100 active defs per entity.
-- Security LOW: `bin/seed.ts` refuses only on `NODE_ENV=production`; add the `_dev`/`_test` + localhost guard used by `reset-dev`.
+- ~~Security LOW: `bin/seed.ts` refuses only on `NODE_ENV=production`~~ **Fixed M2-T0**; add the `_dev`/`_test` + localhost guard used by `reset-dev`.
 - `contacts` create/update and `changeLeadStageRequestSchema` use `z.object` (strips unknown keys) where others are strict; switch to `strictObject` for consistency.
 - Local tooling: the Bash/system PATH resolves Node 24 (`C:\Program Files\nodejs`); run `fnm use 22` first or every pnpm command fails on `engine-strict`.

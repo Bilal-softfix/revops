@@ -29,9 +29,10 @@ import type { RequestMeta } from '../../platform/request-meta';
 import { ContactsRepository } from './contacts.repository';
 import { ContactsService } from './contacts.service';
 import { type CrmAuth, CrmService } from './crm.service';
+import { CrmRateLimits } from './crm-rate-limits';
 import { CustomFieldsService } from './custom-fields.service';
 import { ActivitiesRepository, type TimelineEntry } from './activities.repository';
-import { crmNotFound } from './errors';
+import { contactGone, crmNotFound, leadMoved } from './errors';
 import {
   type LeadRecord,
   type LeadRow,
@@ -124,6 +125,7 @@ export class LeadsService {
     private readonly repository: LeadsRepository,
     private readonly activities: ActivitiesRepository,
     private readonly clock: Clock,
+    private readonly limits: CrmRateLimits,
   ) {}
 
   scope(auth: CrmAuth): LeadScope {
@@ -251,6 +253,7 @@ export class LeadsService {
   }
 
   async create(auth: CrmAuth, input: CreateLeadRequest, meta: RequestMeta): Promise<Lead> {
+    await this.limits.consume(auth, 'create');
     try {
       return await this.createOnce(auth, input, meta);
     } catch (error) {
@@ -262,7 +265,7 @@ export class LeadsService {
 
   private createOnce(auth: CrmAuth, input: CreateLeadRequest, meta: RequestMeta): Promise<Lead> {
     return this.crm.withCrm(auth, async (tx) => {
-      const pipeline = await this.repository.activePipeline(tx, input.pipelineId);
+      const pipeline = await this.repository.activePipeline(tx, input.pipelineId, { lock: true });
       if (!pipeline) {
         throw input.pipelineId
           ? invalid([{ path: 'pipelineId', message: 'unknown pipeline' }])
@@ -391,14 +394,16 @@ export class LeadsService {
   ): Promise<Lead> {
     return mapStageGone(
       this.crm.withCrm(auth, async (tx) => {
+        const peek = await this.repository.findVisible(tx, this.scope(auth), id);
+        if (!peek) throw crmNotFound();
+        const pipelineId = input.pipelineId ?? peek.lead.pipelineId;
+        // Target pipeline first (FOR SHARE), then the lead: see activePipeline.
+        if (!(await this.repository.activePipeline(tx, pipelineId, { lock: true }))) {
+          throw invalid([{ path: 'pipelineId', message: 'unknown pipeline' }]);
+        }
         const current = await this.repository.lockVisible(tx, this.scope(auth), id);
         if (!current) throw crmNotFound();
-        const pipelineId = input.pipelineId ?? current.pipelineId;
-        if (pipelineId !== current.pipelineId) {
-          if (!(await this.repository.activePipeline(tx, pipelineId))) {
-            throw invalid([{ path: 'pipelineId', message: 'unknown pipeline' }]);
-          }
-        }
+        if (!input.pipelineId && current.pipelineId !== pipelineId) throw leadMoved();
         const stage = (await this.repository.stagesOf(tx, pipelineId)).find(
           (s) => s.id === input.stageId,
         );
@@ -421,27 +426,31 @@ export class LeadsService {
    * Bulk stage move (M1-T6): the single-move rules per lead, all-or-nothing for the leads found.
    * Without `pipelineId` every selected lead must already be in the stage's pipeline.
    */
-  bulkChangeStage(
+  async bulkChangeStage(
     auth: CrmAuth,
     input: BulkChangeLeadStageRequest,
     meta: RequestMeta,
   ): Promise<BulkLeadResult> {
+    await this.limits.consume(auth, 'bulk');
     return mapStageGone(
       this.crm.withCrm(auth, async (tx) => {
-        let stage: StageRow | undefined;
-        if (input.pipelineId) {
-          if (!(await this.repository.activePipeline(tx, input.pipelineId))) {
-            throw invalid([{ path: 'pipelineId', message: 'unknown pipeline' }]);
-          }
-          stage = (await this.repository.stagesOf(tx, input.pipelineId)).find(
-            (s) => s.id === input.stageId,
-          );
-          if (!stage) {
-            throw invalid([{ path: 'stageId', message: 'not a stage of this pipeline' }]);
-          }
-        } else {
-          stage = await this.repository.activeStage(tx, input.stageId);
-          if (!stage) throw invalid([{ path: 'stageId', message: 'unknown stage' }]);
+        // Target pipeline first (FOR SHARE), then the leads: see activePipeline.
+        const targetPipelineId =
+          input.pipelineId ?? (await this.repository.activeStage(tx, input.stageId))?.pipelineId;
+        if (!targetPipelineId) throw invalid([{ path: 'stageId', message: 'unknown stage' }]);
+        if (!(await this.repository.activePipeline(tx, targetPipelineId, { lock: true }))) {
+          throw input.pipelineId
+            ? invalid([{ path: 'pipelineId', message: 'unknown pipeline' }])
+            : invalid([{ path: 'stageId', message: 'unknown stage' }]);
+        }
+        // Re-read under the lock: the stage may have been deleted while we waited.
+        const stage = (await this.repository.stagesOf(tx, targetPipelineId)).find(
+          (s) => s.id === input.stageId,
+        );
+        if (!stage) {
+          throw input.pipelineId
+            ? invalid([{ path: 'stageId', message: 'not a stage of this pipeline' }])
+            : invalid([{ path: 'stageId', message: 'unknown stage' }]);
         }
         const target = stage;
         const pipelineId = target.pipelineId;
@@ -482,6 +491,7 @@ export class LeadsService {
     meta: RequestMeta,
   ): Promise<BulkLeadResult> {
     if (!hasPermission(auth.role, 'lead.assign')) throw forbidden('You can’t assign leads');
+    await this.limits.consume(auth, 'bulk');
     return this.crm.withCrm(auth, async (tx) => {
       const ownerUserId = await this.resolveOwner(tx, auth, input.ownerUserId);
       const found = await this.repository.lockVisibleMany(tx, this.scope(auth), input.leadIds);
@@ -555,6 +565,7 @@ export class LeadsService {
         tx,
         await this.contacts.scope(tx, auth),
         input.contactId,
+        { lock: 'share' }, // a concurrent contact delete waits, then sees this lead (409)
       );
       if (!visible) throw invalid([{ path: 'contactId', message: 'unknown contact' }]);
       return visible.id;
@@ -567,9 +578,13 @@ export class LeadsService {
     });
     if (duplicate) {
       const scope = await this.contacts.scope(tx, auth);
-      if (scope.all || (await this.contactsRepository.findVisible(tx, scope, duplicate.row.id))) {
+      // Lock as for an explicit contactId; if it was deleted meanwhile, ask the client to retry.
+      if (
+        await this.contactsRepository.findVisible(tx, scope, duplicate.row.id, { lock: 'share' })
+      ) {
         return duplicate.row.id;
       }
+      if (scope.all) throw contactGone();
       throw await this.contacts.conflict(tx, auth, duplicate.row, duplicate.field);
     }
     const row = await this.contactsRepository.insert(tx, {

@@ -15,11 +15,12 @@ import { Clock } from '../../platform/clock';
 import { DomainError } from '../../platform/errors/domain-error';
 import { recordAudit, recordEvent } from '../../platform/outbox/record';
 import type { RequestMeta } from '../../platform/request-meta';
+import { CrmRateLimits } from './crm-rate-limits';
 import { CrmService } from './crm.service';
 import { CustomFieldsService } from './custom-fields.service';
 import type { CrmAuth } from './crm.service';
 import { type ContactScope, ContactsRepository, toContact } from './contacts.repository';
-import { contactExists, crmNotFound } from './errors';
+import { contactExists, contactHasLeads, crmNotFound } from './errors';
 
 type ContactRow = Awaited<ReturnType<ContactsRepository['insert']>>;
 
@@ -41,6 +42,7 @@ export class ContactsService {
     private readonly fields: CustomFieldsService,
     private readonly repository: ContactsRepository,
     private readonly clock: Clock,
+    private readonly limits: CrmRateLimits,
   ) {}
 
   /** Tenant transaction with the CRM setup in place (field definitions, settings). */
@@ -86,6 +88,7 @@ export class ContactsService {
   }
 
   async create(auth: CrmAuth, input: CreateContactRequest, meta: RequestMeta): Promise<Contact> {
+    await this.limits.consume(auth, 'create');
     const email = input.email ?? null;
     const phoneE164 = input.phone ?? null;
     return this.mapDuplicate(auth, { phoneE164, email }, undefined, () =>
@@ -183,8 +186,15 @@ export class ContactsService {
 
   async remove(auth: CrmAuth, id: string, meta: RequestMeta): Promise<void> {
     await this.inTenant(auth, async (tx) => {
-      const current = await this.repository.findVisible(tx, await this.scope(tx, auth), id);
+      // FOR UPDATE: a lead create linking this contact holds FOR SHARE on it, so the count below
+      // sees that lead (or the create waits and then finds the contact gone).
+      const current = await this.repository.findVisible(tx, await this.scope(tx, auth), id, {
+        lock: 'update',
+      });
       if (!current) throw crmNotFound();
+      // Dev decision (M2-T0): no orphaned leads. Full erasure (DPDP) is a dedicated M8 flow.
+      const leadCount = await this.repository.liveLeadCount(tx, id);
+      if (leadCount > 0) throw contactHasLeads(leadCount);
       await this.repository.softDelete(tx, id, this.clock.now());
       await recordAudit(tx, {
         tenantId: auth.tenantId,
