@@ -1,8 +1,14 @@
 'use client';
 
-import { LEAD_SOURCE_TYPES, type LeadSource, type LeadSourceType } from '@revops/shared';
+import {
+  type AssignmentConfig,
+  LEAD_SOURCE_TYPES,
+  type LeadSource,
+  type LeadSourceType,
+} from '@revops/shared';
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { SimpleSelect } from '@/components/form/simple-select';
 import { FormError, TextField } from '@/components/form/text-field';
 import { EmptyState, ErrorState, LoadingState } from '@/components/states/states';
 import { Badge } from '@/components/ui/badge';
@@ -24,6 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useMembers } from '@/features/team/queries';
 import { errorMessage } from '@/lib/api/messages';
 import { common } from '@/lib/strings/common';
 import { leadSourceStrings as s } from '@/lib/strings/lead-sources';
@@ -38,7 +45,44 @@ import {
 
 type Confirm = { kind: 'rotateKey' | 'rotateSecret' | 'delete'; source: LeadSource };
 
-/** Settings → Lead sources (M2-T1, owners/admins). Capture config UI arrives with M2-T2/T6. */
+const ROUND_ROBIN = 'round_robin';
+const UNASSIGNED = 'unassigned';
+
+/** Who gets new leads from this source (M2-T6): round-robin, a fixed active member, or nobody. */
+function AssignmentPicker({ source }: { source: LeadSource }) {
+  const update = useUpdateLeadSource();
+  const members = (useMembers().data?.pages.flatMap((p) => p.items) ?? []).filter(
+    (m) => m.status === 'active',
+  );
+  const { assignment } = source.config;
+  const value = assignment.strategy === 'user' ? assignment.userId : assignment.strategy;
+  const toAssignment = (v: string): AssignmentConfig =>
+    v === ROUND_ROBIN || v === UNASSIGNED ? { strategy: v } : { strategy: 'user', userId: v };
+  return (
+    <SimpleSelect
+      label={s.assignment.label}
+      value={value}
+      disabled={update.isPending}
+      className="max-w-sm"
+      options={[
+        { value: ROUND_ROBIN, label: s.assignment.roundRobin },
+        { value: UNASSIGNED, label: s.assignment.unassigned },
+        ...members.map((m) => ({ value: m.userId, label: m.name })),
+      ]}
+      onChange={(v) =>
+        void update
+          .mutateAsync({
+            id: source.id,
+            config: { ...source.config, assignment: toAssignment(v) },
+          })
+          .then(() => toast.success(s.saved))
+          .catch((error: unknown) => toast.error(errorMessage(error)))
+      }
+    />
+  );
+}
+
+/** Settings → Lead sources (M2-T1, owners/admins; assignment M2-T6; capture config M2-T2). */
 export function LeadSourcesView() {
   const sources = useLeadSources();
   const update = useUpdateLeadSource();
@@ -83,6 +127,7 @@ export function LeadSourcesView() {
                   <CopyButton value={source.publicKey} />
                 </div>
               ) : null}
+              <AssignmentPicker source={source} />
               <div className="flex flex-wrap gap-2">
                 <Button
                   size="sm"

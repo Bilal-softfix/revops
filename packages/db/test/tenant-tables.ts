@@ -6,6 +6,7 @@ import {
   customFieldDefs,
   customFieldPipelines,
   leadSources,
+  assignmentCursors,
   leadIngestions,
   leads,
   savedViews,
@@ -273,6 +274,19 @@ export const TENANT_TABLES: readonly TenantTableFixture[] = [
           contactId: lead.contactId,
         })
         .returning({ id: leadIngestions.id });
+      return row?.id ?? '';
+    },
+  },
+  {
+    table: 'assignment_cursors',
+    tenantColumn: 'tenant_id',
+    idColumn: 'tenant_id',
+    privileges: ['SELECT', 'INSERT', 'UPDATE'],
+    insert: async (tx, tenantId) => {
+      const [row] = await tx
+        .insert(assignmentCursors)
+        .values({ tenantId })
+        .returning({ id: assignmentCursors.tenantId });
       return row?.id ?? '';
     },
   },

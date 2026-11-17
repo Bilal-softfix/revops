@@ -232,7 +232,7 @@ export class LeadIntakeService {
       stages.find((s) => s.category === 'open');
     if (!stage) throw new Error('pipeline has no open stage');
 
-    const ownerUserId = await this.owner(tx, config);
+    const ownerUserId = await this.owner(tx, tenantId, config, now);
     const { values, dropped } = await this.leadFields(tx, input.leadFields, pipeline.id);
     const row = await this.leads.insert(tx, {
       tenantId,
@@ -302,13 +302,22 @@ export class LeadIntakeService {
   }
 
   /**
-   * Owner on arrival. `user` → that member while active, else unassigned. Round-robin arrives in
-   * M2-T6; until then it leaves the lead unassigned.
+   * Owner on arrival (M2-T6), per the source's assignment: `round_robin` (also when there is no
+   * source) → the next active agent, or unassigned if there is none; `user` → that member while
+   * active, else unassigned; `unassigned` → nobody.
    */
-  private async owner(tx: Tx, config: LeadSourceConfig | undefined): Promise<string | null> {
-    const assignment = config?.assignment;
+  private async owner(
+    tx: Tx,
+    tenantId: string,
+    config: LeadSourceConfig | undefined,
+    now: Date,
+  ): Promise<string | null> {
+    const assignment = config?.assignment ?? { strategy: 'round_robin' as const };
+    if (assignment.strategy === 'round_robin') {
+      return this.repository.nextRoundRobinAgent(tx, tenantId, now);
+    }
     if (
-      assignment?.strategy === 'user' &&
+      assignment.strategy === 'user' &&
       (await this.leads.isActiveMember(tx, assignment.userId))
     ) {
       return assignment.userId;

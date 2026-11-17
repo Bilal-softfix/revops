@@ -218,6 +218,20 @@
       "when": 1794915237576,
       "tag": "0030_timeline_contact_update",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1794918140663,
+      "tag": "0031_assignment_first_response",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1794918142718,
+      "tag": "0032_assignment_cursors_rls",
+      "breakpoints": true
     }
   ]
 }

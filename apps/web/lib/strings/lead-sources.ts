@@ -52,4 +52,9 @@ export const leadSourceStrings = {
   deleted: (name: string) => `${name} deleted`,
   keyRotated: 'New public key created',
   confirm: 'Continue',
+  assignment: {
+    label: 'Assign new leads to',
+    roundRobin: 'Agents in turn (round-robin)',
+    unassigned: 'Nobody (leave unassigned)',
+  },
 } as const;

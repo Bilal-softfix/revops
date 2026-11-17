@@ -1,7 +1,7 @@
 # PROGRESS
 
 ## Current
-Milestone: M2 — Lead Capture & Dedupe. Branch: `milestone/m2-lead-capture`, cut 2026-11-17 from the tip of `milestone/m1-crm-core` (44b37dc): PR #2 was still open and tag `m1-done` points at the M0 merge (5f428c5); `gh pr merge` was denied by permissions. **Dev to do:** merge PR #2, move `m1-done` to the merge commit. M2-T0 done 2026-11-17. M2 plan approved 2026-11-17 (order: T1 → T4 → T6 → T2 → T3 → T5, sequential; plan incl. threat model in `docs/milestones/M2-lead-capture.md` tasks). M2-T1, M2-T4 done 2026-11-17. PR #2 merged by Dev (a655812). Next: M2-T6.
+Milestone: M2 — Lead Capture & Dedupe. Branch: `milestone/m2-lead-capture`, cut 2026-11-17 from the tip of `milestone/m1-crm-core` (44b37dc): PR #2 was still open and tag `m1-done` points at the M0 merge (5f428c5); `gh pr merge` was denied by permissions. **Dev to do:** merge PR #2, move `m1-done` to the merge commit. M2-T0 done 2026-11-17. M2 plan approved 2026-11-17 (order: T1 → T4 → T6 → T2 → T3 → T5, sequential; plan incl. threat model in `docs/milestones/M2-lead-capture.md` tasks). M2-T1, M2-T4, M2-T6 done 2026-11-17. PR #2 merged by Dev (a655812). Next: M2-T2.
 
 M1 history:
 Milestone: M1 — CRM Core. Branch: `milestone/m1-crm-core` (from main after M0 merged, tag `m0-done`).
@@ -170,9 +170,14 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
   - Web: CRM settings → inbound dedupe radio; contact page → "Merge duplicate" dialog (search, per-field pick); timeline shows "enquired again via <source>" and "created … via <source>".
   - Tests: `lead-intake.int.test.ts` (20: matrix incl. phone vs email precedence, closed leads, both policies, idempotent replay, concurrent same key / same new phone, cross-tenant keys, 422 unusable, dropped fields, source config, merge happy path / pick other phone / refusals), Playwright `contact-merge.spec.ts` (2).
   - Fixed a date time-bomb in `my-tasks-buckets.int.test.ts` (fixed 2026-11-16 clock made signup tokens expire in real time after 24 h; instants now shift by whole days).
+- [x] M2-T6 Assignment on arrival + response time (2026-11-17):
+  - Migrations 0031/0032: `assignment_cursors` (per-tenant round-robin position, FORCE RLS, leak fixture keyed on tenant_id), `leads.first_response_at`.
+  - Intake owner per source assignment: round-robin over active agents in user-id order (cursor row locked → strict turns under concurrency; disabled agents skipped, new agents join; none → unassigned), fixed user while active, or unassigned. Re-enquiries keep the owner and don't advance the rotation.
+  - `first_response_at` set once by human stage changes (single + bulk, not no-ops), never by stage-deletion moves; `LeadsRepository.markFirstResponse` is the hook for M3/M5 calls/messages. Exposed as `Lead.firstResponseAt`.
+  - Web: lead page "First response N after the lead arrived" / "No response yet" (`lib/duration.ts`), Settings → Lead sources "Assign new leads to" picker.
+  - Tests: `lead-assignment.int.test.ts` (10: AC 30 leads → 10/10/10 in strict rotation, concurrent fairness, disabled/new agents, no agents, fixed/unassigned, re-enquiry, first response timing/no-op/bulk/system move), `duration.test.ts` (9), Playwright additions in `leads.spec.ts` and `lead-sources.spec.ts`.
 
 ## In progress
-- [ ] M2-T6 Assignment on arrival (round-robin) + `first_response_at`
 - [ ] M2-T2 Public form endpoint + embed snippet
 - [ ] M2-T3 Signed generic webhook (`inbound_webhooks`, async, idempotent)
 - [ ] M2-T5 CSV import (LocalDiskStorage, mapping, preview, background, error report, ANALYZE)
@@ -182,6 +187,7 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - 2026-11-17 · M2 Dev decisions (plan approval): dedupe policy per tenant `reenquiry` (default) | `always_new`, inbound channels only (manual UI create unchanged); CSV re-run skips already-imported rows per row (idempotency key); round-robin pool = active agents, inbound leads without an owner; captcha + object storage as interfaces + Fakes (LocalDiskStorage), Turnstile adapter off by default, S3 in M8.
 - 2026-11-17 · M2-T1 (**Review**): the capture-config editors (origins, field mapping, captcha, pipeline, assignment) arrive in the UI with T2/T6, where they're used; the API accepts the full config now. Public key and webhook URL are shown for web_form/api sources only.
 - 2026-11-17 · M2-T4 (**Review**): inbound data never overwrites an existing contact (no enrichment of a missing email/name); merge UI picks name/phone/email/city only (custom fields follow the default rule: this contact's value unless empty — the API accepts per-key picks); round-robin sources leave leads unassigned until T6.
+- 2026-11-17 · M2-T6 (**Review**): round-robin is one rotation per tenant (shared by all round-robin sources), in stable user-id order (not by current load); managers/owners are never in the pool; manual leads also get first_response_at from their first human stage change.
 - 2026-11-17 · M2 assumptions (**Review**): first_response_at is set by the first human stage change in M2 (calls/messages hook in M3/M5); contact merge = owner/admin/manager; webhook secrets use envelope encryption with a local KEK from `DATA_ENCRYPTION_KEY` (KMS in M8); raw webhook payloads purged after 30 days.
 - 2026-11-17 · M2-T0 (**Review**): rate-limit ceilings (300 creates, 60 bulk, 30 exports per user per hour) are my sizing for "normal team use"; refused requests (409 duplicates) count toward the create bucket, so the duplicate-check oracle is bounded too. A 403 export doesn't count.
 - 2026-11-17 · M1-T7 assumptions (**Review**):

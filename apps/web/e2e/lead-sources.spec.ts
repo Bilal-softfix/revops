@@ -30,6 +30,15 @@ test('M2-T1: manage lead sources', async ({ page }) => {
   await form.getByRole('button', { name: 'Resume' }).click();
   await expect(form).toContainText('Active');
 
+  // M2-T6: who gets new leads (persists).
+  await form.getByRole('combobox', { name: 'Assign new leads to' }).click();
+  await page.getByRole('option', { name: 'Nobody (leave unassigned)' }).click();
+  await expect(form.getByRole('combobox', { name: 'Assign new leads to' })).toContainText('Nobody');
+  await page.reload();
+  await expect(
+    card(page, 'Website enquiry').getByRole('combobox', { name: 'Assign new leads to' }),
+  ).toContainText('Nobody');
+
   // New public key after confirming.
   await form.getByRole('button', { name: 'New public key' }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Continue' }).click();

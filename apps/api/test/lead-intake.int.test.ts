@@ -122,7 +122,12 @@ beforeAll(async () => {
     .items;
   const first = sources[0];
   if (!first) throw new Error('no template source');
-  source = { id: first.id, name: first.name, config: leadSourceConfigSchema.parse({}) };
+  // Unassigned here: round-robin is covered in lead-assignment.int.test.ts (M2-T6).
+  source = {
+    id: first.id,
+    name: first.name,
+    config: leadSourceConfigSchema.parse({ assignment: { strategy: 'unassigned' } }),
+  };
   const pipelines = ((await api(owner).get('/v1/pipelines').expect(200)).body as PipelineList)
     .items;
   const found = pipelines.find((p) => p.key === 'repairs') ?? pipelines[1] ?? pipelines[0];

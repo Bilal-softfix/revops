@@ -40,6 +40,7 @@ test('M1-T4: create leads; fields follow the pipeline; losing needs a reason', a
   await expect(page.getByRole('heading', { name: 'Kiran Rao' })).toBeVisible();
   await expect(page.getByLabel('IMEI / serial no.')).toHaveValue('356938035643809');
   await expect(page.getByRole('combobox', { name: 'Stage' })).toContainText('Received');
+  await expect(page.getByTestId('first-response')).toHaveText('No response yet');
 
   // Lost needs a reason.
   await page.getByRole('combobox', { name: 'Stage' }).click();
@@ -49,6 +50,8 @@ test('M1-T4: create leads; fields follow the pipeline; losing needs a reason', a
   await lost.getByRole('radio', { name: 'Not repairable' }).check();
   await lost.getByRole('button', { name: 'Mark lost' }).click();
   await expect(page.getByText('Lost on')).toContainText('Not repairable');
+  // M2-T6: the first stage change by a person is the first response.
+  await expect(page.getByTestId('first-response')).toContainText('First response');
 
   // Reopen, so the board test has it in an open stage.
   await page.getByRole('combobox', { name: 'Stage' }).click();

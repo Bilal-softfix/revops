@@ -154,6 +154,7 @@ export class LeadsService {
       wonAt: lead.wonAt?.toISOString() ?? null,
       lostAt: lead.lostAt?.toISOString() ?? null,
       lostReason: lead.lostReason,
+      firstResponseAt: lead.firstResponseAt?.toISOString() ?? null,
       createdAt: lead.createdAt.toISOString(),
       updatedAt: lead.updatedAt.toISOString(),
     };
@@ -702,6 +703,12 @@ export class LeadsService {
       tx,
       changed.filter(keepsWonAt).map((l) => l.id),
       moveKeepingWonAt,
+    );
+    // A person moved these leads: their first response, if they had none yet (M2-T6).
+    await this.repository.markFirstResponse(
+      tx,
+      changed.map((l) => l.id),
+      now,
     );
     const fromPipelineIds = [...new Set(changed.map((l) => l.pipelineId))];
     const stageNames = await this.repository.stageNames(tx, [

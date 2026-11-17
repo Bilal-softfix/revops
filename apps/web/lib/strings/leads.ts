@@ -103,6 +103,8 @@ export const leadStrings = {
     contact: 'Contact',
     openContact: 'Open contact',
     won: (date: string) => `Won on ${date}`,
+    firstResponse: (after: string) => `First response ${after} after the lead arrived`,
+    awaitingResponse: 'No response yet',
     lost: (date: string, reason: string | null) =>
       reason ? `Lost on ${date}: ${reason}` : `Lost on ${date}`,
     delete: 'Delete lead',

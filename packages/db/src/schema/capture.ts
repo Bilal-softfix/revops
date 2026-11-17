@@ -58,3 +58,15 @@ export const leadIngestions = pgTable(
     index('lead_ingestions_lead_idx').on(t.tenantId, t.leadId),
   ],
 );
+
+/**
+ * Round-robin position per tenant (M2-T6): the agent who got the last inbound lead. The intake
+ * locks this row FOR UPDATE, so concurrent arrivals take strict turns. Tenant-owned, FORCE RLS.
+ */
+export const assignmentCursors = pgTable('assignment_cursors', {
+  tenantId: uuid('tenant_id')
+    .primaryKey()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  lastUserId: uuid('last_user_id'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});

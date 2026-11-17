@@ -312,6 +312,18 @@ export class LeadsRepository {
       .where(inArray(leads.id, [...ids]));
   }
 
+  /**
+   * First human response (M2-T6): set once. Callers: stage changes by a user (M2), outbound calls
+   * and messages by a user (M3/M5). Never for system or AI actions.
+   */
+  async markFirstResponse(tx: Tx, ids: readonly string[], at: Date): Promise<void> {
+    if (ids.length === 0) return;
+    await tx
+      .update(leads)
+      .set({ firstResponseAt: at })
+      .where(and(inArray(leads.id, [...ids]), isNull(leads.firstResponseAt)));
+  }
+
   async softDelete(tx: Tx, id: string, now: Date): Promise<void> {
     await tx.update(leads).set({ deletedAt: now, updatedAt: now }).where(eq(leads.id, id));
   }

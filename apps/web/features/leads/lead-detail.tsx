@@ -33,6 +33,7 @@ import { useCustomFields } from '@/features/custom-fields/queries';
 import { usePipelines } from '@/features/pipelines/queries';
 import { useMembers } from '@/features/team/queries';
 import { errorMessage } from '@/lib/api/messages';
+import { formatDuration } from '@/lib/duration';
 import { ApiError } from '@/lib/api/problem';
 import {
   type CustomFieldFormValues,
@@ -107,6 +108,11 @@ function LeadPage({
           {s.status[lead.status]}
         </Badge>
       </div>
+      <p className="text-sm text-muted-foreground" data-testid="first-response">
+        {lead.firstResponseAt
+          ? s.detail.firstResponse(formatDuration(lead.createdAt, lead.firstResponseAt))
+          : s.detail.awaitingResponse}
+      </p>
       {lead.wonAt ? <p className="text-sm">{s.detail.won(formatDate(lead.wonAt))}</p> : null}
       {lead.lostAt ? (
         <p className="text-sm">{s.detail.lost(formatDate(lead.lostAt), lead.lostReason)}</p>

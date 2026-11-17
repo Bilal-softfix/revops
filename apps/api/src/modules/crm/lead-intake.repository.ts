@@ -1,5 +1,17 @@
 import { Injectable } from '@nestjs/common';
-import { type Tx, and, desc, eq, isNull, leadIngestions, leads, timelineEvents } from '@revops/db';
+import {
+  type Tx,
+  and,
+  asc,
+  assignmentCursors,
+  desc,
+  eq,
+  isNull,
+  leadIngestions,
+  leads,
+  memberships,
+  timelineEvents,
+} from '@revops/db';
 
 export type LeadIngestionRow = typeof leadIngestions.$inferSelect;
 type LeadRow = typeof leads.$inferSelect;
@@ -53,6 +65,36 @@ export class LeadIntakeRepository {
 
   async touchLead(tx: Tx, id: string, now: Date): Promise<void> {
     await tx.update(leads).set({ updatedAt: now }).where(eq(leads.id, id));
+  }
+
+  /**
+   * Round-robin (M2-T6): the next active agent after the tenant's cursor, in user-id order, and
+   * moves the cursor to them. The cursor row is locked, so concurrent arrivals take strict turns;
+   * agents who join, leave or are disabled simply enter or drop out of the rotation.
+   * Returns null when the tenant has no active agent.
+   */
+  async nextRoundRobinAgent(tx: Tx, tenantId: string, now: Date): Promise<string | null> {
+    await tx.insert(assignmentCursors).values({ tenantId }).onConflictDoNothing();
+    const [cursor] = await tx
+      .select()
+      .from(assignmentCursors)
+      .where(eq(assignmentCursors.tenantId, tenantId))
+      .for('update');
+    const agents = await tx
+      .select({ userId: memberships.userId })
+      .from(memberships)
+      .where(and(eq(memberships.role, 'agent'), eq(memberships.status, 'active')))
+      .orderBy(asc(memberships.userId));
+    if (agents.length === 0) return null;
+    const last = cursor?.lastUserId ?? null;
+    // uuid order in Postgres is byte order = the lower-case hex string order.
+    const next = (last ? agents.find((a) => a.userId > last) : undefined) ?? agents[0];
+    if (!next) return null;
+    await tx
+      .update(assignmentCursors)
+      .set({ lastUserId: next.userId, updatedAt: now })
+      .where(eq(assignmentCursors.tenantId, tenantId));
+    return next.userId;
   }
 
   // ---- contact merge ----
