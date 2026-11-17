@@ -27,15 +27,19 @@ export class CrmService {
   ) {}
 
   async getSettings(auth: CrmAuth): Promise<CrmSettings> {
-    return this.database.withContext(
-      { tenantId: auth.tenantId, userId: auth.userId },
-      async (tx) => ({
-        agentContactVisibility: await this.contacts.agentContactVisibility(tx, auth.tenantId),
-      }),
+    return this.database.withContext({ tenantId: auth.tenantId, userId: auth.userId }, (tx) =>
+      this.readSettings(tx, auth.tenantId),
     );
   }
 
-  /** Owner/admin (crm.settings.manage); audited with before/after. */
+  private async readSettings(tx: Tx, tenantId: string): Promise<CrmSettings> {
+    return {
+      agentContactVisibility: await this.contacts.agentContactVisibility(tx, tenantId),
+      allowAgentExport: await this.contacts.allowAgentExport(tx, tenantId),
+    };
+  }
+
+  /** Owner/admin (crm.settings.manage); audited with before/after of the changed keys only. */
   async updateSettings(
     auth: CrmAuth,
     patch: UpdateCrmSettingsRequest,
@@ -44,10 +48,25 @@ export class CrmService {
     return this.database.withContext(
       { tenantId: auth.tenantId, userId: auth.userId },
       async (tx) => {
-        const before = await this.contacts.agentContactVisibility(tx, auth.tenantId);
-        const after = patch.agentContactVisibility ?? before;
-        if (after !== before) {
-          await this.contacts.setAgentContactVisibility(tx, auth.tenantId, after);
+        const before = await this.readSettings(tx, auth.tenantId);
+        const after: CrmSettings = { ...before, ...patch };
+        const changed: Partial<CrmSettings> = {};
+        const was: Partial<CrmSettings> = {};
+        if (after.agentContactVisibility !== before.agentContactVisibility) {
+          await this.contacts.setAgentContactVisibility(
+            tx,
+            auth.tenantId,
+            after.agentContactVisibility,
+          );
+          changed.agentContactVisibility = after.agentContactVisibility;
+          was.agentContactVisibility = before.agentContactVisibility;
+        }
+        if (after.allowAgentExport !== before.allowAgentExport) {
+          await this.contacts.setAllowAgentExport(tx, auth.tenantId, after.allowAgentExport);
+          changed.allowAgentExport = after.allowAgentExport;
+          was.allowAgentExport = before.allowAgentExport;
+        }
+        if (Object.keys(changed).length > 0) {
           await recordAudit(tx, {
             tenantId: auth.tenantId,
             actorType: 'user',
@@ -55,12 +74,12 @@ export class CrmService {
             action: 'crm_settings.updated',
             entity: 'tenant',
             entityId: auth.tenantId,
-            before: { agentContactVisibility: before },
-            after: { agentContactVisibility: after },
+            before: was,
+            after: changed,
             ip: meta.ip,
           });
         }
-        return { agentContactVisibility: after };
+        return after;
       },
     );
   }

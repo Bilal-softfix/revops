@@ -193,13 +193,72 @@ describe('GET /v1/exports/leads.csv', () => {
     expect(ids(await exportCsv(other))).toEqual([otherLead.id]);
   });
 
-  it('an agent gets only their own leads; an agent with none gets the header only', async () => {
-    const mine = await exportCsv(agent);
-    expect(ids(mine)).toEqual([agentLead.id]);
-    expect(mine.rows[0]?.Owner).toBe('agent user');
-    const none = await exportCsv(idleAgent);
-    expect(none.rows).toEqual([]);
-    expect(none.header.slice(0, HEADERS.length)).toEqual(HEADERS);
+  describe('agents (tenant setting allowAgentExport)', () => {
+    const setAllow = (allowAgentExport: boolean) =>
+      withSession(request(t.server).patch('/v1/crm/settings'), owner)
+        .send({ allowAgentExport })
+        .expect(200);
+
+    it('off by default: agents get 403 forbidden, owner/admin/manager still export', async () => {
+      const settings = await withSession(request(t.server).get('/v1/crm/settings'), agent).expect(
+        200,
+      );
+      expect(settings.body).toMatchObject({ allowAgentExport: false });
+      for (const s of [agent, idleAgent]) {
+        const res = await withSession(request(t.server).get(PATH), s, false).expect(403);
+        expect((res.body as { code: string }).code).toBe('forbidden');
+      }
+      for (const s of [owner, admin, manager]) await exportCsv(s);
+    });
+
+    it('on: an agent gets only their own leads; an agent with none gets the header only', async () => {
+      await setAllow(true);
+      try {
+        const mine = await exportCsv(agent);
+        expect(ids(mine)).toEqual([agentLead.id]);
+        expect(mine.rows[0]?.Owner).toBe('agent user');
+        // Even filtering by another owner doesn't widen it.
+        const ownerId = owner.body.user.id;
+        expect(ids(await exportCsv(agent, { owner: ownerId }))).toEqual([]);
+        const none = await exportCsv(idleAgent);
+        expect(none.rows).toEqual([]);
+        expect(none.header.slice(0, HEADERS.length)).toEqual(HEADERS);
+      } finally {
+        await setAllow(false);
+      }
+      await withSession(request(t.server).get(PATH), agent, false).expect(403);
+    });
+
+    it('only owners/admins change it; changes are audited with before/after', async () => {
+      await withSession(request(t.server).patch('/v1/crm/settings'), manager)
+        .send({ allowAgentExport: true })
+        .expect(403);
+      await withSession(request(t.server).patch('/v1/crm/settings'), agent)
+        .send({ allowAgentExport: true })
+        .expect(403);
+      const audit = () =>
+        asTestOwner((sql) =>
+          sql.begin(async (tx) => {
+            await tx`select set_config('app.tenant_id', ${tenantId}, true)`;
+            return tx<{ before: unknown; after: unknown }[]>`
+              select before, after from audit_logs where action = 'crm_settings.updated'
+              order by created_at desc, id desc`;
+          }),
+        );
+      const n = (await audit()).length;
+      await setAllow(true);
+      await setAllow(true); // no change → no audit row
+      const res = await withSession(request(t.server).patch('/v1/crm/settings'), admin)
+        .send({ allowAgentExport: false })
+        .expect(200);
+      expect(res.body).toMatchObject({ allowAgentExport: false });
+      const rows = await audit();
+      expect(rows.length).toBe(n + 2);
+      expect(rows.slice(0, 2)).toEqual([
+        { before: { allowAgentExport: true }, after: { allowAgentExport: false } },
+        { before: { allowAgentExport: false }, after: { allowAgentExport: true } },
+      ]);
+    });
   });
 
   it('applies the list filters: stage, owner, q and a custom field', async () => {
@@ -284,8 +343,8 @@ describe('GET /v1/exports/leads.csv', () => {
       const res = await withSession(request(t.server).get(PATH), owner, false).expect(422);
       expect(res.headers['content-type']).toMatch(/application\/problem\+json/);
       expect(res.body).toMatchObject({ code: 'export_too_large', limit: 2, count: 3 });
-      // Within the cap still works (the agent sees one lead).
-      await exportCsv(agent);
+      // Within the cap still works (a filter down to one lead).
+      await exportCsv(owner, { owner: agentId });
     } finally {
       service.maxRows = 10_000;
     }

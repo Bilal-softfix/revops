@@ -11,6 +11,11 @@ export const crmSettingsStrings = {
     assigned: 'Only their own',
     assignedHint: 'Contacts they created, or that belong to leads assigned to them.',
   },
+  agentExport: {
+    legend: 'Can agents export leads?',
+    label: 'Let agents export their own leads as CSV',
+    hint: 'Owners, admins and managers can always export. Agents only ever get the leads assigned to them.',
+  },
   save: 'Save',
   saved: 'Settings saved',
 } as const;

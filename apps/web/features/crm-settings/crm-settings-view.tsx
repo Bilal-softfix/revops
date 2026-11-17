@@ -10,15 +10,22 @@ import { errorMessage } from '@/lib/api/messages';
 import { crmSettingsStrings as s } from '@/lib/strings/crm-settings';
 import { useCrmSettings, useUpdateCrmSettings } from './queries';
 
-/** Settings → CRM settings (owners/admins): agent contact visibility (M1-T1 setting, UI in T3b). */
+/**
+ * Settings → CRM settings (owners/admins): agent contact visibility (M1-T1 setting, UI in T3b) and
+ * whether agents may export their own leads (M1-T6 review).
+ */
 export function CrmSettingsView() {
   const settings = useCrmSettings();
   const update = useUpdateCrmSettings();
   // The unsaved choice; null = show what is stored.
   const [draft, setDraft] = useState<AgentContactVisibility | null>(null);
+  const [exportDraft, setExportDraft] = useState<boolean | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const stored = settings.data?.agentContactVisibility;
   const visibility = draft ?? stored ?? null;
+  const storedExport = settings.data?.allowAgentExport;
+  const allowAgentExport = exportDraft ?? storedExport ?? false;
+  const dirty = visibility !== stored || allowAgentExport !== storedExport;
 
   return (
     <div className="mx-auto grid max-w-3xl gap-6">
@@ -39,9 +46,10 @@ export function CrmSettingsView() {
             if (!visibility) return;
             setFormError(null);
             update
-              .mutateAsync({ agentContactVisibility: visibility })
+              .mutateAsync({ agentContactVisibility: visibility, allowAgentExport })
               .then(() => {
                 setDraft(null);
+                setExportDraft(null);
                 toast.success(s.saved);
               })
               .catch((error: unknown) => setFormError(errorMessage(error)));
@@ -68,8 +76,22 @@ export function CrmSettingsView() {
               </label>
             ))}
           </fieldset>
+          <fieldset className="grid gap-3">
+            <legend className="mb-1 font-medium">{s.agentExport.legend}</legend>
+            <p className="text-sm text-muted-foreground">{s.agentExport.hint}</p>
+            <label className="flex items-start gap-3 rounded-md border p-3 text-sm">
+              <input
+                type="checkbox"
+                name="allowAgentExport"
+                className="mt-0.5 size-4 accent-primary"
+                checked={allowAgentExport}
+                onChange={(event) => setExportDraft(event.target.checked)}
+              />
+              <span className="font-medium">{s.agentExport.label}</span>
+            </label>
+          </fieldset>
           <div>
-            <Button type="submit" disabled={update.isPending || visibility === stored}>
+            <Button type="submit" disabled={update.isPending || !dirty}>
               {s.save}
             </Button>
           </div>

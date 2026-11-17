@@ -5,12 +5,15 @@ import {
   LEAD_EXPORT_MAX_ROWS,
   type LeadExportQuery,
   customFieldsForPipeline,
+  hasPermission,
 } from '@revops/shared';
 import { Clock } from '../../platform/clock';
 import { type CsvCell, csvDocument } from '../../platform/csv';
 import { DomainError } from '../../platform/errors/domain-error';
 import { recordAudit } from '../../platform/outbox/record';
 import type { RequestMeta } from '../../platform/request-meta';
+import { forbidden } from '../tenancy/errors';
+import { ContactsRepository } from './contacts.repository';
 import { type CrmAuth, CrmService } from './crm.service';
 import { CustomFieldsService } from './custom-fields.service';
 import { type LeadRecord, LeadsRepository } from './leads.repository';
@@ -94,7 +97,8 @@ export interface LeadExport {
 }
 
 /**
- * CSV export of leads (M1-T6). Same visibility and filters as the list (agents: only their own
+ * CSV export of leads (M1-T6). `lead.export` roles, or agents when the tenant setting
+ * `allowAgentExport` is on (else 403 `forbidden`). Same visibility and filters as the list (agents: only their own
  * leads), counted first and refused over `maxRows`; one `lead.exported` audit row with the count
  * and filters only — row contents are never logged or audited.
  */
@@ -109,11 +113,20 @@ export class LeadsExportService {
     private readonly leads: LeadsService,
     private readonly repository: LeadsRepository,
     private readonly clock: Clock,
+    private readonly contacts: ContactsRepository,
   ) {}
 
   async exportCsv(auth: CrmAuth, query: LeadExportQuery, meta: RequestMeta): Promise<LeadExport> {
     const { filters } = query;
     return this.crm.withCrm(auth, async (tx) => {
+      // Owners/admins/managers have `lead.export`; agents only when the tenant allows it, and then
+      // only their own leads (the scope below).
+      if (
+        !hasPermission(auth.role, 'lead.export') &&
+        !(await this.contacts.allowAgentExport(tx, auth.tenantId))
+      ) {
+        throw forbidden();
+      }
       const defs = await this.fields.definitions(tx, 'lead');
       // Same custom-field filter validation as the list (400 validation_failed).
       this.leads.checkFilters(filters, defs);

@@ -13,6 +13,11 @@ export type AgentContactVisibility = z.infer<typeof agentContactVisibilitySchema
 /** Per-tenant CRM settings (GET/PATCH /v1/crm/settings). */
 export const crmSettingsSchema = z.object({
   agentContactVisibility: agentContactVisibilitySchema,
+  /**
+   * Agents may export CSV of their own (assigned) leads (M1-T6 review). Default false: only
+   * owners, admins and managers (`lead.export`) export.
+   */
+  allowAgentExport: z.boolean(),
 });
 export type CrmSettings = z.infer<typeof crmSettingsSchema>;
 

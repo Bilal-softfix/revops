@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { errorMessage } from '@/lib/api/messages';
 import { ApiError, NetworkError, toApiError } from '@/lib/api/problem';
+import { useCrmSettings } from '@/features/crm-settings/queries';
 import { useSession } from '@/lib/session';
 import { leadExportStrings as s } from '@/lib/strings/lead-export';
 
@@ -25,12 +26,15 @@ function tooLargeMessage(error: ApiError): string {
 /**
  * Downloads the leads matching `filters` as CSV (GET /api/v1/exports/leads.csv through the
  * same-origin proxy, session cookie). Fetch → blob so a 422 `export_too_large` becomes a toast
- * instead of a downloaded error page. Rendered only for members with `lead.export`.
+ * instead of a downloaded error page. Rendered for members with `lead.export`, and for agents when
+ * the tenant's CRM setting `allowAgentExport` is on (they export their own leads only).
  */
 export function ExportLeadsButton({ filters }: { filters: LeadFilters }) {
   const { can } = useSession();
+  const full = can('lead.export');
+  const settings = useCrmSettings();
   const [busy, setBusy] = useState(false);
-  if (!can('lead.export')) return null;
+  if (!full && settings.data?.allowAgentExport !== true) return null;
 
   async function download() {
     setBusy(true);

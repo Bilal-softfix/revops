@@ -115,7 +115,7 @@ export const leadStrings = {
   bulk: {
     selectAll: 'Select all leads on this page',
     select: (name: string) => `Select lead ${name}`,
-    selected: (n: number) => `${n} selected`,
+    selected: (n: number) => `${n} selected on this page`,
     barLabel: 'Bulk actions',
     assign: 'Assign to…',
     assignTitle: (n: number) => `Assign ${n} ${n === 1 ? 'lead' : 'leads'}`,

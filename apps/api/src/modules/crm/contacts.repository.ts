@@ -68,11 +68,30 @@ export class ContactsRepository {
     tenantId: string,
     value: AgentContactVisibility,
   ): Promise<void> {
+    await this.mergeSettings(tx, tenantId, { agentContactVisibility: value });
+  }
+
+  /** Tenant setting `allowAgentExport` (M1-T6 review); anything but a stored `true` is false. */
+  async allowAgentExport(tx: Tx, tenantId: string): Promise<boolean> {
+    const [row] = await tx
+      .select({ settings: tenants.settings })
+      .from(tenants)
+      .where(eq(tenants.id, tenantId));
+    return row?.settings.allowAgentExport === true;
+  }
+
+  async setAllowAgentExport(tx: Tx, tenantId: string, value: boolean): Promise<void> {
+    await this.mergeSettings(tx, tenantId, { allowAgentExport: value });
+  }
+
+  private async mergeSettings(
+    tx: Tx,
+    tenantId: string,
+    patch: Record<string, unknown>,
+  ): Promise<void> {
     await tx
       .update(tenants)
-      .set({
-        settings: sql`${tenants.settings} || ${JSON.stringify({ agentContactVisibility: value })}::jsonb`,
-      })
+      .set({ settings: sql`${tenants.settings} || ${JSON.stringify(patch)}::jsonb` })
       .where(eq(tenants.id, tenantId));
   }
 

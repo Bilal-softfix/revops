@@ -19,7 +19,8 @@ export class LeadsExportController {
   constructor(private readonly exports: LeadsExportService) {}
 
   @Get('exports/leads.csv')
-  @RequirePermission('lead.export')
+  // Every role reaches the service, which checks `lead.export` or the tenant's allowAgentExport.
+  @RequirePermission('lead.read.assigned')
   @Header('Content-Type', 'text/csv; charset=utf-8')
   @Header('Cache-Control', 'no-store')
   @ApiProduces('text/csv')

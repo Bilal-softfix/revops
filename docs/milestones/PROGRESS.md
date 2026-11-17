@@ -126,6 +126,11 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
   - My tasks bucket tests at the IST day boundary: `task-bucket.test.ts` (30) +
     `my-tasks-buckets.int.test.ts` (6, with the FakeClock checking SQL against `taskBucket()`).
   - Playwright: `leads-bulk.spec.ts` (2), `leads-export.spec.ts` (1).
+  - **Dev review 2026-11-17 (approved with one change, done):** `lead.export` is owner/admin/manager
+    only. New CRM setting `allowAgentExport` (default false, Settings → CRM settings, audited as
+    `crm_settings.updated` with before/after of changed keys only): when on, agents export their own
+    leads; when off they get 403 `forbidden` and no Export button. Bulk bar says "N selected on this
+    page". Tests: `leads-export.int.test.ts` "agents (tenant setting allowAgentExport)" (3).
 
 ## In progress
 - [ ] M1-T7 Seed (4 demo tenants incl. Demo Software Agency + Demo Repair Shop), 10k-lead volume check, Playwright
@@ -133,8 +138,8 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
 ## Assumptions made
 _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - 2026-11-17 · M1-T6 assumptions (**Review**):
-  - Agents can export (their own leads only), per the AC "export respects agent visibility". Flip
-    `lead.export` off for agents if owners don't want agent exports.
+  - ~~Agents can export (their own leads only)~~ → changed by Dev: only with the tenant setting
+    `allowAgentExport` (see M1-T6 under Done).
   - Bulk actions are owner/admin/manager only (`lead.bulk`); agents keep single-lead moves.
   - Bulk works on explicit ids (max 500; select-all = the loaded page), not "all matching the
     filter". Ids that are invisible or deleted are skipped and reported, not a 404 for the whole request.
@@ -323,6 +328,7 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 ## Backlog
 - Shared team saved views (Dev, 2026-11-16, M1-T4 review): today saved views are private to their creator.
 - Member search in the owner picker (Dev, 2026-11-16, M1-T4 review): today it lists the first 50 active members.
+- "Select all matching the filter" for bulk actions (Dev, 2026-11-17, M1-T6 review): today select-all is the loaded page only.
 - Archive pipeline (Dev, 2026-11-16): hide a pipeline that still has leads without deleting it (today a pipeline with leads can't be deleted).
 
 ## Blocked on external

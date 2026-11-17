@@ -23,7 +23,10 @@ export const PERMISSIONS = [
   'lead.delete',
   /** Bulk actions on leads: bulk assign and bulk stage move (M1-T6). */
   'lead.bulk',
-  /** Export leads as CSV — only the leads the member can see (M1-T6). */
+  /**
+   * Export leads as CSV — the leads the member can see (M1-T6). Agents don't have it; a tenant can
+   * let them export their own leads with the CRM setting `allowAgentExport`.
+   */
   'lead.export',
   /** Create and edit contacts the member can see. */
   'contact.write',
@@ -85,7 +88,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     'contact.write',
     'contact.delete',
   ],
-  agent: ['member.read', 'lead.read.assigned', 'lead.write', 'lead.export', 'contact.write'],
+  agent: ['member.read', 'lead.read.assigned', 'lead.write', 'contact.write'],
 };
 
 export function hasPermission(role: Role | null | undefined, permission: Permission): boolean {
