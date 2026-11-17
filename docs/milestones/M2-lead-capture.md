@@ -32,3 +32,11 @@ Treat all public endpoints as hostile input. Show me the threat considerations i
 - [ ] Public endpoints rate-limited and payload-size-limited
 - [ ] Attribution fields preserved end to end (form → lead)
 - [ ] Idempotency on webhook + import proven by tests
+
+## Threat model (approved plan, 2026-11-17)
+- Tenant resolved only from the source `public_key` via a SECURITY DEFINER lookup (active sources only; unknown/inactive → same 404). Everything after runs in `withTenant`.
+- Rate limits per IP, per source and per tenant/day; body caps of 16 kB (form) and 64 kB (webhook); strict Zod with length caps.
+- Honeypot returns a silent 200; optional captcha (Fake/Turnstile); per-source CORS allow-list; no cookies; CSRF exempt only for `/v1/public/*`.
+- Webhook: HMAC-SHA256 over `timestamp.body`, ±5 min window, timing-safe compare, idempotent on external id, secret envelope-encrypted, never logged.
+- Responses never reveal whether a contact exists. Attribution values are capped strings; URLs are http(s) only. Raw payloads are purged after 30 days.
+- CSV: ≤10 MB / 50k rows, background, per-row idempotency, escaped error report, ANALYZE after ≥1k inserted rows.

@@ -1,7 +1,7 @@
 # PROGRESS
 
 ## Current
-Milestone: M2 — Lead Capture & Dedupe. Branch: `milestone/m2-lead-capture`, cut 2026-11-17 from the tip of `milestone/m1-crm-core` (44b37dc): PR #2 was still open and tag `m1-done` points at the M0 merge (5f428c5); `gh pr merge` was denied by permissions. **Dev to do:** merge PR #2, move `m1-done` to the merge commit. M2-T0 done 2026-11-17. Next: `/start-milestone M2` plan.
+Milestone: M2 — Lead Capture & Dedupe. Branch: `milestone/m2-lead-capture`, cut 2026-11-17 from the tip of `milestone/m1-crm-core` (44b37dc): PR #2 was still open and tag `m1-done` points at the M0 merge (5f428c5); `gh pr merge` was denied by permissions. **Dev to do:** merge PR #2, move `m1-done` to the merge commit. M2-T0 done 2026-11-17. M2 plan approved 2026-11-17 (order: T1 → T4 → T6 → T2 → T3 → T5, sequential; plan incl. threat model in `docs/milestones/M2-lead-capture.md` tasks). Next: M2-T1.
 
 M1 history:
 Milestone: M1 — CRM Core. Branch: `milestone/m1-crm-core` (from main after M0 merged, tag `m0-done`).
@@ -159,10 +159,17 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
   - Tests: `crm-guards.int.test.ts` (9: lock-wait races driven from an owner transaction, a churn test for deadlocks, rate-limit buckets incl. window reset), `reset.test.ts` seed guard (6).
 
 ## In progress
-_(none)_
+- [ ] M2-T1 Lead sources (public key, config, webhook secret, CRUD + settings UI)
+- [ ] M2-T4 Dedupe engine + `LeadIntakeService` + manual contact merge
+- [ ] M2-T6 Assignment on arrival (round-robin) + `first_response_at`
+- [ ] M2-T2 Public form endpoint + embed snippet
+- [ ] M2-T3 Signed generic webhook (`inbound_webhooks`, async, idempotent)
+- [ ] M2-T5 CSV import (LocalDiskStorage, mapping, preview, background, error report, ANALYZE)
 
 ## Assumptions made
 _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
+- 2026-11-17 · M2 Dev decisions (plan approval): dedupe policy per tenant `reenquiry` (default) | `always_new`, inbound channels only (manual UI create unchanged); CSV re-run skips already-imported rows per row (idempotency key); round-robin pool = active agents, inbound leads without an owner; captcha + object storage as interfaces + Fakes (LocalDiskStorage), Turnstile adapter off by default, S3 in M8.
+- 2026-11-17 · M2 assumptions (**Review**): first_response_at is set by the first human stage change in M2 (calls/messages hook in M3/M5); contact merge = owner/admin/manager; webhook secrets use envelope encryption with a local KEK from `DATA_ENCRYPTION_KEY` (KMS in M8); raw webhook payloads purged after 30 days.
 - 2026-11-17 · M2-T0 (**Review**): rate-limit ceilings (300 creates, 60 bulk, 30 exports per user per hour) are my sizing for "normal team use"; refused requests (409 duplicates) count toward the create bucket, so the duplicate-check oracle is bounded too. A 403 export doesn't count.
 - 2026-11-17 · M1-T7 assumptions (**Review**):
   - "4 demo tenants" = the existing Realty + Clinic plus Software Agency + Repair Shop; 60 leads
@@ -366,6 +373,8 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - Archive pipeline (Dev, 2026-11-16): hide a pipeline that still has leads without deleting it (today a pipeline with leads can't be deleted).
 
 ## Blocked on external
+- [ ] S3 bucket (ap-south-1) + IAM for the S3 `StorageProvider` adapter (M8; LocalDiskStorage until then)
+- [ ] Cloudflare Turnstile site/secret keys to switch `CAPTCHA_DRIVER=turnstile` on (optional; Fake in dev/tests)
 - [ ] Meta Business Verification + App Review
 - [ ] WhatsApp Cloud API number + templates
 - [ ] Telephony provider KYC + numbers
