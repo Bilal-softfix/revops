@@ -22,6 +22,7 @@ import { useSession } from '@/lib/session';
 import { common } from '@/lib/strings/common';
 import { contactStrings as s } from '@/lib/strings/contacts';
 import { ContactForm } from './contact-form';
+import { MergeContactDialog } from './merge-contact-dialog';
 import { useContact, useDeleteContact, useUpdateContact } from './queries';
 
 export function ContactDetail({ id }: { id: string }) {
@@ -31,6 +32,7 @@ export function ContactDetail({ id }: { id: string }) {
   const update = useUpdateContact(id);
   const remove = useDeleteContact(id);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [merging, setMerging] = useState(false);
 
   if (contact.isPending) return <LoadingState rows={4} />;
   if (contact.isError) {
@@ -57,12 +59,22 @@ export function ContactDetail({ id }: { id: string }) {
       </Link>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold">{data.name}</h1>
-        {can('contact.delete') ? (
-          <Button variant="outline" onClick={() => setConfirmDelete(true)}>
-            {s.delete}
-          </Button>
-        ) : null}
+        <div className="flex gap-2">
+          {can('contact.merge') ? (
+            <Button variant="outline" onClick={() => setMerging(true)}>
+              {s.merge.open}
+            </Button>
+          ) : null}
+          {can('contact.delete') ? (
+            <Button variant="outline" onClick={() => setConfirmDelete(true)}>
+              {s.delete}
+            </Button>
+          ) : null}
+        </div>
       </div>
+      {can('contact.merge') ? (
+        <MergeContactDialog contact={data} open={merging} onOpenChange={setMerging} />
+      ) : null}
       {can('contact.write') ? (
         <section aria-label={s.editTitle} className="rounded-lg border p-4">
           <ContactForm

@@ -107,7 +107,6 @@ const prod = (patch: Record<string, string>) =>
   );
 
 describe('productionEnvProblems', () => {
-
   it('ignores non-production environments', () => {
     expect(productionEnvProblems(parseEnv(apiEnvSchema, validApiEnv))).toEqual([]);
   });

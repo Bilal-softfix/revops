@@ -246,7 +246,7 @@ export class LeadsRepository {
       wonAt: Date | null;
       lostAt: Date | null;
       lostReason: string | null;
-      createdBy: string;
+      createdBy: string | null;
     },
   ): Promise<LeadRow> {
     const [row] = await tx.insert(leads).values(values).returning();

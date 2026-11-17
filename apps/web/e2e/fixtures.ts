@@ -40,6 +40,7 @@ export const FIXTURES = {
   /** M1-T7: 10,000 generated leads (global-setup), owned by the owner or unassigned. */
   volume: fixture(10, 'volume', 'Big Realty', 'real-estate', 'Volume Owner'),
   leadSources: fixture(11, 'lead-sources', 'Source Shop', 'repair-shop', 'Source Owner'),
+  merge: fixture(12, 'merge', 'Merge Clinic', 'clinic', 'Merge Owner'),
 } as const satisfies Record<string, Fixture>;
 
 /** Leads generated into the `volume` fixture workspace. */

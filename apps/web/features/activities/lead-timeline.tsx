@@ -27,7 +27,12 @@ export function describe(item: TimelineItem): string {
   const d = item.data;
   switch (item.type) {
     case 'created':
-      return s.timeline.created(d.pipeline?.name ?? '', d.stage?.name ?? '');
+      return (
+        s.timeline.created(d.pipeline?.name ?? '', d.stage?.name ?? '') +
+        (d.source ? s.timeline.viaSource(d.source.name) : '')
+      );
+    case 're_enquiry':
+      return s.timeline.reenquiry + (d.source ? s.timeline.viaSource(d.source.name) : '');
     case 'stage_changed':
       if (d.reason === 'stage_deleted') {
         return s.timeline.stageDeleted(d.fromStage?.name ?? '', d.stage?.name ?? '');

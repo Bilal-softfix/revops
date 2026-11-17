@@ -21,6 +21,13 @@ import {
 
 // M1-T6: "My tasks" buckets around the IST day boundary, SQL checked against taskBucket().
 // IST = UTC+5:30: 23:45 IST = 18:15Z, 00:00 IST = 18:30Z, 00:15 IST = 18:45Z.
+// The instants below are written for 2026-11-16 and shifted by whole days to just before the real
+// "now": token/session expiry is checked against the database clock, so a fixed past date would
+// make signup verification fail once it is more than 24 h old. Whole days keep the IST boundaries.
+const DAY = 24 * 60 * 60 * 1000;
+const SHIFT =
+  Math.max(0, Math.floor((Date.now() - Date.parse('2026-11-16T12:00:00.000Z')) / DAY)) * DAY;
+const at = (iso: string) => new Date(Date.parse(iso) + SHIFT).toISOString();
 const BUCKETS: TaskBucket[] = ['overdue', 'today', 'upcoming'];
 const NOWS: [label: string, iso: string][] = [
   ['23:45 IST', '2026-11-16T18:15:00.000Z'],
@@ -50,7 +57,7 @@ const idByDue = new Map<string, string>();
 const get = (path: string, query: Record<string, string> = {}) =>
   withSession(request(t.server).get(path), me).query(query);
 const setClock = (iso: string) =>
-  t.clock.advance(new Date(iso).getTime() - t.clock.now().getTime());
+  t.clock.advance(new Date(at(iso)).getTime() - t.clock.now().getTime());
 const bucketIds = async (bucket: TaskBucket) =>
   new Set(
     ((await get('/v1/tasks', { bucket, limit: '100' }).expect(200)).body as TaskPage).items.map(
@@ -83,7 +90,7 @@ beforeAll(async () => {
   for (const dueAt of DUES) {
     const task = (
       await withSession(request(t.server).post(`/v1/leads/${lead.id}/tasks`), me)
-        .send({ title: dueAt, dueAt })
+        .send({ title: dueAt, dueAt: at(dueAt) })
         .expect(201)
     ).body as { id: string };
     idByDue.set(dueAt, task.id);
@@ -94,14 +101,14 @@ afterAll(() => t.close());
 describe('My tasks buckets at the IST day boundary (SQL agrees with taskBucket)', () => {
   it.each(NOWS)('bucket membership and counts at %s', async (_label, nowIso) => {
     setClock(nowIso);
-    const now = new Date(nowIso);
+    const now = new Date(at(nowIso));
     const expected: Record<TaskBucket, Set<string>> = {
       overdue: new Set(),
       today: new Set(),
       upcoming: new Set(),
     };
     for (const due of DUES) {
-      expected[taskBucket(new Date(due), now, DEFAULT_TIMEZONE)].add(idByDue.get(due) ?? '');
+      expected[taskBucket(new Date(at(due)), now, DEFAULT_TIMEZONE)].add(idByDue.get(due) ?? '');
     }
 
     for (const bucket of BUCKETS) {

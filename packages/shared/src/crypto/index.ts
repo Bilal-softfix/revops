@@ -42,7 +42,10 @@ function open(key: Buffer, sealed: string, aad: string): Buffer {
   const decipher = createDecipheriv('aes-256-gcm', key, iv);
   decipher.setAAD(Buffer.from(aad, 'utf8'));
   decipher.setAuthTag(body.subarray(body.length - TAG_BYTES));
-  return Buffer.concat([decipher.update(body.subarray(0, body.length - TAG_BYTES)), decipher.final()]);
+  return Buffer.concat([
+    decipher.update(body.subarray(0, body.length - TAG_BYTES)),
+    decipher.final(),
+  ]);
 }
 
 /** `v1:<kekId>:<wrapped DEK>:<ciphertext>` — safe to store in a text column. */

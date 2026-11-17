@@ -15,6 +15,8 @@ export type TaskStatus = z.infer<typeof taskStatusSchema>;
 /** docs/02-data-model.md; call/message/qualification arrive with M3/M4/M5. */
 export const TIMELINE_EVENT_TYPES = [
   'created',
+  /** M2-T4: the same person enquired again through a capture channel while the lead was open. */
+  're_enquiry',
   'stage_changed',
   'assignment',
   'note',
@@ -133,6 +135,10 @@ export const timelineDataSchema = z.object({
   action: z.enum(['completed', 'reopened']).optional(),
   title: z.string().optional(),
   taskType: taskTypeSchema.optional(),
+  /** created / re_enquiry from a capture channel (M2-T4): the source it came through. */
+  source: z.object({ id: z.uuid(), name: z.string() }).nullable().optional(),
+  /** re_enquiry: the new enquiry's attribution (utm_*, gclid, …). */
+  attribution: z.record(z.string(), z.unknown()).optional(),
 });
 export type TimelineData = z.infer<typeof timelineDataSchema>;
 

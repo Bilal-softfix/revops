@@ -21,6 +21,8 @@ import {
   contactSchema,
   createContactRequestSchema,
   updateContactRequestSchema,
+  type MergeContactsRequest,
+  mergeContactsRequestSchema,
 } from '@revops/shared';
 import type { Request } from 'express';
 import { z } from 'zod';
@@ -78,6 +80,19 @@ export class ContactsController {
     @Req() req: Request,
   ): Promise<Contact> {
     return this.contacts.update(auth, id, body, requestMeta(req));
+  }
+
+  @Post(':id/merge')
+  @HttpCode(200)
+  @ZodResponse(200, contactSchema)
+  @RequirePermission('contact.merge')
+  merge(
+    @CurrentAuth() auth: CrmAuth,
+    @Param('id', idParam) id: string,
+    @Body(new ZodBodyPipe(mergeContactsRequestSchema)) body: MergeContactsRequest,
+    @Req() req: Request,
+  ): Promise<Contact> {
+    return this.contacts.merge(auth, id, body, requestMeta(req));
   }
 
   @Delete(':id')

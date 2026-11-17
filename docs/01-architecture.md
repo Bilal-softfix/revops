@@ -145,6 +145,13 @@ Permissions are strings (`lead.read.all`, `lead.read.assigned`, `routing.manage`
 - Config references (pipeline, open stage, assignment user, `lead.<key>` fields) are checked against the tenant on every write; other tenants' ids read as unknown.
 - **Secrets at rest:** `SecretBox` (platform) wraps `@revops/shared/crypto`: AES-256-GCM envelope encryption (per-value DEK wrapped by the `DATA_ENCRYPTION_KEY` KEK), with the row context (`lead_source:<tenant>:<id>:webhook`) as associated data. Format `v1:<kekId>:…` so M8 can move the KEK to KMS. Without the key: 503 `encryption_unavailable`, never plaintext. The webhook secret (`whsec_…`) is returned once, on create/rotate.
 
+## Lead intake, dedupe and merge (M2-T4)
+- **`LeadIntakeService.ingest(tx, { tenantId, source, idempotencyKey, input })`** (CRM module, exported for the capture channels) is the only way inbound leads (form, webhook, CSV) enter. Manual UI create is unchanged (M1 behaviour). Actor `system`.
+- Order: normalise (phone → E.164, email → lower case; neither valid → 422 `intake_unusable`) → claim the idempotency key in `lead_ingestions` (a replay returns `duplicate` with the first lead) → match contact on phone, then email, and lock it (a new contact racing the same phone retries in a savepoint and then matches) → tenant `dedupePolicy`.
+- `reenquiry` (default): the contact's most recent open lead gets a `re_enquiry` timeline entry (source, attribution, field names) and `lead.reenquired.v1`; with no open lead a new lead is created. `always_new`: always a new lead. Existing contact data is never overwritten by inbound values.
+- New leads: the source's pipeline/open stage if still valid, else the default pipeline's first open stage (pipeline locked `FOR SHARE`); owner per source assignment (`user` while active; round-robin in M2-T6); lead custom fields validated one by one — invalid/unknown/inapplicable ones are dropped and listed (`droppedFields`, audit), never fatal.
+- **Manual merge** `POST /v1/contacts/:id/merge` (`contact.merge`: owner/admin/manager): field-level pick (`this`/`other`, default this-unless-empty) for name, phone, email, city and contact custom fields; both rows locked in id order; the other contact is soft-deleted first (freeing its phone/email), its leads (with notes/tasks), timeline entries and ingestions move over, non-kept phones become alternates, consent keys merge (this wins). Audited (which side won, never values) + `contact.merged.v1`.
+
 ## Custom fields (M1-T2)
 - **Definitions:** per tenant and entity (contact/lead), seeded from the industry template and edited in Settings → Custom fields (`customfield.manage`: owner, admin). Everyone can read them, because forms need them.
   - Key and type are immutable (the update schema is strict).

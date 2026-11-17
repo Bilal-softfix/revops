@@ -1,6 +1,11 @@
 'use client';
 
-import { AGENT_CONTACT_VISIBILITY, type AgentContactVisibility } from '@revops/shared';
+import {
+  AGENT_CONTACT_VISIBILITY,
+  type AgentContactVisibility,
+  DEDUPE_POLICIES,
+  type DedupePolicy,
+} from '@revops/shared';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { FormError } from '@/components/form/text-field';
@@ -25,7 +30,11 @@ export function CrmSettingsView() {
   const visibility = draft ?? stored ?? null;
   const storedExport = settings.data?.allowAgentExport;
   const allowAgentExport = exportDraft ?? storedExport ?? false;
-  const dirty = visibility !== stored || allowAgentExport !== storedExport;
+  const [dedupeDraft, setDedupeDraft] = useState<DedupePolicy | null>(null);
+  const storedDedupe = settings.data?.dedupePolicy;
+  const dedupePolicy = dedupeDraft ?? storedDedupe ?? 'reenquiry';
+  const dirty =
+    visibility !== stored || allowAgentExport !== storedExport || dedupePolicy !== storedDedupe;
 
   return (
     <div className="mx-auto grid max-w-3xl gap-6">
@@ -46,10 +55,11 @@ export function CrmSettingsView() {
             if (!visibility) return;
             setFormError(null);
             update
-              .mutateAsync({ agentContactVisibility: visibility, allowAgentExport })
+              .mutateAsync({ agentContactVisibility: visibility, allowAgentExport, dedupePolicy })
               .then(() => {
                 setDraft(null);
                 setExportDraft(null);
+                setDedupeDraft(null);
                 toast.success(s.saved);
               })
               .catch((error: unknown) => setFormError(errorMessage(error)));
@@ -89,6 +99,26 @@ export function CrmSettingsView() {
               />
               <span className="font-medium">{s.agentExport.label}</span>
             </label>
+          </fieldset>
+          <fieldset className="grid gap-3">
+            <legend className="mb-1 font-medium">{s.dedupe.legend}</legend>
+            <p className="text-sm text-muted-foreground">{s.dedupe.hint}</p>
+            {DEDUPE_POLICIES.map((option) => (
+              <label key={option} className="flex items-start gap-3 rounded-md border p-3 text-sm">
+                <input
+                  type="radio"
+                  name="dedupePolicy"
+                  value={option}
+                  className="mt-0.5 size-4 accent-primary"
+                  checked={dedupePolicy === option}
+                  onChange={() => setDedupeDraft(option)}
+                />
+                <span className="grid gap-0.5">
+                  <span className="font-medium">{s.dedupe[option]}</span>
+                  <span className="text-muted-foreground">{s.dedupe[`${option}Hint`]}</span>
+                </span>
+              </label>
+            ))}
           </fieldset>
           <div>
             <Button type="submit" disabled={update.isPending || !dirty}>

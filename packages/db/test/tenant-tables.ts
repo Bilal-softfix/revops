@@ -6,6 +6,7 @@ import {
   customFieldDefs,
   customFieldPipelines,
   leadSources,
+  leadIngestions,
   leads,
   savedViews,
   pipelineStages,
@@ -253,6 +254,25 @@ export const TENANT_TABLES: readonly TenantTableFixture[] = [
           occurredAt: new Date(),
         })
         .returning({ id: timelineEvents.id });
+      return row?.id ?? '';
+    },
+  },
+  {
+    table: 'lead_ingestions',
+    tenantColumn: 'tenant_id',
+    privileges: ['SELECT', 'INSERT', 'UPDATE'],
+    insert: async (tx, tenantId) => {
+      const lead = await insertLead(tx, tenantId);
+      const [row] = await tx
+        .insert(leadIngestions)
+        .values({
+          tenantId,
+          idempotencyKey: `test:${randomUUID()}`,
+          outcome: 'created',
+          leadId: lead.id,
+          contactId: lead.contactId,
+        })
+        .returning({ id: leadIngestions.id });
       return row?.id ?? '';
     },
   },

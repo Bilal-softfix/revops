@@ -31,6 +31,7 @@ export class CrmService {
     return {
       agentContactVisibility: await this.contacts.agentContactVisibility(tx, tenantId),
       allowAgentExport: await this.contacts.allowAgentExport(tx, tenantId),
+      dedupePolicy: await this.contacts.dedupePolicy(tx, tenantId),
     };
   }
 
@@ -60,6 +61,11 @@ export class CrmService {
           await this.contacts.setAllowAgentExport(tx, auth.tenantId, after.allowAgentExport);
           changed.allowAgentExport = after.allowAgentExport;
           was.allowAgentExport = before.allowAgentExport;
+        }
+        if (after.dedupePolicy !== before.dedupePolicy) {
+          await this.contacts.setDedupePolicy(tx, auth.tenantId, after.dedupePolicy);
+          changed.dedupePolicy = after.dedupePolicy;
+          was.dedupePolicy = before.dedupePolicy;
         }
         if (Object.keys(changed).length > 0) {
           await recordAudit(tx, {

@@ -16,6 +16,15 @@ export const crmSettingsStrings = {
     label: 'Let agents export their own leads as CSV',
     hint: 'Owners, admins and managers can always export. Agents only ever get the leads assigned to them.',
   },
+  dedupe: {
+    legend: 'When a form, webhook or import brings in someone you already have',
+    hint: 'Matched on phone number first, then email. Leads you add by hand always create a new lead.',
+    reenquiry: 'Add it to their open lead',
+    reenquiryHint:
+      'Shows as a re-enquiry on the open lead. If all their leads are closed, a new lead is created.',
+    always_new: 'Always create a new lead',
+    always_newHint: 'Every enquiry becomes its own lead, linked to the same contact.',
+  },
   save: 'Save',
   saved: 'Settings saved',
 } as const;

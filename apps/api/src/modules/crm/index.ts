@@ -19,6 +19,8 @@ import { LeadsExportController } from './leads-export.controller';
 import { LeadsExportService } from './leads-export.service';
 import { LeadsController } from './leads.controller';
 import { LeadsRepository } from './leads.repository';
+import { LeadIntakeRepository } from './lead-intake.repository';
+import { LeadIntakeService } from './lead-intake.service';
 import { LeadSourcesController } from './lead-sources.controller';
 import { LeadSourcesRepository } from './lead-sources.repository';
 import { LeadSourcesService } from './lead-sources.service';
@@ -56,12 +58,21 @@ export { type CrmAuth, CrmService } from './crm.service';
     LeadsService,
     LeadSourcesRepository,
     LeadSourcesService,
+    LeadIntakeRepository,
+    LeadIntakeService,
     LeadViewsRepository,
     LeadViewsService,
     LeadsExportService,
     ActivitiesRepository,
     ActivitiesService,
   ],
-  exports: [CrmService],
+  exports: [CrmService, LeadIntakeService],
 })
 export class CrmModule {}
+export {
+  type IntakeRequest,
+  type IntakeResult,
+  type IntakeSource,
+  LeadIntakeService,
+  intakeUnusable,
+} from './lead-intake.service';

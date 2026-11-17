@@ -25,6 +25,8 @@ export const activityStrings = {
     taskCompleted: (title: string) => `completed the task “${title}”`,
     taskReopened: (title: string) => `reopened the task “${title}”`,
     other: 'recorded an activity',
+    viaSource: (source: string) => ` via ${source}`,
+    reenquiry: 'The contact enquired again',
   },
   notes: {
     label: 'Add a note',

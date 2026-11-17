@@ -16,6 +16,7 @@ import {
 } from '@revops/db';
 import {
   type AgentContactVisibility,
+  type DedupePolicy,
   type Contact,
   type Consent,
   agentContactVisibilitySchema,
@@ -82,6 +83,29 @@ export class ContactsRepository {
 
   async setAllowAgentExport(tx: Tx, tenantId: string, value: boolean): Promise<void> {
     await this.mergeSettings(tx, tenantId, { allowAgentExport: value });
+  }
+
+  /** M2-T4: inbound dedupe policy; anything but `always_new` reads as the default. */
+  async dedupePolicy(tx: Tx, tenantId: string): Promise<DedupePolicy> {
+    const [row] = await tx
+      .select({ settings: tenants.settings })
+      .from(tenants)
+      .where(eq(tenants.id, tenantId));
+    return row?.settings.dedupePolicy === 'always_new' ? 'always_new' : 'reenquiry';
+  }
+
+  async setDedupePolicy(tx: Tx, tenantId: string, value: DedupePolicy): Promise<void> {
+    await this.mergeSettings(tx, tenantId, { dedupePolicy: value });
+  }
+
+  /** A live contact by id regardless of visibility, locked (intake, merge). */
+  async lockLive(tx: Tx, id: string): Promise<ContactRow | undefined> {
+    const [row] = await tx
+      .select()
+      .from(contacts)
+      .where(and(eq(contacts.id, id), isNull(contacts.deletedAt)))
+      .for('update');
+    return row;
   }
 
   private async mergeSettings(
@@ -223,7 +247,7 @@ export class ContactsRepository {
       city: string | null;
       consent: Consent;
       customFields: Record<string, unknown>;
-      createdBy: string;
+      createdBy: string | null;
     },
   ): Promise<ContactRow> {
     const [row] = await tx.insert(contacts).values(values).returning();
@@ -235,7 +259,10 @@ export class ContactsRepository {
     tx: Tx,
     id: string,
     patch: Partial<
-      Pick<ContactRow, 'name' | 'phoneE164' | 'altPhones' | 'email' | 'city' | 'consent'>
+      Pick<
+        ContactRow,
+        'name' | 'phoneE164' | 'altPhones' | 'email' | 'city' | 'consent' | 'customFields'
+      >
     >,
     customFields: Record<string, unknown> = {},
   ): Promise<ContactRow> {
