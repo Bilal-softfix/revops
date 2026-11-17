@@ -44,6 +44,7 @@ import { useSession } from '@/lib/session';
 import { common } from '@/lib/strings/common';
 import { leadStrings as s } from '@/lib/strings/leads';
 import { BulkActionBar } from './bulk-actions';
+import { ExportLeadsButton } from './export-button';
 import { LeadBoard } from './lead-board';
 import { LeadFiltersBar } from './lead-filters';
 import { LeadForm } from './lead-form';
@@ -111,6 +112,7 @@ export function LeadsView() {
           <p className="text-sm text-muted-foreground">{s.description}</p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
+          <ExportLeadsButton filters={effective} />
           <SavedViews filters={filters} layout={layout} onApply={(f, l) => navigate(f, l)} />
           <div role="group" aria-label={s.layoutLabel} className="flex rounded-md border">
             {(['list', 'board'] as const).map((l) => (
