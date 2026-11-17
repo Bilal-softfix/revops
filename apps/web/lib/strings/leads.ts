@@ -112,4 +112,35 @@ export const leadStrings = {
     noFields: 'No custom fields for this pipeline.',
   },
   stageChanged: (stage: string) => `Moved to ${stage}`,
+  bulk: {
+    selectAll: 'Select all leads on this page',
+    select: (name: string) => `Select lead ${name}`,
+    selected: (n: number) => `${n} selected`,
+    barLabel: 'Bulk actions',
+    assign: 'Assign to…',
+    assignTitle: (n: number) => `Assign ${n} ${n === 1 ? 'lead' : 'leads'}`,
+    assignHint: 'Each lead’s timeline records the change.',
+    owner: 'Owner',
+    pickOwner: 'Choose an owner',
+    unassigned: 'Unassigned',
+    assignConfirm: 'Assign',
+    move: 'Move to stage…',
+    moveTitle: (n: number) => `Move ${n} ${n === 1 ? 'lead' : 'leads'}`,
+    moveHint: 'Leads from other pipelines move into the pipeline you pick.',
+    pipeline: 'Pipeline',
+    stage: 'Stage',
+    pickStage: 'Choose a stage',
+    lostReason: 'Lost reason',
+    customReason: 'Or type a reason',
+    moveConfirm: 'Move',
+    clear: 'Clear',
+    result: (r: { updated: number; unchanged: number; notFound: number }) =>
+      [
+        `${r.updated} updated`,
+        r.unchanged > 0 ? `${r.unchanged} already there` : null,
+        r.notFound > 0 ? `${r.notFound} not found` : null,
+      ]
+        .filter(Boolean)
+        .join(' · '),
+  },
 } as const;

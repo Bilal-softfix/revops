@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import type { Tx } from '@revops/db';
 import {
+  type BulkAssignLeadsRequest,
+  type BulkChangeLeadStageRequest,
+  type BulkLeadResult,
   CONTACT_CREATED,
   type ChangeLeadStageRequest,
   type CreateLeadRequest,
@@ -62,6 +65,37 @@ function isStageGone(error: unknown): boolean {
     if (pg?.code === '23503' && pg.constraint_name === 'leads_stage_fk') return true;
   }
   return false;
+}
+
+/** Maps a concurrent stage delete (FK violation on the lead's stage) to a 409. */
+async function mapStageGone<T>(work: Promise<T>): Promise<T> {
+  try {
+    return await work;
+  } catch (error) {
+    if (isStageGone(error)) {
+      throw new DomainError(
+        'stage_gone',
+        409,
+        'That stage was just deleted — reload and try again',
+      );
+    }
+    throw error;
+  }
+}
+
+/** Splits a bulk request's ids (in request order) into updated / unchanged / not found. */
+function bulkResult(
+  requested: readonly string[],
+  found: readonly LeadRow[],
+  changed: readonly LeadRow[],
+): BulkLeadResult {
+  const foundIds = new Set(found.map((l) => l.id));
+  const changedIds = new Set(changed.map((l) => l.id));
+  return {
+    updatedIds: requested.filter((id) => changedIds.has(id)),
+    unchangedIds: requested.filter((id) => foundIds.has(id) && !changedIds.has(id)),
+    notFoundIds: requested.filter((id) => !foundIds.has(id)),
+  };
 }
 
 /** won/lost bookkeeping for a lead entering a stage of `category`. */
@@ -130,7 +164,7 @@ export class LeadsService {
   }
 
   /** 400 unless every custom-field filter names an active lead field with a fitting value. */
-  private checkFilters(filters: LeadFilters, defs: readonly CustomFieldDef[]): void {
+  checkFilters(filters: LeadFilters, defs: readonly CustomFieldDef[]): void {
     const errors: { path: string; message: string }[] = [];
     for (const [key, value] of Object.entries(filters.customFields ?? {})) {
       const def = defs.find((d) => d.key === key);
@@ -336,7 +370,9 @@ export class LeadsService {
         fields: Object.keys(input).sort(),
         ...(input.customFields ? { customFields: Object.keys(input.customFields).sort() } : {}),
       });
-      if (ownerChanged) await this.recordAssignment(tx, auth, meta, current, input.ownerUserId);
+      if (ownerChanged) {
+        await this.recordAssignments(tx, auth, meta, [current], input.ownerUserId ?? null, false);
+      }
       // An assign-role user can hand a lead away and still see it (read-all).
       return this.load(tx, auth, id);
     });
@@ -347,14 +383,14 @@ export class LeadsService {
    * don't apply to the new pipeline stay stored (hidden); its required fields aren't enforced
    * until the lead is next edited (Dev decision, M1-T3b).
    */
-  async changeStage(
+  changeStage(
     auth: CrmAuth,
     id: string,
     input: ChangeLeadStageRequest,
     meta: RequestMeta,
   ): Promise<Lead> {
-    try {
-      return await this.crm.withCrm(auth, async (tx) => {
+    return mapStageGone(
+      this.crm.withCrm(auth, async (tx) => {
         const current = await this.repository.lockVisible(tx, this.scope(auth), id);
         if (!current) throw crmNotFound();
         const pipelineId = input.pipelineId ?? current.pipelineId;
@@ -370,75 +406,100 @@ export class LeadsService {
         if (stage.id === current.stageId && pipelineId === current.pipelineId) {
           return this.load(tx, auth, id); // no-op: no event
         }
-        if (stage.category === 'lost' && !input.lostReason) {
-          throw invalid([{ path: 'lostReason', message: 'a lost lead needs a reason' }]);
-        }
-        const now = this.clock.now();
-        const next = outcome(stage.category, now, input.lostReason);
-        // Moving within won (or within lost) keeps the original date.
-        if (stage.category === 'won' && current.status === 'won') next.wonAt = current.wonAt;
-        await this.repository.update(tx, id, { pipelineId, stageId: stage.id, ...next });
-        await this.audit(
-          tx,
-          auth,
-          meta,
-          'lead.stage_changed',
-          id,
-          {
-            pipelineId,
-            stageId: stage.id,
-            status: stage.category,
-            ...(next.lostReason ? { lostReason: next.lostReason } : {}),
-          },
-          { pipelineId: current.pipelineId, stageId: current.stageId, status: current.status },
-        );
-        const fromStages = await this.repository.stagesOf(tx, current.pipelineId);
-        await this.timeline(tx, auth, current, 'stage_changed', now, {
-          fromStage: {
-            id: current.stageId,
-            name: fromStages.find((s) => s.id === current.stageId)?.name ?? '',
-          },
-          stage: { id: stage.id, name: stage.name },
-          ...(pipelineId !== current.pipelineId
-            ? {
-                fromPipeline: {
-                  id: current.pipelineId,
-                  name: await this.repository.pipelineName(tx, current.pipelineId),
-                },
-                pipeline: {
-                  id: pipelineId,
-                  name: await this.repository.pipelineName(tx, pipelineId),
-                },
-              }
-            : {}),
-          ...(next.lostReason ? { lostReason: next.lostReason } : {}),
-        });
-        await recordEvent(tx, LEAD_STAGE_CHANGED, {
-          tenantId: auth.tenantId,
-          aggregateId: id,
-          payload: {
-            tenantId: auth.tenantId,
-            leadId: id,
-            fromPipelineId: current.pipelineId,
-            fromStageId: current.stageId,
-            toPipelineId: pipelineId,
-            toStageId: stage.id,
-            toStatus: stage.category,
-            actorUserId: auth.userId,
-          },
+        await this.applyStageMoves(tx, auth, meta, [current], {
+          pipelineId,
+          stage,
+          lostReason: input.lostReason,
+          bulk: false,
         });
         return this.load(tx, auth, id);
-      });
-    } catch (error) {
-      if (isStageGone(error)) {
-        throw new DomainError(
-          'stage_gone',
-          409,
-          'That stage was just deleted — reload and try again',
+      }),
+    );
+  }
+
+  /**
+   * Bulk stage move (M1-T6): the single-move rules per lead, all-or-nothing for the leads found.
+   * Without `pipelineId` every selected lead must already be in the stage's pipeline.
+   */
+  bulkChangeStage(
+    auth: CrmAuth,
+    input: BulkChangeLeadStageRequest,
+    meta: RequestMeta,
+  ): Promise<BulkLeadResult> {
+    return mapStageGone(
+      this.crm.withCrm(auth, async (tx) => {
+        let stage: StageRow | undefined;
+        if (input.pipelineId) {
+          if (!(await this.repository.activePipeline(tx, input.pipelineId))) {
+            throw invalid([{ path: 'pipelineId', message: 'unknown pipeline' }]);
+          }
+          stage = (await this.repository.stagesOf(tx, input.pipelineId)).find(
+            (s) => s.id === input.stageId,
+          );
+          if (!stage) {
+            throw invalid([{ path: 'stageId', message: 'not a stage of this pipeline' }]);
+          }
+        } else {
+          stage = await this.repository.activeStage(tx, input.stageId);
+          if (!stage) throw invalid([{ path: 'stageId', message: 'unknown stage' }]);
+        }
+        const target = stage;
+        const pipelineId = target.pipelineId;
+        const found = await this.repository.lockVisibleMany(tx, this.scope(auth), input.leadIds);
+        if (!input.pipelineId && found.some((l) => l.pipelineId !== pipelineId)) {
+          throw invalid([
+            {
+              path: 'leadIds',
+              message: 'some leads are in another pipeline — choose the pipeline to move them to',
+            },
+          ]);
+        }
+        const changed = found.filter(
+          (l) => !(l.stageId === target.id && l.pipelineId === pipelineId),
         );
-      }
-      throw error;
-    }
+        await this.applyStageMoves(tx, auth, meta, changed, {
+          pipelineId,
+          stage: target,
+          lostReason: input.lostReason,
+          bulk: true,
+        });
+        const result = bulkResult(input.leadIds, found, changed);
+        await this.audit(tx, auth, meta, 'lead.bulk_stage_changed', null, {
+          count: result.updatedIds.length,
+          leadIds: result.updatedIds,
+          pipelineId,
+          stageId: target.id,
+        });
+        return result;
+      }),
+    );
+  }
+
+  /** Bulk assign (M1-T6): needs `lead.assign`; null unassigns. All-or-nothing for the leads found. */
+  async bulkAssign(
+    auth: CrmAuth,
+    input: BulkAssignLeadsRequest,
+    meta: RequestMeta,
+  ): Promise<BulkLeadResult> {
+    if (!hasPermission(auth.role, 'lead.assign')) throw forbidden('You can’t assign leads');
+    return this.crm.withCrm(auth, async (tx) => {
+      const ownerUserId = await this.resolveOwner(tx, auth, input.ownerUserId);
+      const found = await this.repository.lockVisibleMany(tx, this.scope(auth), input.leadIds);
+      const changed = found.filter((l) => l.ownerUserId !== ownerUserId);
+      await this.repository.updateMany(
+        tx,
+        changed.map((l) => l.id),
+        { ownerUserId },
+      );
+      await this.recordAssignments(tx, auth, meta, changed, ownerUserId, true);
+      const result = bulkResult(input.leadIds, found, changed);
+      await this.audit(tx, auth, meta, 'lead.bulk_assigned', null, {
+        count: result.updatedIds.length,
+        leadIds: result.updatedIds,
+        ownerUserId,
+      });
+      return result;
+    });
   }
 
   async remove(auth: CrmAuth, id: string, meta: RequestMeta): Promise<void> {
@@ -540,43 +601,151 @@ export class LeadsService {
     return row.id;
   }
 
-  private async recordAssignment(
+  /**
+   * Timeline entry, audit row and `lead.assigned.v1` for each lead whose owner changed to
+   * `toUserId` (rows already updated; `changed` holds their previous state). PATCH and bulk.
+   */
+  private async recordAssignments(
     tx: Tx,
     auth: CrmAuth,
     meta: RequestMeta,
-    current: LeadRow,
-    to: string | null | undefined,
+    changed: readonly LeadRow[],
+    toUserId: string | null,
+    bulk: boolean,
   ): Promise<void> {
-    const toUserId = to ?? null;
-    const names = await this.repository.userNames(
-      tx,
-      [current.ownerUserId, toUserId].filter((x): x is string => x !== null),
-    );
+    if (changed.length === 0) return;
+    const names = await this.repository.userNames(tx, [
+      ...new Set(
+        [toUserId, ...changed.map((l) => l.ownerUserId)].filter((x): x is string => x !== null),
+      ),
+    ]);
     const userRef = (id: string | null) => (id ? { id, name: names.get(id) ?? '' } : null);
-    await this.timeline(tx, auth, current, 'assignment', this.clock.now(), {
-      fromOwner: userRef(current.ownerUserId),
-      owner: userRef(toUserId),
-    });
-    await this.audit(
+    const now = this.clock.now();
+    await this.activities.insertTimeline(
       tx,
-      auth,
-      meta,
-      'lead.assigned',
-      current.id,
-      { ownerUserId: toUserId },
-      { ownerUserId: current.ownerUserId },
+      changed.map((lead) =>
+        this.timelineEntry(auth, lead, 'assignment', now, {
+          fromOwner: userRef(lead.ownerUserId),
+          owner: userRef(toUserId),
+          ...(bulk ? { bulk: true } : {}),
+        }),
+      ),
     );
-    await recordEvent(tx, LEAD_ASSIGNED, {
-      tenantId: auth.tenantId,
-      aggregateId: current.id,
-      payload: {
+    for (const lead of changed) {
+      await this.audit(
+        tx,
+        auth,
+        meta,
+        'lead.assigned',
+        lead.id,
+        { ownerUserId: toUserId, ...(bulk ? { bulk: true } : {}) },
+        { ownerUserId: lead.ownerUserId },
+      );
+      await recordEvent(tx, LEAD_ASSIGNED, {
         tenantId: auth.tenantId,
-        leadId: current.id,
-        fromUserId: current.ownerUserId,
-        toUserId,
-        actorUserId: auth.userId,
-      },
-    });
+        aggregateId: lead.id,
+        payload: {
+          tenantId: auth.tenantId,
+          leadId: lead.id,
+          fromUserId: lead.ownerUserId,
+          toUserId,
+          actorUserId: auth.userId,
+        },
+      });
+    }
+  }
+
+  /**
+   * Moves `changed` (locked, visible, not already in the stage) to `target.stage`, keeping
+   * status / won / lost fields in sync, then writes a timeline entry, audit row and
+   * `lead.stage_changed.v1` per lead. Shared by the single and the bulk stage change.
+   */
+  private async applyStageMoves(
+    tx: Tx,
+    auth: CrmAuth,
+    meta: RequestMeta,
+    changed: readonly LeadRow[],
+    target: { pipelineId: string; stage: StageRow; lostReason: string | undefined; bulk: boolean },
+  ): Promise<void> {
+    if (changed.length === 0) return;
+    const { pipelineId, stage, bulk } = target;
+    if (stage.category === 'lost' && !target.lostReason) {
+      throw invalid([{ path: 'lostReason', message: 'a lost lead needs a reason' }]);
+    }
+    const now = this.clock.now();
+    const next = outcome(stage.category, now, target.lostReason);
+    const move = { pipelineId, stageId: stage.id, ...next };
+    // Moving within won keeps the original date.
+    const keepsWonAt = (l: LeadRow) => stage.category === 'won' && l.status === 'won';
+    const { wonAt: _wonAt, ...moveKeepingWonAt } = move;
+    await this.repository.updateMany(
+      tx,
+      changed.filter((l) => !keepsWonAt(l)).map((l) => l.id),
+      move,
+    );
+    await this.repository.updateMany(
+      tx,
+      changed.filter(keepsWonAt).map((l) => l.id),
+      moveKeepingWonAt,
+    );
+    const fromPipelineIds = [...new Set(changed.map((l) => l.pipelineId))];
+    const stageNames = await this.repository.stageNames(tx, [
+      ...new Set(changed.map((l) => l.stageId)),
+    ]);
+    const pipelineNames = fromPipelineIds.some((id) => id !== pipelineId)
+      ? await this.repository.pipelineNames(tx, [...fromPipelineIds, pipelineId])
+      : new Map<string, string>();
+    await this.activities.insertTimeline(
+      tx,
+      changed.map((lead) =>
+        this.timelineEntry(auth, lead, 'stage_changed', now, {
+          fromStage: { id: lead.stageId, name: stageNames.get(lead.stageId) ?? '' },
+          stage: { id: stage.id, name: stage.name },
+          ...(pipelineId !== lead.pipelineId
+            ? {
+                fromPipeline: {
+                  id: lead.pipelineId,
+                  name: pipelineNames.get(lead.pipelineId) ?? '',
+                },
+                pipeline: { id: pipelineId, name: pipelineNames.get(pipelineId) ?? '' },
+              }
+            : {}),
+          ...(next.lostReason ? { lostReason: next.lostReason } : {}),
+          ...(bulk ? { bulk: true } : {}),
+        }),
+      ),
+    );
+    for (const lead of changed) {
+      await this.audit(
+        tx,
+        auth,
+        meta,
+        'lead.stage_changed',
+        lead.id,
+        {
+          pipelineId,
+          stageId: stage.id,
+          status: stage.category,
+          ...(next.lostReason ? { lostReason: next.lostReason } : {}),
+          ...(bulk ? { bulk: true } : {}),
+        },
+        { pipelineId: lead.pipelineId, stageId: lead.stageId, status: lead.status },
+      );
+      await recordEvent(tx, LEAD_STAGE_CHANGED, {
+        tenantId: auth.tenantId,
+        aggregateId: lead.id,
+        payload: {
+          tenantId: auth.tenantId,
+          leadId: lead.id,
+          fromPipelineId: lead.pipelineId,
+          fromStageId: lead.stageId,
+          toPipelineId: pipelineId,
+          toStageId: stage.id,
+          toStatus: stage.category,
+          actorUserId: auth.userId,
+        },
+      });
+    }
   }
 
   /** A timeline entry by the calling user (M1-T5), in the caller's transaction. */
@@ -589,17 +758,27 @@ export class LeadsService {
     data: Record<string, unknown>,
   ): Promise<void> {
     return this.activities.insertTimeline(tx, [
-      {
-        tenantId: auth.tenantId,
-        leadId: lead.id,
-        contactId: lead.contactId,
-        type,
-        actorType: 'user',
-        actorId: auth.userId,
-        data,
-        occurredAt,
-      },
+      this.timelineEntry(auth, lead, type, occurredAt, data),
     ]);
+  }
+
+  private timelineEntry(
+    auth: CrmAuth,
+    lead: { id: string; contactId: string },
+    type: TimelineEntry['type'],
+    occurredAt: Date,
+    data: Record<string, unknown>,
+  ): TimelineEntry {
+    return {
+      tenantId: auth.tenantId,
+      leadId: lead.id,
+      contactId: lead.contactId,
+      type,
+      actorType: 'user',
+      actorId: auth.userId,
+      data,
+      occurredAt,
+    };
   }
 
   private audit(
@@ -607,7 +786,8 @@ export class LeadsService {
     auth: CrmAuth,
     meta: RequestMeta,
     action: string,
-    entityId: string,
+    /** null for a bulk request's summary row. */
+    entityId: string | null,
     after: Record<string, unknown>,
     before?: Record<string, unknown>,
   ) {

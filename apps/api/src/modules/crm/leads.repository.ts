@@ -216,6 +216,20 @@ export class LeadsRepository {
     return row;
   }
 
+  /**
+   * Locks the visible, non-deleted leads among `ids` for a bulk state change — in id order, so
+   * concurrent bulk requests over overlapping selections can't deadlock (M1-T6).
+   */
+  async lockVisibleMany(tx: Tx, scope: LeadScope, ids: readonly string[]): Promise<LeadRow[]> {
+    if (ids.length === 0) return [];
+    return tx
+      .select()
+      .from(leads)
+      .where(and(inArray(leads.id, [...ids]), isNull(leads.deletedAt), this.visible(scope)))
+      .orderBy(asc(leads.id))
+      .for('update');
+  }
+
   async insert(
     tx: Tx,
     values: {
@@ -280,6 +294,24 @@ export class LeadsRepository {
       .where(eq(leads.id, id));
   }
 
+  /** The same patch on many leads (bulk actions); one statement. */
+  async updateMany(
+    tx: Tx,
+    ids: readonly string[],
+    patch: Partial<
+      Pick<
+        LeadRow,
+        'ownerUserId' | 'pipelineId' | 'stageId' | 'status' | 'wonAt' | 'lostAt' | 'lostReason'
+      >
+    >,
+  ): Promise<void> {
+    if (ids.length === 0) return;
+    await tx
+      .update(leads)
+      .set({ ...patch, updatedAt: new Date() })
+      .where(inArray(leads.id, [...ids]));
+  }
+
   async softDelete(tx: Tx, id: string, now: Date): Promise<void> {
     await tx.update(leads).set({ deletedAt: now, updatedAt: now }).where(eq(leads.id, id));
   }
@@ -308,12 +340,43 @@ export class LeadsRepository {
       .orderBy(asc(pipelineStages.position), asc(pipelineStages.createdAt));
   }
 
+  /** A stage of an active (non-deleted) pipeline, by id. */
+  async activeStage(tx: Tx, id: string): Promise<StageRow | undefined> {
+    const [row] = await tx
+      .select({ stage: pipelineStages })
+      .from(pipelineStages)
+      .innerJoin(pipelines, eq(pipelines.id, pipelineStages.pipelineId))
+      .where(and(eq(pipelineStages.id, id), isNull(pipelines.deletedAt)))
+      .limit(1);
+    return row?.stage;
+  }
+
   async pipelineName(tx: Tx, id: string): Promise<string> {
     const [row] = await tx
       .select({ name: pipelines.name })
       .from(pipelines)
       .where(eq(pipelines.id, id));
     return row?.name ?? '';
+  }
+
+  /** id → name for stages (timeline snapshots). */
+  async stageNames(tx: Tx, ids: readonly string[]): Promise<Map<string, string>> {
+    if (ids.length === 0) return new Map();
+    const rows = await tx
+      .select({ id: pipelineStages.id, name: pipelineStages.name })
+      .from(pipelineStages)
+      .where(inArray(pipelineStages.id, [...ids]));
+    return new Map(rows.map((r) => [r.id, r.name]));
+  }
+
+  /** id → name for pipelines (timeline snapshots). */
+  async pipelineNames(tx: Tx, ids: readonly string[]): Promise<Map<string, string>> {
+    if (ids.length === 0) return new Map();
+    const rows = await tx
+      .select({ id: pipelines.id, name: pipelines.name })
+      .from(pipelines)
+      .where(inArray(pipelines.id, [...ids]));
+    return new Map(rows.map((r) => [r.id, r.name]));
   }
 
   /** The member's role if they are an active member of this tenant. */

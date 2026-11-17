@@ -1,11 +1,14 @@
 'use client';
 
 import {
+  type BulkAssignLeadsRequest,
+  type BulkChangeLeadStageRequest,
   type ChangeLeadStageRequest,
   type CreateLeadRequest,
   type CreateLeadViewRequest,
   type LeadFilters,
   type UpdateLeadRequest,
+  bulkLeadResultSchema,
   leadBoardSchema,
   leadFiltersToParams,
   leadPageSchema,
@@ -124,6 +127,23 @@ export const useChangeLeadStage = () =>
 export const useDeleteLead = () =>
   useLeadMutation((id: string, csrfToken) =>
     api(`/v1/leads/${id}`, { method: 'DELETE', csrfToken }),
+  );
+
+/** Bulk assign (M1-T6); `ownerUserId: null` unassigns. */
+export const useBulkAssignLeads = () =>
+  useLeadMutation((body: BulkAssignLeadsRequest, csrfToken) =>
+    api('/v1/leads/bulk-assign', {
+      method: 'POST',
+      body,
+      schema: bulkLeadResultSchema,
+      csrfToken,
+    }),
+  );
+
+/** Bulk stage move (M1-T6). */
+export const useBulkChangeLeadStage = () =>
+  useLeadMutation((body: BulkChangeLeadStageRequest, csrfToken) =>
+    api('/v1/leads/bulk-stage', { method: 'POST', body, schema: bulkLeadResultSchema, csrfToken }),
   );
 
 export function useLeadViews() {

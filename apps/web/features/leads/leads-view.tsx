@@ -1,6 +1,12 @@
 'use client';
 
-import { type LeadFilters, customFieldsForPipeline, formatPhone } from '@revops/shared';
+import {
+  type LeadFilters,
+  type Member,
+  type Pipeline,
+  customFieldsForPipeline,
+  formatPhone,
+} from '@revops/shared';
 import { Plus, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
@@ -37,6 +43,7 @@ import { formatPaise } from '@/lib/money';
 import { useSession } from '@/lib/session';
 import { common } from '@/lib/strings/common';
 import { leadStrings as s } from '@/lib/strings/leads';
+import { BulkActionBar } from './bulk-actions';
 import { LeadBoard } from './lead-board';
 import { LeadFiltersBar } from './lead-filters';
 import { LeadForm } from './lead-form';
@@ -139,7 +146,14 @@ export function LeadsView() {
       {layout === 'board' && boardPipeline ? (
         <LeadBoard pipeline={boardPipeline} filters={effective} />
       ) : (
-        <LeadList filters={filters} pipelineNames={items} />
+        <LeadList
+          // A new filter set starts with an empty selection.
+          key={JSON.stringify(filters)}
+          filters={filters}
+          pipelines={items}
+          members={members}
+          canBulk={can('lead.bulk')}
+        />
       )}
       <Dialog open={creating} onOpenChange={setCreating}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
@@ -167,12 +181,18 @@ export function LeadsView() {
 
 function LeadList({
   filters,
-  pipelineNames,
+  pipelines,
+  members,
+  canBulk,
 }: {
   filters: LeadFilters;
-  pipelineNames: readonly { id: string; stages: readonly { id: string; name: string }[] }[];
+  pipelines: readonly Pipeline[];
+  members: readonly Member[];
+  /** Row checkboxes + the bulk action bar (M1-T6). */
+  canBulk: boolean;
 }) {
   const leads = useLeads(filters);
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   if (leads.isPending) return <LoadingState rows={8} />;
   if (leads.isError) return <ErrorState error={leads.error} onRetry={() => void leads.refetch()} />;
   const rows = leads.data.pages.flatMap((p) => p.items);
@@ -180,14 +200,49 @@ function LeadList({
     return <EmptyState title={Object.keys(filters).length > 0 ? s.empty : s.emptyAll} />;
   }
   const stageName = (pipelineId: string, stageId: string) =>
-    pipelineNames.find((p) => p.id === pipelineId)?.stages.find((x) => x.id === stageId)?.name ??
-    '—';
+    pipelines.find((p) => p.id === pipelineId)?.stages.find((x) => x.id === stageId)?.name ?? '—';
+  // Only leads still on screen count as selected (a refetch may drop some).
+  const selected = rows.filter((l) => picked.has(l.id));
+  const allPicked = selected.length === rows.length;
+  const toggle = (id: string) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const pipelineIds = new Set(selected.map((l) => l.pipelineId));
   return (
     <div className="grid gap-3">
+      {canBulk ? (
+        <BulkActionBar
+          selectedIds={selected.map((l) => l.id)}
+          pipelines={pipelines}
+          members={members}
+          defaultPipelineId={pipelineIds.size === 1 ? [...pipelineIds][0] : undefined}
+          onDone={() => setPicked(new Set())}
+        />
+      ) : null}
       <div className="overflow-x-auto rounded-md border">
         <Table>
           <TableHeader>
             <TableRow>
+              {canBulk ? (
+                <TableHead className="w-10">
+                  <input
+                    type="checkbox"
+                    className="size-4 accent-primary"
+                    aria-label={s.bulk.selectAll}
+                    checked={allPicked}
+                    ref={(el) => {
+                      if (el) el.indeterminate = selected.length > 0 && !allPicked;
+                    }}
+                    onChange={() =>
+                      setPicked(allPicked ? new Set() : new Set(rows.map((l) => l.id)))
+                    }
+                  />
+                </TableHead>
+              ) : null}
               <TableHead>{s.columns.contact}</TableHead>
               <TableHead>{s.columns.stage}</TableHead>
               <TableHead>{s.columns.owner}</TableHead>
@@ -198,7 +253,22 @@ function LeadList({
           </TableHeader>
           <TableBody>
             {rows.map((lead) => (
-              <TableRow key={lead.id} data-testid={`lead-${lead.contact.name}`}>
+              <TableRow
+                key={lead.id}
+                data-testid={`lead-${lead.contact.name}`}
+                data-state={picked.has(lead.id) ? 'selected' : undefined}
+              >
+                {canBulk ? (
+                  <TableCell>
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-primary"
+                      aria-label={s.bulk.select(lead.contact.name)}
+                      checked={picked.has(lead.id)}
+                      onChange={() => toggle(lead.id)}
+                    />
+                  </TableCell>
+                ) : null}
                 <TableCell>
                   <Link href={`/leads/${lead.id}`} className="font-medium hover:underline">
                     {lead.contact.name}

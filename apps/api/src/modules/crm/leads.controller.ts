@@ -11,6 +11,9 @@ import {
   Req,
 } from '@nestjs/common';
 import {
+  type BulkAssignLeadsRequest,
+  type BulkChangeLeadStageRequest,
+  type BulkLeadResult,
   type ChangeLeadStageRequest,
   type CreateLeadRequest,
   type CreateLeadViewRequest,
@@ -22,6 +25,9 @@ import {
   type LeadView,
   type LeadViewList,
   type UpdateLeadRequest,
+  bulkAssignLeadsRequestSchema,
+  bulkChangeLeadStageRequestSchema,
+  bulkLeadResultSchema,
   changeLeadStageRequestSchema,
   createLeadRequestSchema,
   createLeadViewRequestSchema,
@@ -76,6 +82,35 @@ export class LeadsController {
     @Query(new ZodBodyPipe(leadBoardQuerySchema)) query: LeadBoardQuery,
   ): Promise<LeadBoard> {
     return this.leads.board(auth, query);
+  }
+
+  /**
+   * Bulk assign (M1-T6): `lead.bulk` + `lead.assign`. All-or-nothing for the leads found;
+   * invisible/deleted ids come back as notFoundIds. Path avoids clashing with leads/:id/stage.
+   */
+  @Post('leads/bulk-assign')
+  @HttpCode(200)
+  @ZodResponse(200, bulkLeadResultSchema)
+  @RequirePermission('lead.bulk')
+  bulkAssign(
+    @CurrentAuth() auth: CrmAuth,
+    @Body(new ZodBodyPipe(bulkAssignLeadsRequestSchema)) body: BulkAssignLeadsRequest,
+    @Req() req: Request,
+  ): Promise<BulkLeadResult> {
+    return this.leads.bulkAssign(auth, body, requestMeta(req));
+  }
+
+  /** Bulk stage move (M1-T6): the single stage-change rules per lead, one transaction. */
+  @Post('leads/bulk-stage')
+  @HttpCode(200)
+  @ZodResponse(200, bulkLeadResultSchema)
+  @RequirePermission('lead.bulk')
+  bulkChangeStage(
+    @CurrentAuth() auth: CrmAuth,
+    @Body(new ZodBodyPipe(bulkChangeLeadStageRequestSchema)) body: BulkChangeLeadStageRequest,
+    @Req() req: Request,
+  ): Promise<BulkLeadResult> {
+    return this.leads.bulkChangeStage(auth, body, requestMeta(req));
   }
 
   @Get('leads/:id')
