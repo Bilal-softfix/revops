@@ -140,6 +140,11 @@ Permissions are strings (`lead.read.all`, `lead.read.assigned`, `routing.manage`
 - **Deleting a contact with live leads → 409 `contact_has_leads`** with `leadCount`; the message says to delete or move them first (Dev decision, M2-T0). Soft-deleted leads don't count. Full erasure (DPDP) is a dedicated M8 flow.
   - The delete locks the contact row `FOR UPDATE`; a lead create linking a contact (by id or by duplicate phone/email) takes `FOR SHARE` on it, so either the delete sees the new lead, or the create waits and then finds the contact gone (400 `unknown contact`, or 409 `contact_gone` on the duplicate path).
 
+## Lead sources (M2-T1)
+- `/v1/lead-sources`: list (every role, lead forms), create / `PATCH` (name, isActive, whole config) / soft `DELETE` / `POST :id/rotate-key` / `POST :id/rotate-secret` with `source.manage` (owner, admin), audited (`lead_source.*`, field names only, never secrets or config values).
+- Config references (pipeline, open stage, assignment user, `lead.<key>` fields) are checked against the tenant on every write; other tenants' ids read as unknown.
+- **Secrets at rest:** `SecretBox` (platform) wraps `@revops/shared/crypto`: AES-256-GCM envelope encryption (per-value DEK wrapped by the `DATA_ENCRYPTION_KEY` KEK), with the row context (`lead_source:<tenant>:<id>:webhook`) as associated data. Format `v1:<kekId>:…` so M8 can move the KEK to KMS. Without the key: 503 `encryption_unavailable`, never plaintext. The webhook secret (`whsec_…`) is returned once, on create/rotate.
+
 ## Custom fields (M1-T2)
 - **Definitions:** per tenant and entity (contact/lead), seeded from the industry template and edited in Settings → Custom fields (`customfield.manage`: owner, admin). Everyone can read them, because forms need them.
   - Key and type are immutable (the update schema is strict).

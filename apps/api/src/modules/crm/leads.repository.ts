@@ -421,7 +421,7 @@ export class LeadsRepository {
     const [row] = await tx
       .select({ id: leadSources.id })
       .from(leadSources)
-      .where(eq(leadSources.id, id))
+      .where(and(eq(leadSources.id, id), isNull(leadSources.deletedAt)))
       .limit(1);
     return Boolean(row);
   }

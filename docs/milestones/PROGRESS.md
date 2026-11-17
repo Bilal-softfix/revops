@@ -1,7 +1,7 @@
 # PROGRESS
 
 ## Current
-Milestone: M2 — Lead Capture & Dedupe. Branch: `milestone/m2-lead-capture`, cut 2026-11-17 from the tip of `milestone/m1-crm-core` (44b37dc): PR #2 was still open and tag `m1-done` points at the M0 merge (5f428c5); `gh pr merge` was denied by permissions. **Dev to do:** merge PR #2, move `m1-done` to the merge commit. M2-T0 done 2026-11-17. M2 plan approved 2026-11-17 (order: T1 → T4 → T6 → T2 → T3 → T5, sequential; plan incl. threat model in `docs/milestones/M2-lead-capture.md` tasks). Next: M2-T1.
+Milestone: M2 — Lead Capture & Dedupe. Branch: `milestone/m2-lead-capture`, cut 2026-11-17 from the tip of `milestone/m1-crm-core` (44b37dc): PR #2 was still open and tag `m1-done` points at the M0 merge (5f428c5); `gh pr merge` was denied by permissions. **Dev to do:** merge PR #2, move `m1-done` to the merge commit. M2-T0 done 2026-11-17. M2 plan approved 2026-11-17 (order: T1 → T4 → T6 → T2 → T3 → T5, sequential; plan incl. threat model in `docs/milestones/M2-lead-capture.md` tasks). M2-T1 done 2026-11-17. Next: M2-T4.
 
 M1 history:
 Milestone: M1 — CRM Core. Branch: `milestone/m1-crm-core` (from main after M0 merged, tag `m0-done`).
@@ -157,9 +157,14 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
   - Pipeline-delete race: lead create / stage change / bulk stage lock the target pipeline `FOR SHARE` before any lead row (pipeline → leads, the deletes' order: no deadlock). New 409 `lead_moved` for a lead moved between read and lock.
   - Contact delete with live leads → 409 `contact_has_leads` (`leadCount`, "delete them or move them to another contact first"); contact `FOR UPDATE` vs `FOR SHARE` in lead create; 409 `contact_gone` on the duplicate-link path.
   - Tests: `crm-guards.int.test.ts` (9: lock-wait races driven from an owner transaction, a churn test for deadlocks, rate-limit buckets incl. window reset), `reset.test.ts` seed guard (6).
+- [x] M2-T1 Lead sources (2026-11-17):
+  - Migration 0027: `lead_sources.public_key` (unique, random DB default backfills template rows; API keys are 32-byte base64url), `config` jsonb, `webhook_secret_enc`, `deleted_at`; live names unique case-insensitively.
+  - Shared `crm/lead-sources.ts` (`LeadSourceConfig`: allowedOrigins normalised to exact origins, captcha, fieldMapping with safe field names → name/phone/email/city/`lead.<key>`, pipeline/open stage, assignment) + `@revops/shared/crypto` (AES-256-GCM envelope encryption, row-bound context). New env `DATA_ENCRYPTION_KEY` (required in production), new permission `source.manage` (owner/admin).
+  - API `/v1/lead-sources`: list (all roles), create/PATCH/soft DELETE/rotate-key/rotate-secret (audited, no secrets/config values in audit). `SecretBox` platform provider. Deleted sources can't be picked for leads.
+  - Web: Settings → Lead sources (create, rename, pause/resume, copy key, rotate key/secret with confirm, secret shown once, delete).
+  - Tests: `lead-sources.int.test.ts` (11), shared `lead-sources.test.ts` (21) + `crypto.test.ts` (6) + env tests, Playwright `lead-sources.spec.ts`.
 
 ## In progress
-- [ ] M2-T1 Lead sources (public key, config, webhook secret, CRUD + settings UI)
 - [ ] M2-T4 Dedupe engine + `LeadIntakeService` + manual contact merge
 - [ ] M2-T6 Assignment on arrival (round-robin) + `first_response_at`
 - [ ] M2-T2 Public form endpoint + embed snippet
@@ -169,6 +174,7 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
 ## Assumptions made
 _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - 2026-11-17 · M2 Dev decisions (plan approval): dedupe policy per tenant `reenquiry` (default) | `always_new`, inbound channels only (manual UI create unchanged); CSV re-run skips already-imported rows per row (idempotency key); round-robin pool = active agents, inbound leads without an owner; captcha + object storage as interfaces + Fakes (LocalDiskStorage), Turnstile adapter off by default, S3 in M8.
+- 2026-11-17 · M2-T1 (**Review**): the capture-config editors (origins, field mapping, captcha, pipeline, assignment) arrive in the UI with T2/T6, where they're used; the API accepts the full config now. Public key and webhook URL are shown for web_form/api sources only.
 - 2026-11-17 · M2 assumptions (**Review**): first_response_at is set by the first human stage change in M2 (calls/messages hook in M3/M5); contact merge = owner/admin/manager; webhook secrets use envelope encryption with a local KEK from `DATA_ENCRYPTION_KEY` (KMS in M8); raw webhook payloads purged after 30 days.
 - 2026-11-17 · M2-T0 (**Review**): rate-limit ceilings (300 creates, 60 bulk, 30 exports per user per hour) are my sizing for "normal team use"; refused requests (409 duplicates) count toward the create bucket, so the duplicate-check oracle is bounded too. A 403 export doesn't count.
 - 2026-11-17 · M1-T7 assumptions (**Review**):

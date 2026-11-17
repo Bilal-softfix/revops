@@ -24,7 +24,7 @@ All tables: `id uuid pk default gen_random_uuid()`, `created_at`, `updated_at ti
 - **timeline_events** (M1-T5) — lead_id, contact_id, type (created/stage_changed/call/message/note/task/qualification/assignment), actor_type (user/ai/system), actor_id, ref_table, ref_id, summary, data jsonb (name snapshots), occurred_at, seq (identity: write order for ties). Index (tenant_id, lead_id, occurred_at desc, seq desc). Append-only: app_user SELECT, INSERT
 
 ## Capture
-- **lead_sources** — type (web_form/api/csv/phone/whatsapp/meta/manual/walk_in), key (template key), name, is_active. Created minimal in M1-T3a from the industry template; M2 adds config jsonb and public_key (for form embed)
+- **lead_sources** — type (web_form/api/csv/phone/whatsapp/meta/manual/walk_in), key (template key), name, is_active. Created minimal in M1-T3a from the industry template. M2-T1 adds public_key (globally unique; volatile DB default for template rows, 32-byte base64url from the API; rotatable), config jsonb (`LeadSourceConfig`: allowedOrigins, captcha, fieldMapping, pipelineId/stageId, assignment), webhook_secret_enc (api sources; envelope-encrypted, context-bound to the row), deleted_at (soft delete; live names unique case-insensitively per tenant)
 - **inbound_webhooks** — provider, external_event_id, signature_valid, payload jsonb, status, error, processed_at; unique(provider, external_event_id)
 - **imports** — file_key, status, totals jsonb, error_report_key
 

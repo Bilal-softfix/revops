@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { leadSourceTypeSchema, stageCategorySchema } from './enums.js';
+import { stageCategorySchema } from './enums.js';
 
 // CRM API contracts (/v1/pipelines, /v1/lead-sources …), shared by apps/api and apps/web.
 
@@ -26,13 +26,4 @@ export type Pipeline = z.infer<typeof pipelineSchema>;
 export const pipelineListSchema = z.object({ items: z.array(pipelineSchema) });
 export type PipelineList = z.infer<typeof pipelineListSchema>;
 
-export const leadSourceSchema = z.object({
-  id: z.uuid(),
-  key: z.string().nullable(),
-  name: z.string(),
-  type: leadSourceTypeSchema,
-  isActive: z.boolean(),
-});
-export type LeadSource = z.infer<typeof leadSourceSchema>;
-export const leadSourceListSchema = z.object({ items: z.array(leadSourceSchema) });
-export type LeadSourceList = z.infer<typeof leadSourceListSchema>;
+// Lead source contracts live in ./lead-sources.ts (M2-T1).

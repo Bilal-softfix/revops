@@ -11,6 +11,7 @@ export const shellStrings = {
     team: 'Team',
     customFields: 'Custom fields',
     pipelines: 'Pipelines',
+    leadSources: 'Lead sources',
     crmSettings: 'CRM settings',
   },
   tenantSwitcher: {

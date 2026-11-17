@@ -19,6 +19,9 @@ import { LeadsExportController } from './leads-export.controller';
 import { LeadsExportService } from './leads-export.service';
 import { LeadsController } from './leads.controller';
 import { LeadsRepository } from './leads.repository';
+import { LeadSourcesController } from './lead-sources.controller';
+import { LeadSourcesRepository } from './lead-sources.repository';
+import { LeadSourcesService } from './lead-sources.service';
 import { LeadsService } from './leads.service';
 import { PipelinesController } from './pipelines.controller';
 import { PipelinesRepository } from './pipelines.repository';
@@ -35,6 +38,7 @@ export { type CrmAuth, CrmService } from './crm.service';
     ContactsController,
     CustomFieldsController,
     LeadsController,
+    LeadSourcesController,
     LeadsExportController,
     ActivitiesController,
   ],
@@ -50,6 +54,8 @@ export { type CrmAuth, CrmService } from './crm.service';
     PipelinesService,
     LeadsRepository,
     LeadsService,
+    LeadSourcesRepository,
+    LeadSourcesService,
     LeadViewsRepository,
     LeadViewsService,
     LeadsExportService,

@@ -6,12 +6,11 @@ import {
   eq,
   inArray,
   isNull,
-  leadSources,
   pipelineStages,
   pipelines,
   tenants,
 } from '@revops/db';
-import type { LeadSource, Pipeline } from '@revops/shared';
+import type { Pipeline } from '@revops/shared';
 
 /** SQL for the CRM setup tables. Every method runs in the caller's tenant transaction (RLS). */
 @Injectable()
@@ -75,20 +74,6 @@ export class CrmRepository {
           probability: s.probability,
           position: s.position,
         })),
-    }));
-  }
-
-  async listLeadSources(tx: Tx): Promise<LeadSource[]> {
-    const rows = await tx
-      .select()
-      .from(leadSources)
-      .orderBy(asc(leadSources.createdAt), asc(leadSources.name));
-    return rows.map((s) => ({
-      id: s.id,
-      key: s.key,
-      name: s.name,
-      type: s.type,
-      isActive: s.isActive,
     }));
   }
 }

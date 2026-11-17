@@ -11,7 +11,7 @@ describe('role-based navigation', () => {
     for (const role of ROLES) {
       const expected = ['Dashboard', 'Leads', 'Contacts', 'My tasks', 'Team'];
       if (role === 'owner' || role === 'admin') {
-        expected.push('Custom fields', 'Pipelines', 'CRM settings');
+        expected.push('Custom fields', 'Pipelines', 'Lead sources', 'CRM settings');
       }
       expect(labels(role)).toEqual(expected);
     }

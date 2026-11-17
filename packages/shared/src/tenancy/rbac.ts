@@ -38,6 +38,8 @@ export const PERMISSIONS = [
   'customfield.manage',
   /** Create, edit, reorder and delete pipelines and their stages. */
   'pipeline.manage',
+  /** Create and edit lead sources, rotate their public keys and webhook secrets (M2-T1). */
+  'source.manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -58,6 +60,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     'crm.settings.manage',
     'customfield.manage',
     'pipeline.manage',
+    'source.manage',
   ],
   admin: [
     'member.read',
@@ -75,6 +78,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     'crm.settings.manage',
     'customfield.manage',
     'pipeline.manage',
+    'source.manage',
   ],
   manager: [
     'member.read',

@@ -1,11 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { type Tx, provisionCrm } from '@revops/db';
-import type {
-  CrmSettings,
-  LeadSourceList,
-  PipelineList,
-  UpdateCrmSettingsRequest,
-} from '@revops/shared';
+import type { CrmSettings, PipelineList, UpdateCrmSettingsRequest } from '@revops/shared';
 import { recordAudit } from '../../platform/outbox/record';
 import type { RequestMeta } from '../../platform/request-meta';
 import { ContactsRepository } from './contacts.repository';
@@ -107,11 +102,5 @@ export class CrmService {
 
   listPipelines(auth: CrmAuth): Promise<PipelineList> {
     return this.withCrm(auth, async (tx) => ({ items: await this.repository.listPipelines(tx) }));
-  }
-
-  listLeadSources(auth: CrmAuth): Promise<LeadSourceList> {
-    return this.withCrm(auth, async (tx) => ({
-      items: await this.repository.listLeadSources(tx),
-    }));
   }
 }

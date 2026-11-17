@@ -74,7 +74,7 @@ Without `--write-env` the script prints the four lines (with passwords) instead 
   - files run one at a time.
 
 ## Trying auth locally (M0-T4)
-- `apps/api/.env` holds API-only vars (see `apps/api/.env.example`): `APP_URL` (web origin used in email links), `EMAIL_DRIVER=console`, `EMAIL_FROM`, `COOKIE_SECURE=true`.
+- `apps/api/.env` holds API-only vars (see `apps/api/.env.example`): `APP_URL` (web origin used in email links), `EMAIL_DRIVER=console`, `EMAIL_FROM`, `COOKIE_SECURE=true`. From M2: `DATA_ENCRYPTION_KEY` (32 random bytes, base64 — generate with `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`); without it, creating an API lead source answers 503 `encryption_unavailable`. Keep it stable: secrets encrypted with one key don't decrypt with another.
 - `pnpm dev`, then `POST http://localhost:4000/v1/auth/signup`. The console email provider prints the verify link to the API terminal, with the recipient masked. `POST /v1/auth/verify-email {"token": …}`, then `POST /v1/auth/login`.
 - Send JSON only (`content-type: application/json`). On unsafe authenticated calls such as logout, send the `csrfToken` from the login/me response as `x-csrf-token`.
 - Rate limits live in Postgres (`rate_limit_buckets`), so they survive API restarts. To clear them in dev, truncate that table as `revops_owner`.
