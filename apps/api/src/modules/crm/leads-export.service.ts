@@ -12,12 +12,14 @@ import { type CsvCell, csvDocument } from '../../platform/csv';
 import { DomainError } from '../../platform/errors/domain-error';
 import { recordAudit } from '../../platform/outbox/record';
 import type { RequestMeta } from '../../platform/request-meta';
-import { forbidden } from '../tenancy/errors';
 import { ContactsRepository } from './contacts.repository';
 import { type CrmAuth, CrmService } from './crm.service';
 import { CustomFieldsService } from './custom-fields.service';
 import { type LeadRecord, LeadsRepository } from './leads.repository';
 import { LeadsService } from './leads.service';
+
+const forbidden = () =>
+  new DomainError('forbidden', 403, 'Your workspace doesn’t allow agents to export leads');
 
 /** Column headers of the leads CSV (custom lead fields follow, by label). */
 export const LEAD_EXPORT_HEADERS = {

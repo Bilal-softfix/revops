@@ -37,7 +37,12 @@ export const FIXTURES = {
   switchSecond: fixture(7, 'switch-second', 'Second Clinic', 'generic', 'Second Owner'),
   leads: fixture(8, 'leads', 'Lead Desk', 'repair-shop', 'Desk Owner'),
   activities: fixture(9, 'activities', 'Task Desk', 'repair-shop', 'Task Owner'),
+  /** M1-T7: 10,000 generated leads (global-setup), owned by the owner or unassigned. */
+  volume: fixture(10, 'volume', 'Big Realty', 'real-estate', 'Volume Owner'),
 } as const satisfies Record<string, Fixture>;
+
+/** Leads generated into the `volume` fixture workspace. */
+export const VOLUME_LEADS = 10_000;
 
 /** The seed input for every fixture: one workspace each, its owner as the only member. */
 export function fixtureAccounts(): { tenants: DemoTenant[]; users: Fixture['owner'][] } {

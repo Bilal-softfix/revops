@@ -27,6 +27,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/bin/migrate.ts",
     "db:seed": "tsx src/bin/seed.ts",
+    "db:explain-leads": "tsx src/bin/explain-leads.ts",
     "db:reset:dev": "tsx src/bin/reset-dev.ts"
   },
   "dependencies": {

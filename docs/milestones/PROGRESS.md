@@ -2,7 +2,7 @@
 
 ## Current
 Milestone: M1 — CRM Core (starting). Branch: `milestone/m1-crm-core` (from main after M0 merged, tag `m0-done`).
-M1-T0 (M0 follow-ups) done 2026-11-12. M1 plan approved 2026-11-12 (order: T3a → T1 → T2 → T3b → T4 → T5 → T6 → T7, sequential). Draft PR #2 open. Done: T3a, T1, T2, T3b, T4, T5 (2026-11-16), T6 (2026-11-17). Next: M1-T7 Seed + 10k-lead volume check.
+M1-T0 (M0 follow-ups) done 2026-11-12. M1 plan approved 2026-11-12 (order: T3a → T1 → T2 → T3b → T4 → T5 → T6 → T7, sequential). Draft PR #2 open. Done: T3a, T1, T2, T3b, T4, T5 (2026-11-16), T6 (2026-11-17, Dev-reviewed + allowAgentExport change), T7 (2026-11-17). Next: `/review-milestone M1`.
 
 M0 history:
 Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-11-05; M0-T5 done 2026-11-11. 2026-11-11: switched to local-first (ADR-011 no Redis/pg-boss, ADR-012 native Postgres). M0-T6, M0-T7 done 2026-11-11. M0 milestone review done 2026-11-12: blockers fixed, PR ready for review. Next: Dev merges PR #1 → start M1 (`/start-milestone M1`). PR #1 merged 2026-11-12 (tag `m0-done`).
@@ -132,11 +132,34 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
     leads; when off they get 403 `forbidden` and no Export button. Bulk bar says "N selected on this
     page". Tests: `leads-export.int.test.ts` "agents (tenant setting allowAgentExport)" (3).
 
+- [x] M1-T7 Seed + 10k-lead volume check (2026-11-17):
+  - Seed: 4 tenants (Demo Realty, Demo Clinic, Demo Software Agency, Demo Repair Shop; manager in
+    all four), 60 generated leads each (`packages/db/src/seed-crm.ts`: deterministic, batched through
+    RLS, every stage incl. won/lost with reasons, owners/unassigned, sources, custom fields, `created`
+    timeline, notes + tasks). Idempotent top-up via `attribution.seed`. `pnpm db:seed -- --volume`
+    adds 10k leads to Demo Realty; `pnpm db:explain-leads` prints plans.
+  - **Volume check (10,060 leads, dev):** list first page / agent / stage / cursor / custom field
+    0.5–0.7 ms on `leads_tenant_created_idx`; search `q` 20 ms and board counts 26 ms (seq scans,
+    fine at this size). `leads-volume.int.test.ts` (4): board counts add up to 10k, 5 cursor pages
+    without overlap, filters, agent scope, each request < 1.5 s (≈10–60 ms locally).
+  - **Finding:** right after a bulk insert, before (auto)ANALYZE, owner list/board requests took
+    40–120 s (bad plans on stale stats); fine after `ANALYZE`. See Tech debt (M2 import).
+  - Playwright `leads-volume.spec.ts` (2) on a new `volume` fixture workspace (10k leads seeded by
+    global-setup + ANALYZE): list paging, "100 selected on this page", board column counts + load more.
+  - `seed.int.test.ts` +3 (four tenants, demo data validity, top-up/isolation).
+
 ## In progress
-- [ ] M1-T7 Seed (4 demo tenants incl. Demo Software Agency + Demo Repair Shop), 10k-lead volume check, Playwright
+_(none — M1 tasks done; next: `/review-milestone M1`)_
 
 ## Assumptions made
 _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
+- 2026-11-17 · M1-T7 assumptions (**Review**):
+  - "4 demo tenants" = the existing Realty + Clinic plus Software Agency + Repair Shop; 60 leads
+    each; the 10k volume set is opt-in (`--volume`, Demo Realty only), not part of every seed.
+  - Seeded leads have a system `created` timeline entry ("Demo data"), no audit/outbox rows (no
+    real user acted); demo phones are +91 9XX… numbers in per-batch blocks, emails `@example.test`.
+  - Volume budget = 1.5 s per API request in the integration test (CI headroom); no index changes
+    were needed at 10k.
 - 2026-11-17 · M1-T6 assumptions (**Review**):
   - ~~Agents can export (their own leads only)~~ → changed by Dev: only with the tenant setting
     `allowAgentExport` (see M1-T6 under Done).
@@ -348,6 +371,7 @@ _M0 milestone review (2026-11-12): non-blocking findings from the code-reviewer 
 - **No-env production run fails open (security L2).** `NODE_ENV` defaults to `development`, so a prod deploy that forgets it gets `/docs`, open `/metrics` and the console email driver (live reset links in logs). M8: require NODE_ENV explicitly outside local dev.
 - **Session and token retention (security L6).** Revoked or expired `sessions` (with IP and user agent) and used `auth_tokens` rows are never purged. Add a purge cron next to the rate-limit purge (DPDP).
 - **API and worker bind 0.0.0.0 (security L7).** In dev, `/metrics` and `/docs` are reachable from the LAN. Bind to 127.0.0.1 by default, or require `METRICS_TOKEN` when bound to a non-loopback address.
+- **Stale planner stats after bulk inserts (M1-T7).** With 10k leads inserted at once and no ANALYZE yet, leads list/board took 40–120 s until autovacuum analyzed (≈1 min). M2 CSV import must ANALYZE after large imports (app_user can't: needs a definer function or a worker job as owner, or `GRANT MAINTAIN` on PG17+).
 - Published `outbox_events` and `processed_events` rows are never purged. Add a retention job when volumes matter (M6/M8).
 - The minimatch moderate advisory (transitive) is still reported by `pnpm audit`; it is dev-tooling only.
 - Worker jobs have no per-job log context (the job id is in the failure log only); add an AsyncLocalStorage child logger when consumers multiply.
