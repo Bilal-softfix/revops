@@ -2,7 +2,7 @@
 
 ## Current
 Milestone: M1 — CRM Core (starting). Branch: `milestone/m1-crm-core` (from main after M0 merged, tag `m0-done`).
-M1-T0 (M0 follow-ups) done 2026-11-12. M1 plan approved 2026-11-12 (order: T3a → T1 → T2 → T3b → T4 → T5 → T6 → T7, sequential). Draft PR #2 open. Done: T3a, T1, T2, T3b, T4, T5 (2026-11-16). Next: M1-T6 Audit + bulk actions + CSV export.
+M1-T0 (M0 follow-ups) done 2026-11-12. M1 plan approved 2026-11-12 (order: T3a → T1 → T2 → T3b → T4 → T5 → T6 → T7, sequential). Draft PR #2 open. Done: T3a, T1, T2, T3b, T4, T5 (2026-11-16), T6 (2026-11-17). Next: M1-T7 Seed + 10k-lead volume check.
 
 M0 history:
 Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-11-05; M0-T5 done 2026-11-11. 2026-11-11: switched to local-first (ADR-011 no Redis/pg-boss, ADR-012 native Postgres). M0-T6, M0-T7 done 2026-11-11. M0 milestone review done 2026-11-12: blockers fixed, PR ready for review. Next: Dev merges PR #1 → start M1 (`/start-milestone M1`). PR #1 merged 2026-11-12 (tag `m0-done`).
@@ -112,12 +112,40 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
     details); "My tasks" page (`/tasks`, overdue/today/upcoming tabs with counts). Playwright
     `activities.spec.ts`; new e2e fixture workspace `activities`.
 
+- [x] M1-T6 Audit + bulk actions + CSV export (2026-11-17):
+  - Permissions `lead.bulk` (owner/admin/manager) and `lead.export` (all roles). Shared contracts
+    for bulk requests/results, the export query, and a pure `taskBucket()` that matches the My tasks SQL.
+  - Bulk: `POST /v1/leads/bulk-assign`, `/v1/leads/bulk-stage`. Single and bulk share one code path
+    (`recordAssignments`, `applyStageMoves`). Per-lead audit, event and timeline entries plus a
+    summary audit row. Web: list checkboxes, select-all-on-page, bulk bar (assign / move with lost reason).
+  - **AC:** export respects agent visibility (`leads-export.int.test.ts`, 10). Bulk actions audited
+    (`leads-bulk.int.test.ts`, 10; `audit.int.test.ts`, 12, covering assignment, stage, delete, contact
+    delete, stage-delete move, bulk, refused requests and no PII).
+  - CSV: `platform/csv.ts` (RFC 4180 + formula-injection escaping, 14 unit tests). Export button
+    on the leads list (`ExportLeadsButton`).
+  - My tasks bucket tests at the IST day boundary: `task-bucket.test.ts` (30) +
+    `my-tasks-buckets.int.test.ts` (6, with the FakeClock checking SQL against `taskBucket()`).
+  - Playwright: `leads-bulk.spec.ts` (2), `leads-export.spec.ts` (1).
+
 ## In progress
-- [ ] M1-T6 Audit + bulk actions + CSV export
 - [ ] M1-T7 Seed (4 demo tenants incl. Demo Software Agency + Demo Repair Shop), 10k-lead volume check, Playwright
 
 ## Assumptions made
 _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
+- 2026-11-17 · M1-T6 assumptions (**Review**):
+  - Agents can export (their own leads only), per the AC "export respects agent visibility". Flip
+    `lead.export` off for agents if owners don't want agent exports.
+  - Bulk actions are owner/admin/manager only (`lead.bulk`); agents keep single-lead moves.
+  - Bulk works on explicit ids (max 500; select-all = the loaded page), not "all matching the
+    filter". Ids that are invisible or deleted are skipped and reported, not a 404 for the whole request.
+  - Bulk emits the per-lead `lead.assigned.v1` / `lead.stage_changed.v1` (consumers see the same
+    events as single changes). A missing lost reason only fails if some lead would actually move.
+  - The web bulk move always sends a pipeline: leads from other pipelines move into the chosen one.
+  - Export: max 10,000 rows (422 beyond). Select fields export option labels, bool is Yes/No,
+    status is the raw enum, times are in Asia/Kolkata. Fields that don't apply to a lead's pipeline
+    stay blank. E.164 phones are exported as `'+91…` (formula escaping applies to every cell).
+  - E2E bulk/export specs reuse the `activities` fixture workspace (leads isolated by search
+    tag). A dedicated fixture can come in T7.
 - 2026-11-16 · M1-T2 decisions 1 (options relabel/add only) and 2 (later-added required fields don't block older records) **approved by Dev**. Decision 3 **replaced** by pipeline scoping of lead fields (done in M1-T3b).
 - 2026-11-16 · M1-T5 assumptions (**Review**):
   - Tasks need a due date (no undated tasks); default in the UI is tomorrow 10:00 IST.

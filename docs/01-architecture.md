@@ -171,6 +171,17 @@ Permissions are strings (`lead.read.all`, `lead.read.assigned`, `routing.manage`
 - **Ownership:** a new lead belongs to its creator unless a `lead.assign` role (owner, admin,
   manager) picks someone else or nobody. Owners must be active members of the tenant.
   Reassignment writes `lead.assigned` audit + `lead.assigned.v1`.
+- **Bulk actions (M1-T6):** `POST /v1/leads/bulk-assign` and `POST /v1/leads/bulk-stage`
+  (`lead.bulk`: owner/admin/manager; assign also needs `lead.assign`). Explicit ids, max 500, one
+  transaction, rows locked in id order. Result `{updatedIds, unchangedIds, notFoundIds}`: invisible
+  or deleted ids are skipped, no-ops write nothing. Each changed lead gets the same audit row,
+  outbox event and timeline entry as a single change (marked `bulk: true`), plus one summary
+  audit row (`lead.bulk_assigned` / `lead.bulk_stage_changed`, entity id null).
+- **CSV export (M1-T6):** `GET /v1/exports/leads.csv` with the list's filters (`lead.export`, all
+  roles; same visibility scope as the list, so agents get only their leads). Max 10,000 rows, else
+  422 `export_too_large`. UTF-8 BOM, CRLF, RFC 4180 quoting; cells starting with `= + - @`, tab or
+  CR (after optional spaces) get a leading `'` (formula injection). Audited as `lead.exported`
+  with count + filters only.
 - **Contact:** `contactId` (one the caller can see) or `contact {name, phone|email}`. A new
   contact whose phone/email already exists links to that contact (one person, one contact)
   if the caller can see it; a concurrent duplicate insert is retried once and then links.
