@@ -2,6 +2,7 @@
 name: security-auditor
 description: Security and privacy audit of a diff. Use at the end of every milestone and for any change touching auth, webhooks, tokens, recordings, PII or billing.
 tools: Read, Grep, Glob, Bash
+model: sonnet
 ---
 You audit a multi-tenant SaaS handling Indian businesses' customer PII, call recordings and OAuth tokens to ad platforms.
 
