@@ -1,8 +1,11 @@
 # PROGRESS
 
 ## Current
-Milestone: M0 — Foundation (in progress). Branch: `milestone/m0-foundation`.
-Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-11-05; M0-T5 done 2026-11-11. 2026-11-11: switched to local-first (ADR-011 no Redis/pg-boss, ADR-012 native Postgres). M0-T6, M0-T7 done 2026-11-11. M0 milestone review done 2026-11-12: blockers fixed, PR ready for review. Next: Dev merges PR #1 → start M1 (`/start-milestone M1`). Draft PR #1 open, CI green.
+Milestone: M1 — CRM Core (starting). Branch: `milestone/m1-crm-core` (from main after M0 merged, tag `m0-done`).
+M1-T0 (M0 follow-ups) done 2026-11-12. M1 plan approved 2026-11-12 (order: T3a → T1 → T2 → T3b → T4 → T5 → T6 → T7, sequential). Draft PR #2 open. Done: T3a, T1, T2, T3b, T4, T5 (2026-11-16), T6 (2026-11-17, Dev-reviewed + allowAgentExport change), T7 (2026-11-17, approved incl. assumptions). Milestone review done 2026-11-17: no blockers (1 privacy fix), suite green, PR #2 marked ready. Next: Dev decides contact-delete behaviour (Tech debt), reviews/merges PR #2 → `/start-milestone M2`.
+
+M0 history:
+Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-11-05; M0-T5 done 2026-11-11. 2026-11-11: switched to local-first (ADR-011 no Redis/pg-boss, ADR-012 native Postgres). M0-T6, M0-T7 done 2026-11-11. M0 milestone review done 2026-11-12: blockers fixed, PR ready for review. Next: Dev merges PR #1 → start M1 (`/start-milestone M1`). PR #1 merged 2026-11-12 (tag `m0-done`).
 
 ## Done
 - [x] M0-T1 Monorepo scaffold (2026-11-04)
@@ -43,10 +46,178 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
   - worker shutdown stops pg-boss and the relay before closing the DB pool;
   - job retries no longer consume the user's email allowance.
 
+- [x] M1-T0 M0 follow-ups (2026-11-12):
+  - **Signup squatting:** when the replace cap blocks a signup, the inbox owner still gets a start-over link (within the per-address email limit). A start-over through such a link (`auth_cancel_signup`, migration 0016) resets that email's replace allowance.
+  - **Shared writer:** `recordEvent` / `recordAudit` validate against the shared event registry; repository copies removed; outbox CHECKs added.
+  - **Relay:** dead-letters bad rows (migrations 0014/0015) instead of blocking every tenant.
+  - **Expired invitations:** no longer pending; re-inviting supersedes them (revoked + `invitation.superseded` audit).
+
+- [x] M1-T3a Industry templates + CRM provisioning (2026-11-12):
+  - six template JSONs (incl. software-agency and repair-shop with two pipelines), validated by Zod;
+  - tables `pipelines`, `pipeline_stages`, `custom_field_defs`, `lead_sources` (FORCE RLS, composite tenant FKs; migrations 0017/0018);
+  - `provisionCrm` (idempotent, advisory lock) at signup via the new "Business type" picker, and lazily for older tenants;
+  - `GET /v1/pipelines` and `GET /v1/lead-sources` (`lead.read.assigned`, all roles);
+  - permissions `lead.read.assigned` / `lead.read.all` added.
+
+- [x] M1-T1 Contacts (2026-11-13):
+  - E.164 normalisation (14 formats tested) and phone/email uniqueness per tenant with a visibility-aware 409;
+  - trigram search, cursor paging, soft delete;
+  - per-tenant `agentContactVisibility` (all | assigned; template defaults; `GET`/`PATCH /v1/crm/settings`, owner/admin);
+  - web: Contacts list, search, create dialog with phone preview, detail/edit/delete; seed sets Demo Realty = assigned, Demo Clinic = all;
+  - `contact.created.v1` event; audit rows store field names only;
+  - migrations 0019/0020.
+
+- [x] M1-T2 Custom fields (2026-11-13):
+  - definitions API (`GET`/`POST`/`PATCH`/`DELETE /v1/custom-fields`; read: all roles, write: owner/admin; audited);
+  - shared value validation with field-level errors, patch merge, and deleted fields hidden but kept;
+  - contacts read and write custom fields;
+  - web: Settings → Custom fields, plus the fields rendered in the contact form;
+  - leads reuse all of it in M1-T4.
+- [x] M1-T1 follow-up (2026-11-13): contacts need a phone OR an email; `pnpm db:reset:dev`.
+- [x] M1-T3b Pipelines & stages + pipeline-scoped lead fields + CRM settings UI (2026-11-16):
+  - API under `/v1/pipelines` (`pipeline.manage`: owner/admin; audited): create (default stages unless given), rename / lost reasons / make default, reorder, soft delete; stages add / edit / reorder / delete. Writes return the changed pipeline.
+  - **AC:** deleting a stage with leads → 409 `stage_has_leads` (`leadCount`, `targetStageIds`); with `?moveTo=` (same pipeline + category) the leads are bulk-moved and the stage deleted in one transaction. Pipeline-row + stage-row locks against races; `leads → stages` FK NO ACTION as backstop.
+  - `leads` table created now (schema + RLS + leak test; API in T4) so the move is real; composite FK `(tenant_id, pipeline_id, stage_id)` keeps a lead's stage inside its pipeline.
+  - **Lead field scoping** (revised M1-T2 decision 3): `custom_field_pipelines` (composite FKs); `pipelineIds` on definitions (null = all, default); `customFieldsForPipeline` + `validateValues(…, { pipelineId })` for T4 forms, validation (incl. required) and responses; values of non-applicable fields stay stored, hidden. Other tenants' / unknown / deleted pipeline ids → 400 `unknown pipeline` (tested).
+  - Repair-shop template: Device brand, Device model, Issue → all pipelines; IMEI, Estimate, Advance paid, Promised date, Under warranty → Repair jobs only (template `pipelines` keys, validated).
+  - Web: Settings → Pipelines, Settings → CRM settings (agent contact visibility), "Shown in" picker + Pipelines column for lead fields. Migrations 0021/0022. Tests: shared unit, db leak suite + FK tests, API integration (`pipelines.int.test.ts`), service unit, Playwright `pipelines.spec.ts` (3).
+
+- [x] M1-T4 Leads (2026-11-16):
+  - API: `GET /v1/leads` (filters incl. custom fields, keyset paging), `GET /v1/leads/board`,
+    `GET/POST/PATCH/DELETE /v1/leads[/:id]`, `POST /v1/leads/:id/stage`, `/v1/lead-views`.
+    Permissions `lead.write` (all), `lead.assign` + `lead.delete` (owner/admin/manager).
+  - **AC:** stage change writes `lead.stage_changed.v1` to the outbox in the same transaction
+    (tested payload, no event on no-op); an agent gets 404 for a lead they don't own (get,
+    edit, move, delete, list, board).
+  - Events `lead.created.v1`, `lead.stage_changed.v1`, `lead.assigned.v1` registered; audit
+    rows for create / update / assign / stage change / delete.
+  - Contacts: agents in `assigned` mode now also see contacts of leads they own; duplicate
+    conflicts name the owner of the contact's latest open lead.
+  - Migrations 0023/0024 (`leads.status`, GIN index, `saved_views` + RLS + leak test).
+  - Web: Leads (list/board toggle, URL filters, field filters per pipeline, saved views, new
+    lead dialog with new/existing contact), lead page (stage, lost-reason dialog, pipeline
+    move, owner, details form). Tests: API `leads.int.test.ts` (18), shared + web unit,
+    Playwright `leads.spec.ts` (drag-and-drop, lost reason, saved view).
+- [x] M1-T5 Notes, tasks, timeline (2026-11-16):
+  - Migrations 0025/0026: `notes`, `tasks`, `timeline_events` (append-only, `seq` identity
+    for write order) + RLS + leak fixtures. Shared contracts `crm/activities.ts` (+ `dayBounds`).
+  - API: `GET /v1/leads/:id/timeline`, `POST /v1/leads/:id/notes`, `PATCH|DELETE /v1/notes/:id`,
+    `GET|POST /v1/leads/:id/tasks`, `PATCH|DELETE /v1/tasks/:id`, `GET /v1/tasks?bucket=`,
+    `GET /v1/tasks/counts`. Timeline written for create, assignment, stage change, note, task
+    completed/reopened, and (Dev AC) one entry per lead moved by a stage delete (no per-lead event,
+    single audit row).
+  - **AC:** timeline ordered (newest first, ties in write order), cursor-paginated, actor
+    user/ai/system — `activities.int.test.ts` (11).
+  - Web: lead page = timeline with note composer (edit/delete) + side panel (stage/owner, tasks,
+    details); "My tasks" page (`/tasks`, overdue/today/upcoming tabs with counts). Playwright
+    `activities.spec.ts`; new e2e fixture workspace `activities`.
+
+- [x] M1-T6 Audit + bulk actions + CSV export (2026-11-17):
+  - Permissions `lead.bulk` (owner/admin/manager) and `lead.export` (all roles). Shared contracts
+    for bulk requests/results, the export query, and a pure `taskBucket()` that matches the My tasks SQL.
+  - Bulk: `POST /v1/leads/bulk-assign`, `/v1/leads/bulk-stage`. Single and bulk share one code path
+    (`recordAssignments`, `applyStageMoves`). Per-lead audit, event and timeline entries plus a
+    summary audit row. Web: list checkboxes, select-all-on-page, bulk bar (assign / move with lost reason).
+  - **AC:** export respects agent visibility (`leads-export.int.test.ts`, 10). Bulk actions audited
+    (`leads-bulk.int.test.ts`, 10; `audit.int.test.ts`, 12, covering assignment, stage, delete, contact
+    delete, stage-delete move, bulk, refused requests and no PII).
+  - CSV: `platform/csv.ts` (RFC 4180 + formula-injection escaping, 14 unit tests). Export button
+    on the leads list (`ExportLeadsButton`).
+  - My tasks bucket tests at the IST day boundary: `task-bucket.test.ts` (30) +
+    `my-tasks-buckets.int.test.ts` (6, with the FakeClock checking SQL against `taskBucket()`).
+  - Playwright: `leads-bulk.spec.ts` (2), `leads-export.spec.ts` (1).
+  - **Dev review 2026-11-17 (approved with one change, done):** `lead.export` is owner/admin/manager
+    only. New CRM setting `allowAgentExport` (default false, Settings → CRM settings, audited as
+    `crm_settings.updated` with before/after of changed keys only): when on, agents export their own
+    leads; when off they get 403 `forbidden` and no Export button. Bulk bar says "N selected on this
+    page". Tests: `leads-export.int.test.ts` "agents (tenant setting allowAgentExport)" (3).
+
+- [x] M1-T7 Seed + 10k-lead volume check (2026-11-17):
+  - Seed: 4 tenants (Demo Realty, Demo Clinic, Demo Software Agency, Demo Repair Shop; manager in
+    all four), 60 generated leads each (`packages/db/src/seed-crm.ts`: deterministic, batched through
+    RLS, every stage incl. won/lost with reasons, owners/unassigned, sources, custom fields, `created`
+    timeline, notes + tasks). Idempotent top-up via `attribution.seed`. `pnpm db:seed -- --volume`
+    adds 10k leads to Demo Realty; `pnpm db:explain-leads` prints plans.
+  - **Volume check (10,060 leads, dev):** list first page / agent / stage / cursor / custom field
+    0.5–0.7 ms on `leads_tenant_created_idx`; search `q` 20 ms and board counts 26 ms (seq scans,
+    fine at this size). `leads-volume.int.test.ts` (4): board counts add up to 10k, 5 cursor pages
+    without overlap, filters, agent scope, each request < 1.5 s (≈10–60 ms locally).
+  - **Finding:** right after a bulk insert, before (auto)ANALYZE, owner list/board requests took
+    40–120 s (bad plans on stale stats); fine after `ANALYZE`. See Tech debt (M2 import).
+  - Playwright `leads-volume.spec.ts` (2) on a new `volume` fixture workspace (10k leads seeded by
+    global-setup + ANALYZE): list paging, "100 selected on this page", board column counts + load more.
+  - `seed.int.test.ts` +3 (four tenants, demo data validity, top-up/isolation).
+
 ## In progress
+_(none — M1 reviewed; awaiting merge of PR #2)_
 
 ## Assumptions made
 _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
+- 2026-11-17 · M1-T7 assumptions (**Review**):
+  - "4 demo tenants" = the existing Realty + Clinic plus Software Agency + Repair Shop; 60 leads
+    each; the 10k volume set is opt-in (`--volume`, Demo Realty only), not part of every seed.
+  - Seeded leads have a system `created` timeline entry ("Demo data"), no audit/outbox rows (no
+    real user acted); demo phones are +91 9XX… numbers in per-batch blocks, emails `@example.test`.
+  - Volume budget = 1.5 s per API request in the integration test (CI headroom); no index changes
+    were needed at 10k.
+- 2026-11-17 · M1-T6 assumptions (**Review**):
+  - ~~Agents can export (their own leads only)~~ → changed by Dev: only with the tenant setting
+    `allowAgentExport` (see M1-T6 under Done).
+  - Bulk actions are owner/admin/manager only (`lead.bulk`); agents keep single-lead moves.
+  - Bulk works on explicit ids (max 500; select-all = the loaded page), not "all matching the
+    filter". Ids that are invisible or deleted are skipped and reported, not a 404 for the whole request.
+  - Bulk emits the per-lead `lead.assigned.v1` / `lead.stage_changed.v1` (consumers see the same
+    events as single changes). A missing lost reason only fails if some lead would actually move.
+  - The web bulk move always sends a pipeline: leads from other pipelines move into the chosen one.
+  - Export: max 10,000 rows (422 beyond). Select fields export option labels, bool is Yes/No,
+    status is the raw enum, times are in Asia/Kolkata. Fields that don't apply to a lead's pipeline
+    stay blank. E.164 phones are exported as `'+91…` (formula escaping applies to every cell).
+  - E2E bulk/export specs reuse the `activities` fixture workspace (leads isolated by search
+    tag). A dedicated fixture can come in T7.
+- 2026-11-16 · M1-T2 decisions 1 (options relabel/add only) and 2 (later-added required fields don't block older records) **approved by Dev**. Decision 3 **replaced** by pipeline scoping of lead fields (done in M1-T3b).
+- 2026-11-16 · M1-T5 assumptions (**Review**):
+  - Tasks need a due date (no undated tasks); default in the UI is tomorrow 10:00 IST.
+  - Task assignee: the caller by default; anyone else needs `lead.assign` and must be able to
+    see the lead (owner/admin/manager, or the agent who owns it). Agents only assign themselves.
+  - "My tasks" shows open tasks assigned to me on leads I can still see: a task on a lead later
+    reassigned away from an agent drops off their list (it stays on the lead).
+  - Buckets: overdue = due before now (so 10:00 today is overdue at 15:00); today = due later
+    today; upcoming = after today. Day = Asia/Kolkata (no tenant timezone yet).
+  - Notes: only the author edits; the author or a manager/admin/owner (`lead.delete`) deletes.
+    A deleted note disappears from the timeline. Note bodies are not copied into audit rows.
+  - Timeline entries for tasks: completion **and** reopening (reopen added for consistency);
+    task creation/deletion is audited but not on the timeline (AC lists completion only).
+  - Any member who can see a lead can complete / edit / delete its tasks.
+  - No new outbox events for notes/tasks (M5 automation adds them when it needs them).
+  - Timeline text is rendered by the web from stored name snapshots (`data`), not stored
+    English `summary`, so it can be translated later; `summary` is for AI/system entries.
+- 2026-11-16 · M1-T4 reviewed by Dev. Review decisions 1, 2, 4 **approved**; shared team saved views and member search in the owner picker go to the Backlog. **Decision 3 changed (Dev, security):** in `assigned` mode an agent's new lead whose phone/email matches a contact they can't see is **not** linked: same 409 `contact_exists` as contact create (field + "handled by <name>", no contact details), nothing created. Agents still link to contacts they can see; owners/admins/managers and `all` mode link as before. Lead edits can't change contact data (PATCH /contacts/:id already answers with the same 409, now pinned by a test). Tests: `leads.int.test.ts` "matching an existing contact on create" (both modes, phone + email, response contains no id/name/phone/email of the hidden contact, lead/contact counts unchanged). The new-lead dialog shows the "handled by" message.
+- 2026-11-16 · Flaky `@revops/scripts` unit test fixed: `db-urls.test.ts` "Neon: URLs pass the env schemas…" did a cold `await import('@revops/shared/env')` (zod + all env schemas) inside the test body, so the module load counted against vitest's 5 s timeout; under `pnpm test` (all packages in parallel) it took 5.2 s. Imports are now static (loaded at collection, not timed); 4/4 full `pnpm test` runs green. No other test file imports dynamically inside a test.
+- 2026-11-16 · M1-T4 assumptions (reviewed; 3 superseded above):
+  - `status` = the stage's category (open / won / lost), stored and kept in sync; no separate
+    status lifecycle.
+  - Saved views are private to their creator (no shared team views yet).
+  - Stage/pipeline moves only through `POST /leads/:id/stage`; PATCH rejects stageId.
+  - ~~A new lead's contact phone/email matching an existing contact links to it even if the
+    agent couldn't see that contact before~~ (changed by Dev, see above).
+  - Re-entering a won stage from another won stage keeps the original win date; reopening
+    clears won/lost data.
+  - Owner pickers list the first 50 active members (enough for SMB teams; paginate later).
+  - Board columns show 25 cards each with "Load more"; kanban order is newest first.
+  - `valuePaise` is a JSON number (safe integer, up to ~₹90 lakh crore).
+  - The web shows dates and builds day filters in Asia/Kolkata (no tenant timezone yet).
+- 2026-11-16 · M1-T3b reviewed and **approved by Dev**; CI green on PR #2. Decisions 1, 2, 3, 5, 6 below approved. **Decision 4 changed (Dev):** a stage delete that moves leads also writes one timeline entry per moved lead ("stage changed because <stage> was deleted"); still NO per-lead `lead.stage_changed.v1`, still the single audit row. `timeline_events` arrives in M1-T5, so this is part of M1-T5's AC (milestone file).
+- 2026-11-16 · M1-T3b assumptions (reviewed):
+  - **Moving a lead to another pipeline does not enforce that pipeline's required fields** (consistent with approved decision 2): they show empty and become required once edited. T4 implements the move this way unless Dev says otherwise.
+  - Bulk-move target on stage delete must have the **same category** (open→open, won→won, lost→lost), so leads never become won/lost without won_at / a lost reason. Deleting the only won/lost stage that has leads is refused until another stage of that category exists.
+  - A stage with leads can't change category (409 `stage_category_locked`); add a new stage instead.
+  - A pipeline with leads can't be deleted (409 `pipeline_has_leads`), no move option in T3b; T6 bulk move covers moving leads between pipelines.
+  - The bulk move on stage delete writes one audit row (`movedLeads`, `movedTo`) and **no** per-lead `lead.stage_changed.v1` / timeline events; T4/T5 decide whether a structural move emits them.
+  - "Device brand / Model / Issue → both pipelines" is stored as **all pipelines** (also covers pipelines added later), not an explicit list of the two.
+  - A field whose selected pipelines are all deleted shows `pipelineIds: []` and applies nowhere until edited (UI: "No active pipeline").
+  - Pipeline names unique per tenant and stage names unique per pipeline (case-insensitive); max 30 stages per pipeline; default probability open 50 / won 100 / lost 0; new pipelines get New / In progress / Won / Lost.
+  - The `leads` table is created in T3b (needed by the AC); T4 may add columns (status, first_response_at, qualified_at, score) in a forward migration.
+  - Existing tenants provisioned from repair-shop before T3b keep all lead fields on all pipelines (templates never migrate existing tenants); fix via Settings → Custom fields.
 - 2026-11-04 · M0: Node 22 LTS kept (machine also has Node 24; use fnm to switch).
 - 2026-11-04 · M0: Dependency policy is the previous mature major when the newest major is < ~4 months old (TS 5.9, NestJS 11, Vitest 4, ESLint 9, postgres.js 3, pnpm 10; BullMQ/ioredis dropped by ADR-011).
 - 2026-11-04 · M0-T4: An unverified email blocks login (403 `email_not_verified` + resend endpoint). **Superseded 2026-11-06** by the security review: same 401 as a wrong password (confirmed by Dev 2026-11-11).
@@ -119,6 +290,44 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - 2026-11-11 · db:bootstrap with a superuser creates a dedicated NOSUPERUSER `revops_owner` that owns the DBs and runs migrations. Reason: if the owner were `postgres`, the SECURITY DEFINER functions would run as a superuser and bypass RLS, unlike Neon/CI. Doctor warns if `DATABASE_URL_OWNER` is a superuser.
 - 2026-11-11 · db:bootstrap after `--write-env` deletes `DB_BOOTSTRAP_URL` (the superuser password doesn't stay on disk); reruns connect as `revops_owner` in verify-only mode (create nothing, check everything, reuse passwords proven by login).
 - 2026-11-11 · pgvector is optional (doctor ⚠, bootstrap warns) until M4; CI keeps `pgvector/pgvector:0.8.6-pg18`.
+- 2026-11-13 · M1-T2:
+  - select options can be relabelled or added but not removed (400 lists the removed values), so stored values stay valid; the web form sends only changed fields, so untouched old values are never re-validated;
+  - a required field added later doesn't block editing older records unless that field is in the edit;
+  - unticked optional yes/no fields count as "not set" on create;
+  - number fields accept decimals (₹ values typed as rupees); dates are `YYYY-MM-DD`;
+  - ~~no per-pipeline scoping of lead fields yet~~ **Superseded 2026-11-16 (Dev):** lead fields are pipeline-scoped (M1-T3b).
+- 2026-11-13 · M1-T1 follow-up (Dev):
+  - a contact needs a phone OR an email (create: 400 on the phone field if neither; PATCH can clear one but not both); dedupe on whichever is present. This replaces the T1 assumption "a contact needs a phone";
+  - `pnpm db:reset:dev` added (guarded dev-only reset + migrate + seed).
+- 2026-11-13 · M1-T1 (Dev decisions):
+  - agent contact visibility is a per-tenant setting, defaulting from the template (repair-shop/clinic = all; others = assigned);
+  - in `assigned` mode agents also see contacts they created;
+  - a duplicate's `ownerName` is the owner of the contact's latest lead (creator until M1-T4 adds leads).
+- 2026-11-13 · M1-T1 assumptions:
+  - email is unique per tenant too, as the Dev request said "duplicate phone/email";
+  - contact audit rows record changed field names, not values (no second copy of PII);
+  - tenants seeded or provisioned before M1-T1 have no stored setting and read their template's default;
+  - permissions: `contact.write` all roles, `contact.delete` owner/admin/manager, `crm.settings.manage` owner/admin.
+- 2026-11-12 · M1-T3a:
+  - templates live in `packages/shared/src/templates/data/` (not `packages/shared/templates/`), so tsc ships them in `dist` and the web bundle can import them;
+  - lost-reason presets are per pipeline (repair cancellations differ from inquiry losses);
+  - custom field keys are never reusable, even after deletion;
+  - template option values may start with a digit (`1bhk`).
+- 2026-11-12 · M1 plan (Dev decisions):
+  - industry template picked at signup ("Business type", default `generic`), with lazy provisioning for existing tenants;
+  - templates may define several pipelines; repair-shop has "Inquiries" + "Repair jobs" (a repair job = a lead in that pipeline, device details as custom fields);
+  - `pipeline.manage` / `customfield.manage`: owner + admin; `lead.read.all` / assign / delete / bulk / export: owner + admin + manager;
+  - agents see only contacts linked to their leads or created by them;
+  - a lost reason is required when a lead enters a lost stage.
+- 2026-11-12 · M1 assumptions (Review):
+  - a lead always has exactly one contact (a new phone creates it in the same transaction; an existing phone links to it);
+  - agent-created leads are owned by the agent, and only `lead.assign` roles reassign;
+  - unassigned leads are visible only to read-all roles;
+  - seed tenants use generic names (Demo Software Agency / Demo Repair Shop), not the real company names;
+  - templates are applied once at provisioning, and later template edits don't migrate existing tenants.
+- 2026-11-12 · M1-T0 (Dev decision: options 1 + 3, not 2): a refused replace emails a start-over link (a fresh verify token for the pending account), and a successful start-over resets `signup-replace:<email>`. Any successful cancel resets it, because verify/start-over links are only ever emailed to that address, so a cancel proves inbox ownership. The old `auth_discard_unverified_by_token` function stays, unused.
+- 2026-11-12 · M1-T0: an unknown event type is now dead-lettered (it was "published with no consumers"): every event must be registered in `packages/shared/src/events/registry.ts`.
+- 2026-11-12 · M1-T0: an expired invitation is superseded (revoked) when the same email is re-invited, since the open-email unique index has no notion of time. Resending an expired invitation by id still works and gives it a fresh 7-day expiry. The pending list stays unpaginated (small per tenant); paginate when needed.
 - 2026-11-11 · M0-T7: the web never calls the API from the browser directly. A Next route handler proxies `/api/v1/*` → `API_INTERNAL_URL` (a runtime setting, not baked into the build by a next.config rewrite). Only `/v1` is exposed.
 - 2026-11-11 · M0-T7: "restricted nav" today means:
   - every role sees Dashboard + Team, because all four roles have `member.read` (the T5 permission map);
@@ -139,6 +348,12 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - 2026-11-11 · M0-T6 deps: pg-boss 12.38.0, nestjs-pino 4.6.1, pino 9.14.0, pino-http 10.5.0, pino-pretty 13.2.0 (dev), prom-client 15.1.3, @nestjs/swagger 11.4.8, @opentelemetry/{api 1.10.0, sdk-node 0.300.0, exporter-trace-otlp-http 0.300.0, instrumentation-http 0.300.0, instrumentation-express 0.72.0}. These were picked as Nest-11 compatible and ≥2 weeks old; the http/express instrumentations replace the heavy auto-instrumentations bundle. The pnpm override `multer: 2.5.0` fixes the high advisory GHSA-q7qp-rjg7-q26m (via @nestjs/platform-express). `@scarf/scarf` and protobufjs install scripts are ignored.
 - 2026-11-11 · Rate limiter: `rate_limit_buckets` stores sha256(key) only (no IPs/emails), RLS enabled with no policies and no grants, reached via `rate_limit_consume/reset/purge` (definer). The app passes its Clock's now, so FakeClock tests keep working. RLS catalog meta-test gains a "system tables" class. Purge is scheduled in T6.
 
+## Backlog
+- Shared team saved views (Dev, 2026-11-16, M1-T4 review): today saved views are private to their creator.
+- Member search in the owner picker (Dev, 2026-11-16, M1-T4 review): today it lists the first 50 active members.
+- "Select all matching the filter" for bulk actions (Dev, 2026-11-17, M1-T6 review): today select-all is the loaded page only.
+- Archive pipeline (Dev, 2026-11-16): hide a pipeline that still has leads without deleting it (today a pipeline with leads can't be deleted).
+
 ## Blocked on external
 - [ ] Meta Business Verification + App Review
 - [ ] WhatsApp Cloud API number + templates
@@ -149,18 +364,19 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 
 ## Tech debt
 _M0 milestone review (2026-11-12): non-blocking findings from the code-reviewer and security-auditor subagents. The blockers were fixed in the review commit._
-- **Replace-limit lockout (security MEDIUM-4, needs a product decision).** An attacker can keep a pending unverified signup for someone else's email alive and use up the 3 replaces per day. The real owner's signup then silently does nothing (202, no email) and they can only get in through an invitation. Options: still email the inbox owner a verify / start-over link when a replace is blocked; let the verify link claim the pending account; or make cancel reset the replace bucket.
+- **Signup squatting (residual after M1-T0).** A fast attacker can re-squat right after the owner's start-over, but the reset allowance (3 replaces) lets the owner's next signup win, and every refusal emails the owner. The per-address email limit (5/h) can delay the owner by up to an hour under a sustained attack.
 - **Login per-IP counts successes (security MEDIUM-6).** `login-ip` (50 per 15 min) also counts successful logins, so 50+ people behind one CGNAT or office IP get 429 at 9am. Count failures only (needs a peek or decrement in the limiter) and tune the ceilings with real traffic.
 - **Per-account lockout is now possible by design:** 20 wrong passwords lock that email out for 15 minutes (`login-email`). This is the standard trade-off against unlimited guessing; revisit with notification-on-trip or CAPTCHA.
-- **One invalid outbox row stops the relay for every tenant (code review #4).** The relay's envelope parse throws for every bad row, so a row with an unversioned type or a non-object payload blocks the whole batch forever. Before M1: one shared `insertOutboxEvent` (and `insertAudit`) helper that validates the type and payload at write time, and dead-letter or skip per event in the relay.
-- **Expired invitations count as pending (code review #7).** They show in the list with a past date, block a new invite with `invitation_exists`, and the list is unbounded. Show an "Expired" status or supersede them on invite, and paginate.
+- **Dead-lettered outbox events** need an operator view or replay tool (M6/M8); for now they are found via the metric, the logs and `select … where dead_lettered_at is not null`.
 - **No-env production run fails open (security L2).** `NODE_ENV` defaults to `development`, so a prod deploy that forgets it gets `/docs`, open `/metrics` and the console email driver (live reset links in logs). M8: require NODE_ENV explicitly outside local dev.
 - **Session and token retention (security L6).** Revoked or expired `sessions` (with IP and user agent) and used `auth_tokens` rows are never purged. Add a purge cron next to the rate-limit purge (DPDP).
 - **API and worker bind 0.0.0.0 (security L7).** In dev, `/metrics` and `/docs` are reachable from the LAN. Bind to 127.0.0.1 by default, or require `METRICS_TOKEN` when bound to a non-loopback address.
+- **Stale planner stats after bulk inserts (M1-T7).** With 10k leads inserted at once and no ANALYZE yet, leads list/board took 40–120 s until autovacuum analyzed (≈1 min). **Dev-confirmed requirement (2026-11-17): M2 CSV import runs ANALYZE on the affected tables after large imports** (app_user can't: needs a definer function or a worker job as owner, or `GRANT MAINTAIN` on PG17+).
 - Published `outbox_events` and `processed_events` rows are never purged. Add a retention job when volumes matter (M6/M8).
 - The minimatch moderate advisory (transitive) is still reported by `pnpm audit`; it is dev-tooling only.
 - Worker jobs have no per-job log context (the job id is in the failure log only); add an AsyncLocalStorage child logger when consumers multiply.
 - `InMemoryJobQueue` is not transactional: a job sent with `tx` stays queued in tests even if the transaction rolls back. Real pg-boss behaviour is covered by `test/queue.int.test.ts`.
+- ~~E2E at the signup ceiling~~ **Fixed 2026-11-16 (Dev):** specs use pre-seeded fixture workspaces (`apps/web/e2e/fixtures.ts`, seeded by the e2e global setup via `seedAccounts`), one per spec. Only specs that test signup or invite acceptance create accounts. Rate limits unchanged.
 _(non-blocking review findings)_
 - M8: set `TRUST_PROXY` (M0-T7, default `loopback`) to the real hop count / proxy CIDRs before deploying behind a load balancer. Note: Next.js keeps a client-supplied `X-Forwarded-For` instead of appending to it, so behind the web proxy a client can choose the IP the API sees (rate-limit evasion per IP). Since the M0 review, per-account keys that ignore the IP bound the damage: `login-email` (20 per 15 min) and `email-<kind>-addr` (5 per hour). Still open: a spoofed IP can lock out a real shared IP (50 logins per 15 min), and per-IP ceilings are evadable. M8 must put a trusted LB in front that overwrites XFF, or have the web proxy set it from the socket address.
 - M0-T6: discarding an unverified account deletes its tenant's outbox rows, including `user.signed_up.v1`. Once the relay ships, consider a compensating `user.discarded.v1` (also needed for DPDP deletion propagation).
@@ -172,3 +388,19 @@ _(non-blocking review findings)_
 - Docker images in CI are tag-pinned (`pgvector/pgvector:0.8.6-pg18`), not digest-pinned; pin digests in M8 if reproducibility matters.
 - `db:bootstrap` sends the app_user password to Postgres as a plain-text literal over TLS (Neon checks password entropy, so a pre-hashed SCRAM verifier may be rejected). Revisit if server-side statement logging is ever enabled.
 - Turbo `envMode: loose` + `test` uncached: simple and correct for now; tighten env declarations if CI time matters.
+
+_M1 milestone review (2026-11-17): code-reviewer + security-auditor (sonnet) on `main...milestone/m1-crm-core`. No blocking findings. Fixed in the review commit: the `lead.exported` audit row stored the raw search text `q` (often a phone/email) → now `[redacted]` (test in `leads-export.int.test.ts`). Non-blocking:_
+- **Contact soft-delete leaves its leads live (Dev decision needed).** Leads keep listing the deleted contact's name/phone, and the freed phone can be reused by a new contact. Options: refuse with 409 `contact_has_leads`, or soft-delete/detach the leads in the same tx. (`contacts.service.ts` `remove`, `leads.repository.ts` `baseQuery`.)
+- **Pipeline delete race.** `pipelines.service.ts` `remove` locks only the pipeline row; lead create / `changeStage` / bulk move read the pipeline without a lock, so a concurrent move can land a lead in a just-soft-deleted pipeline. Fix: `FOR SHARE` on the pipeline row in `activePipeline`/`activeStage`.
+- **Events gaps for M5/M6 consumers.** Stage-delete moves emit no per-lead `lead.stage_changed.v1` (Dev decision M1-T5 AC; consumers must handle `pipeline_stage.deleted`); lead delete writes audit only — no timeline entry or `lead.deleted.v1`.
+- **Bulk actions are N+1 inside the tx.** `recordAssignments`/`applyStageMoves` insert audit + outbox one row at a time (≈1,000 round trips for 500 leads while holding locks). Batch into multi-row inserts.
+- **Visibility rule duplicated** in `activities.repository.ts` (`leadVisible`) and `leads.repository.ts` (`visible`). Share one helper so notes/tasks/timeline can't drift from the lead list.
+- **Bad cursor = silent empty page.** Unknown/cross-tenant/tampered cursor ids resolve to NULL and return `nextCursor: null`. Return 400 `invalid_cursor` or use an opaque (createdAt, id) cursor.
+- `Number(lead.valuePaise)` in the API response: safe under the Zod MAX_SAFE_INTEGER cap, but an import path writing > 2^53 would corrupt silently. Assert or serialise as string.
+- Indexes: `leads_tenant_owner_idx` lacks `created_at desc, id desc` (agent list sorts); `board()` runs one query per stage sequentially. Fine at 10k.
+- Contact-create retry on concurrent duplicate phone (`LeadsService.create`) has no concurrency test.
+- Security LOW: no rate limit on authenticated create/bulk/export endpoints (duplicate-check is a phone/email existence oracle; the agent 409 also returns `ownerName` by Dev decision). Add `rate_limit_buckets` per-user buckets before M2 public capture.
+- Security LOW: no cap on custom field definitions per tenant/entity (CSV width, jsonb size). Add e.g. ≤100 active defs per entity.
+- Security LOW: `bin/seed.ts` refuses only on `NODE_ENV=production`; add the `_dev`/`_test` + localhost guard used by `reset-dev`.
+- `contacts` create/update and `changeLeadStageRequestSchema` use `z.object` (strips unknown keys) where others are strict; switch to `strictObject` for consistency.
+- Local tooling: the Bash/system PATH resolves Node 24 (`C:\Program Files\nodejs`); run `fnm use 22` first or every pnpm command fails on `engine-strict`.

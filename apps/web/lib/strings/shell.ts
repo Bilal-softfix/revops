@@ -5,7 +5,13 @@ export const shellStrings = {
     main: 'Workspace',
     settings: 'Settings',
     dashboard: 'Dashboard',
+    leads: 'Leads',
+    contacts: 'Contacts',
+    tasks: 'My tasks',
     team: 'Team',
+    customFields: 'Custom fields',
+    pipelines: 'Pipelines',
+    crmSettings: 'CRM settings',
   },
   tenantSwitcher: {
     label: 'Switch workspace',

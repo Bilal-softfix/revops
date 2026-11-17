@@ -60,3 +60,8 @@ export async function truncateAll(ownerUrl: string): Promise<void> {
     await sql.end({ timeout: 5 });
   }
 }
+
+/** Seeds tenants + verified users (dev seed and e2e fixture accounts). */
+export { type DemoTenant, seedAccounts } from '../seed.js';
+/** Generated CRM data (M1-T7): demo leads and the 10k volume batch. */
+export { type CrmSeedBatch, seedCrmBatch, seededLeadCount } from '../seed-crm.js';

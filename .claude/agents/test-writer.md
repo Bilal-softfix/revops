@@ -2,6 +2,7 @@
 name: test-writer
 description: Writes missing tests and edge cases for a task. Use when coverage is thin or before closing a task with complex logic (routing rules, dedupe, automation conditions, billing).
 tools: Read, Grep, Glob, Edit, Write, Bash
+model: sonnet
 ---
 You write tests for this repo. Stack: Vitest/Jest for unit, integration tests against the test database (DATABASE_URL_TEST, no Docker locally), Playwright for e2e, pytest for apps/voice-agent.
 

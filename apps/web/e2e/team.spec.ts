@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { PASSWORD, linkFromEmail, login, navLabels, signupAndVerify, uniqueEmail } from './helpers';
+import { FIXTURES } from './fixtures';
+import { PASSWORD, linkFromEmail, loginAsFixture, navLabels, uniqueEmail } from './helpers';
 
 test.describe('M0-T7 AC: invite → accept as agent → restricted nav', () => {
   test('an owner invites an agent, who accepts and gets the read-only team view', async ({
@@ -7,10 +8,17 @@ test.describe('M0-T7 AC: invite → accept as agent → restricted nav', () => {
     browser,
   }) => {
     // Owner
-    const ownerEmail = uniqueEmail('owner');
-    await signupAndVerify(page, ownerEmail, 'Ravi Clinic', 'Ravi Owner');
-    await login(page, ownerEmail);
-    expect(await navLabels(page)).toEqual(['Dashboard', 'Team']);
+    await loginAsFixture(page, FIXTURES.team);
+    expect(await navLabels(page)).toEqual([
+      'Dashboard',
+      'Leads',
+      'Contacts',
+      'My tasks',
+      'Team',
+      'Custom fields',
+      'Pipelines',
+      'CRM settings',
+    ]);
     await page
       .getByRole('navigation', { name: 'Main' })
       .getByRole('link', { name: 'Team' })
@@ -42,13 +50,13 @@ test.describe('M0-T7 AC: invite → accept as agent → restricted nav', () => {
     await expect(agent.getByText('Agent', { exact: true }).first()).toBeVisible();
 
     // Restricted: the agent sees the team read-only — no invite, no invitations, no controls
-    expect(await navLabels(agent)).toEqual(['Dashboard', 'Team']);
+    expect(await navLabels(agent)).toEqual(['Dashboard', 'Leads', 'Contacts', 'My tasks', 'Team']);
     await agent
       .getByRole('navigation', { name: 'Main' })
       .getByRole('link', { name: 'Team' })
       .click();
     await expect(agent.getByTestId(`member-${agentEmail}`)).toContainText('You');
-    await expect(agent.getByTestId(`member-${ownerEmail}`)).toContainText('Owner');
+    await expect(agent.getByTestId(`member-${FIXTURES.team.owner.email}`)).toContainText('Owner');
     await expect(
       agent.getByText('Only owners and admins can invite or manage members.'),
     ).toBeVisible();

@@ -1,5 +1,15 @@
 import { type Permission, type Role, hasPermission } from '@revops/shared';
-import { LayoutDashboard, type LucideIcon, Users } from 'lucide-react';
+import {
+  Contact,
+  Handshake,
+  KanbanSquare,
+  LayoutDashboard,
+  ListPlus,
+  type LucideIcon,
+  SlidersHorizontal,
+  ListTodo,
+  Users,
+} from 'lucide-react';
 import { shellStrings } from '@/lib/strings/shell';
 
 export interface NavItem {
@@ -22,7 +32,27 @@ export interface NavSection {
 export const NAV: readonly NavSection[] = [
   {
     label: shellStrings.nav.main,
-    items: [{ href: '/dashboard', label: shellStrings.nav.dashboard, icon: LayoutDashboard }],
+    items: [
+      { href: '/dashboard', label: shellStrings.nav.dashboard, icon: LayoutDashboard },
+      {
+        href: '/leads',
+        label: shellStrings.nav.leads,
+        icon: Handshake,
+        permission: 'lead.read.assigned',
+      },
+      {
+        href: '/contacts',
+        label: shellStrings.nav.contacts,
+        icon: Contact,
+        permission: 'lead.read.assigned',
+      },
+      {
+        href: '/tasks',
+        label: shellStrings.nav.tasks,
+        icon: ListTodo,
+        permission: 'lead.read.assigned',
+      },
+    ],
   },
   {
     label: shellStrings.nav.settings,
@@ -32,6 +62,24 @@ export const NAV: readonly NavSection[] = [
         label: shellStrings.nav.team,
         icon: Users,
         permission: 'member.read',
+      },
+      {
+        href: '/settings/custom-fields',
+        label: shellStrings.nav.customFields,
+        icon: ListPlus,
+        permission: 'customfield.manage',
+      },
+      {
+        href: '/settings/pipelines',
+        label: shellStrings.nav.pipelines,
+        icon: KanbanSquare,
+        permission: 'pipeline.manage',
+      },
+      {
+        href: '/settings/crm',
+        label: shellStrings.nav.crmSettings,
+        icon: SlidersHorizontal,
+        permission: 'crm.settings.manage',
       },
     ],
   },

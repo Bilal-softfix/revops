@@ -2,8 +2,28 @@ import { verify } from '@node-rs/argon2';
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createDb } from '../src/client.js';
-import { memberships, users } from '../src/schema/index.js';
-import { DEMO_TENANT_2_ID, DEMO_TENANT_ID, DEMO_TENANTS, seedDemo } from '../src/seed.js';
+import {
+  contacts,
+  leads,
+  memberships,
+  notes,
+  pipelineStages,
+  pipelines,
+  tasks,
+  tenants,
+  timelineEvents,
+  users,
+} from '../src/schema/index.js';
+import { seedCrmBatch } from '../src/seed-crm.js';
+import {
+  DEMO_LEADS_PER_TENANT,
+  DEMO_TENANT_2_ID,
+  DEMO_TENANT_3_ID,
+  DEMO_TENANT_4_ID,
+  DEMO_TENANT_ID,
+  DEMO_TENANTS,
+  seedDemo,
+} from '../src/seed.js';
 import { loadTestDatabaseEnv } from '../src/testing/index.js';
 import { withContext, withTenant } from '../src/with-tenant.js';
 
@@ -24,8 +44,14 @@ async function membersOf(tenantId: string) {
   return rows.sort(byEmail);
 }
 
+const setupOf = (tenantId: string) =>
+  withTenant(app.db, tenantId, async (tx) => ({
+    tenant: (await tx.select().from(tenants))[0],
+    pipelines: (await tx.select({ key: pipelines.key }).from(pipelines)).map((p) => p.key),
+  }));
+
 describe('seedDemo (as app_user, through RLS)', () => {
-  it('creates both demo tenants with their members, and is idempotent', async () => {
+  it('creates the four demo tenants with their members, and is idempotent', async () => {
     await seedDemo(app.db, PASSWORD);
     await seedDemo(app.db, PASSWORD);
 
@@ -34,6 +60,16 @@ describe('seedDemo (as app_user, through RLS)', () => {
         tenant.members.map((m) => ({ ...m, status: 'active' })).sort(byEmail),
       );
     }
+  });
+
+  it('M1: each demo tenant gets its template’s CRM setup and contact-visibility default', async () => {
+    const realty = await setupOf(DEMO_TENANT_ID);
+    expect(realty.tenant?.industryTemplate).toBe('real-estate');
+    expect(realty.tenant?.settings).toMatchObject({ agentContactVisibility: 'assigned' });
+    expect(realty.pipelines).toEqual(['property_sales']);
+    const clinic = await setupOf(DEMO_TENANT_2_ID);
+    expect(clinic.tenant?.settings).toMatchObject({ agentContactVisibility: 'all' });
+    expect(clinic.pipelines).toEqual(['patient_enquiries']);
   });
 
   it('the first tenant has owner/admin/manager/agent; the second its own owner + agent', async () => {
@@ -48,7 +84,20 @@ describe('seedDemo (as app_user, through RLS)', () => {
     expect(second.find((m) => m.role === 'agent')?.email).toBe('agent2@demo.revops.test');
   });
 
-  it('manager@demo.revops.test is one user with an active membership in both tenants', async () => {
+  it('M1-T7: the four tenants are Realty, Clinic, Software Agency and Repair Shop', async () => {
+    expect(DEMO_TENANTS.map((t) => [t.name, t.industryTemplate])).toEqual([
+      ['Demo Realty', 'real-estate'],
+      ['Demo Clinic', 'clinic'],
+      ['Demo Software Agency', 'software-agency'],
+      ['Demo Repair Shop', 'repair-shop'],
+    ]);
+    const agency = await setupOf(DEMO_TENANT_3_ID);
+    expect(agency.pipelines).toEqual(['projects']);
+    const repair = await setupOf(DEMO_TENANT_4_ID);
+    expect(repair.pipelines.sort()).toEqual(['inquiries', 'repair_jobs']);
+  });
+
+  it('manager@demo.revops.test is one user with an active membership in all four tenants', async () => {
     const [manager] = await app.db.execute<{ id: string }>(
       sql`select id from auth_find_user_by_email('manager@demo.revops.test')`,
     );
@@ -59,7 +108,7 @@ describe('seedDemo (as app_user, through RLS)', () => {
         .from(memberships)
         .where(eq(memberships.userId, manager?.id ?? '')),
     );
-    expect(mine.map((m) => m.tenantId).sort()).toEqual([DEMO_TENANT_ID, DEMO_TENANT_2_ID].sort());
+    expect(mine.map((m) => m.tenantId).sort()).toEqual(DEMO_TENANTS.map((t) => t.id).sort());
     expect(mine.every((m) => m.role === 'manager')).toBe(true);
   });
 
@@ -81,5 +130,69 @@ describe('seedDemo (as app_user, through RLS)', () => {
       );
     expect(await visibleIn(DEMO_TENANT_2_ID)).toHaveLength(1);
     expect(await visibleIn(DEMO_TENANT_ID)).toHaveLength(0);
+  });
+
+  it('M1-T7: demo CRM data — leads in every tenant, valid outcomes, timeline, notes, tasks', async () => {
+    await seedDemo(app.db, PASSWORD); // rerun: tops up nothing
+    for (const tenant of DEMO_TENANTS) {
+      const data = await withTenant(app.db, tenant.id, async (tx) => ({
+        leads: await tx
+          .select({
+            status: leads.status,
+            category: pipelineStages.category,
+            wonAt: leads.wonAt,
+            lostAt: leads.lostAt,
+            lostReason: leads.lostReason,
+            ownerUserId: leads.ownerUserId,
+          })
+          .from(leads)
+          .innerJoin(pipelineStages, eq(pipelineStages.id, leads.stageId)),
+        contacts: await tx.select({ phone: contacts.phoneE164 }).from(contacts),
+        created: await tx
+          .select({ n: sql<number>`count(*)::int` })
+          .from(timelineEvents)
+          .where(eq(timelineEvents.type, 'created')),
+        notes: await tx.select({ n: sql<number>`count(*)::int` }).from(notes),
+        tasks: await tx.select({ n: sql<number>`count(*)::int` }).from(tasks),
+      }));
+      expect(data.leads, tenant.slug).toHaveLength(DEMO_LEADS_PER_TENANT);
+      expect(data.created[0]?.n).toBe(DEMO_LEADS_PER_TENANT);
+      expect(data.notes[0]?.n).toBe(DEMO_LEADS_PER_TENANT / 4);
+      expect(data.tasks[0]?.n).toBe(DEMO_LEADS_PER_TENANT / 4);
+      for (const lead of data.leads) {
+        expect(lead.status).toBe(lead.category);
+        expect(lead.wonAt !== null).toBe(lead.category === 'won');
+        expect(lead.lostAt !== null && lead.lostReason !== null).toBe(lead.category === 'lost');
+      }
+      expect(new Set(data.leads.map((l) => l.status)).size).toBeGreaterThan(1);
+      expect(data.leads.some((l) => l.ownerUserId === null)).toBe(true);
+      for (const c of data.contacts) expect(c.phone).toMatch(/^\+919\d{9}$/);
+    }
+  });
+
+  it('M1-T7: a batch tops up to its target and never touches other tenants', async () => {
+    const [owner] = await app.db.execute<{ id: string }>(
+      sql`select id from auth_find_user_by_email('owner2@demo.revops.test')`,
+    );
+    const batch = {
+      name: 'topup-test',
+      leads: 30,
+      ownerIds: [],
+      actorId: owner?.id ?? '',
+      phoneBlock: 77,
+      activityEvery: 0,
+      now: new Date(),
+    };
+    const count = (tenantId: string) =>
+      withTenant(app.db, tenantId, async (tx) => {
+        const [row] = await tx.select({ n: sql<number>`count(*)::int` }).from(leads);
+        return row?.n ?? 0;
+      });
+    const otherBefore = await count(DEMO_TENANT_ID);
+    expect(await seedCrmBatch(app.db, DEMO_TENANT_2_ID, { ...batch, leads: 10 })).toBe(10);
+    expect(await seedCrmBatch(app.db, DEMO_TENANT_2_ID, batch)).toBe(20);
+    expect(await seedCrmBatch(app.db, DEMO_TENANT_2_ID, batch)).toBe(0);
+    expect(await count(DEMO_TENANT_2_ID)).toBe(DEMO_LEADS_PER_TENANT + 30);
+    expect(await count(DEMO_TENANT_ID)).toBe(otherBefore);
   });
 });

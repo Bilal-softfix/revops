@@ -6,13 +6,24 @@ test.describe('M0-T7 AC: signup → verify email → login', () => {
     page,
   }) => {
     const email = uniqueEmail('owner');
-    await signupAndVerify(page, email, 'Asha Realty', 'Asha Owner');
+    await signupAndVerify(
+      page,
+      email,
+      'Asha Repairs',
+      'Asha Owner',
+      'Repair shop / service centre',
+    );
 
     await page.getByRole('link', { name: 'Go to sign in' }).click();
     await login(page, email);
-    await expect(page.getByRole('heading', { name: 'Welcome to Asha Realty' })).toBeVisible();
+    // M1-T3a: the picked business type seeded the CRM (both repair-shop pipelines).
+    const pipelines = (await (await page.request.get('/api/v1/pipelines')).json()) as {
+      items: { name: string }[];
+    };
+    expect(pipelines.items.map((p) => p.name)).toEqual(['Inquiries', 'Repair jobs']);
+    await expect(page.getByRole('heading', { name: 'Welcome to Asha Repairs' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Switch workspace' })).toContainText(
-      'Asha Realty',
+      'Asha Repairs',
     );
 
     // Signing out ends the session: the app is no longer reachable.

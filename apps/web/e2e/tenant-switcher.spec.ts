@@ -1,16 +1,15 @@
 import { expect, test } from '@playwright/test';
-import { linkFromEmail, login, signupAndVerify, uniqueEmail } from './helpers';
+import { FIXTURES } from './fixtures';
+import { linkFromEmail, login } from './helpers';
 
 test('an existing user accepts an invite while signed in, then switches between workspaces', async ({
   page,
   browser,
 }) => {
   // Two independent owners, each with their own workspace
-  const firstEmail = uniqueEmail('first');
-  const secondEmail = uniqueEmail('second');
-  await signupAndVerify(page, firstEmail, 'First Realty', 'First Owner');
+  const firstEmail = FIXTURES.switchFirst.owner.email;
+  const secondEmail = FIXTURES.switchSecond.owner.email;
   const other = await (await browser.newContext()).newPage();
-  await signupAndVerify(other, secondEmail, 'Second Clinic', 'Second Owner');
 
   // The first owner invites the second as a manager
   await login(page, firstEmail);

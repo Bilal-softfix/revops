@@ -1,4 +1,4 @@
-import { emailSchema } from '@revops/shared';
+import { emailSchema, industryTemplateKeySchema } from '@revops/shared';
 import { z } from 'zod';
 import { defineJob } from '../../platform/queue/job';
 
@@ -18,6 +18,8 @@ export const SIGNUP_JOB = defineJob(
     name: z.string().min(1).max(100),
     email: emailSchema,
     tenantName: z.string().min(1).max(100),
+    /** Older queued jobs have none: generic. */
+    industry: industryTemplateKeySchema.default('generic'),
     passwordHash: z.string().startsWith('$argon2id$').max(512),
     meta: requestMetaSchema,
   }),

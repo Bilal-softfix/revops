@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { roleSchema } from '../tenancy/enums.js';
+import { industryTemplateKeySchema } from '../templates/index.js';
 
 // Auth API contracts (/v1/auth/*), shared by apps/api (validation) and apps/web (forms + types).
 
@@ -27,6 +28,8 @@ export const signupRequestSchema = z.object({
   email: emailSchema,
   password: passwordSchema,
   tenantName: nameSchema,
+  /** Industry template that seeds the CRM (pipelines, fields, sources). Default: generic. */
+  industry: industryTemplateKeySchema.optional(),
 });
 export type SignupRequest = z.infer<typeof signupRequestSchema>;
 

@@ -38,6 +38,13 @@ export class Metrics {
     registers: [this.registry],
   });
 
+  readonly outboxDeadLettered = new Counter({
+    name: 'outbox_events_dead_lettered_total',
+    help: 'Outbox events the relay set aside as undeliverable (unknown type / invalid payload)',
+    labelNames: ['type'] as const,
+    registers: [this.registry],
+  });
+
   readonly outboxRelayErrors = new Counter({
     name: 'outbox_relay_errors_total',
     help: 'Failed outbox relay passes (retried on the next tick)',

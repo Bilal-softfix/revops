@@ -1,4 +1,4 @@
-import { auditLogs, createDb, outboxEvents, withTenant } from '@revops/db';
+import { auditLogs, createDb, eq, outboxEvents, withTenant } from '@revops/db';
 import { loadTestDatabaseEnv } from '@revops/db/testing';
 import {
   type Invitation,
@@ -17,6 +17,7 @@ import {
   PASSWORD,
   type TestApp,
   addMember,
+  asTestOwner,
   createTestApp,
   login,
   sessionCookie,
@@ -540,5 +541,68 @@ describe('invitation emails run as jobs (M0-T6)', () => {
         .send({ token, name: 'Retry', password: OTHER_PASSWORD });
     await accept(first).expect(400);
     await accept(second).expect(200);
+  });
+});
+
+describe('M1-T0: expired invitations are not pending', () => {
+  freshApp();
+  let tenantId: string;
+  let owner: LoggedIn;
+
+  beforeAll(async () => {
+    const email = uniqueEmail('owner');
+    tenantId = (await signupVerified(t, email)).tenant?.id ?? '';
+    owner = await login(t, email);
+  });
+
+  /** Ages an invitation past its expiry (as the owner, in that tenant's RLS context). */
+  const expire = (email: string) =>
+    asTestOwner((sql) =>
+      sql.begin(async (tx) => {
+        await tx`select set_config('app.tenant_id', ${tenantId}, true)`;
+        await tx`update invitations set expires_at = now() - interval '1 hour' where email = ${email}`;
+      }),
+    );
+  const pending = async () =>
+    (
+      (await withSession(request(t.server).get('/v1/invitations'), owner).expect(200)).body as {
+        items: Invitation[];
+      }
+    ).items;
+
+  it('an expired invitation drops out of the pending list, and re-inviting the email works', async () => {
+    const email = uniqueEmail('late');
+    const first = (await invite(owner, email, 'agent').expect(201)).body as Invitation;
+    await t.drain();
+    const oldToken = t.email.lastTokenTo(email);
+    await expire(email);
+    expect((await pending()).map((i) => i.email)).not.toContain(email);
+
+    // Before M1-T0 this was 409 invitation_exists for an invitation nobody could accept.
+    const second = (await invite(owner, email, 'manager').expect(201)).body as Invitation;
+    expect(second.id).not.toBe(first.id);
+    expect((await pending()).filter((i) => i.email === email)).toEqual([second]);
+
+    // The old one is superseded (revoked + audited); its link stays dead, the new one works.
+    const db = createDb(loadTestDatabaseEnv().appUrl, { max: 1 });
+    const audit = await withTenant(db.db, tenantId, (tx) =>
+      tx.select().from(auditLogs).where(eq(auditLogs.entityId, first.id)),
+    ).finally(() => db.close());
+    expect(audit.map((a) => a.action)).toContain('invitation.superseded');
+    await t.drain();
+    const accept = (token: string | undefined) =>
+      request(t.server)
+        .post('/v1/invitations/accept')
+        .send({ token, name: 'Late Person', password: OTHER_PASSWORD });
+    await accept(oldToken).expect(400);
+    const res = await accept(t.email.lastTokenTo(email)).expect(200);
+    expect((res.body as SessionResponse).tenant?.role).toBe('manager');
+  });
+
+  it('an unexpired invitation still blocks a duplicate (409 invitation_exists)', async () => {
+    const email = uniqueEmail('dup');
+    await invite(owner, email, 'agent').expect(201);
+    const res = await invite(owner, email, 'agent').expect(409);
+    expect(res.body).toMatchObject({ code: 'invitation_exists' });
   });
 });

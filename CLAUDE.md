@@ -62,3 +62,10 @@ AI Revenue Operations Platform for Indian lead-driven SMBs: lead capture → hum
 - If you hit something that needs a real external account (Meta, Exotel, etc.), build against the Fake adapter and add an item to "Blocked on external" in PROGRESS.md.
 - Do not add new dependencies without stating why; prefer what's already in the stack.
 - Commands and scripts must work on Windows, macOS and Linux (use Node scripts / cross-env, not bash-only scripts).
+
+## Cost & speed (token budget)
+- **No parallel subagents / orchestration.** Do tasks in this one session, sequentially, slice by slice — even if a prompt suggests splitting work across agents.
+- Subagents only where a command explicitly calls for one (`/review-milestone`), run one at a time on `model: sonnet`.
+- Read only what the task needs: the "Current" section of PROGRESS.md and the active task in the milestone file, not whole history; grep/read file ranges instead of whole large files.
+- Run targeted tests while iterating (the files you touched); run the full suite (typecheck, lint, unit, integration, e2e) **once** before pushing, and push after every task so CI catches regressions early.
+- Filter command output (tail/grep) — never dump full build/test logs into context.

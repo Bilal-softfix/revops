@@ -1,0 +1,121 @@
+{
+  "key": "clinic",
+  "name": "Clinic / healthcare",
+  "description": "Clinics and diagnostic centres: enquiry → appointment → visit.",
+  "settings": {
+    "agentContactVisibility": "all"
+  },
+  "pipelines": [
+    {
+      "key": "patient_enquiries",
+      "name": "Patient enquiries",
+      "isDefault": true,
+      "stages": [
+        {
+          "key": "new_enquiry",
+          "name": "New enquiry",
+          "category": "open",
+          "probability": 10
+        },
+        {
+          "key": "contacted",
+          "name": "Contacted",
+          "category": "open",
+          "probability": 30
+        },
+        {
+          "key": "appointment_booked",
+          "name": "Appointment booked",
+          "category": "open",
+          "probability": 70
+        },
+        {
+          "key": "visited",
+          "name": "Visited",
+          "category": "won",
+          "probability": 100
+        },
+        {
+          "key": "no_show",
+          "name": "No-show / not interested",
+          "category": "lost",
+          "probability": 0
+        }
+      ],
+      "lostReasons": ["No-show", "Went elsewhere", "Cost", "Not reachable"]
+    }
+  ],
+  "customFields": [
+    {
+      "entity": "lead",
+      "key": "treatment_interest",
+      "label": "Treatment / service",
+      "type": "text"
+    },
+    {
+      "entity": "lead",
+      "key": "preferred_doctor",
+      "label": "Preferred doctor",
+      "type": "text"
+    },
+    {
+      "entity": "lead",
+      "key": "appointment_date",
+      "label": "Appointment date",
+      "type": "date"
+    },
+    {
+      "entity": "contact",
+      "key": "age",
+      "label": "Age",
+      "type": "number"
+    },
+    {
+      "entity": "contact",
+      "key": "gender",
+      "label": "Gender",
+      "type": "select",
+      "options": [
+        {
+          "value": "female",
+          "label": "Female"
+        },
+        {
+          "value": "male",
+          "label": "Male"
+        },
+        {
+          "value": "other",
+          "label": "Other"
+        }
+      ]
+    }
+  ],
+  "leadSources": [
+    {
+      "key": "website",
+      "name": "Website",
+      "type": "web_form"
+    },
+    {
+      "key": "phone",
+      "name": "Phone call",
+      "type": "phone"
+    },
+    {
+      "key": "whatsapp",
+      "name": "WhatsApp",
+      "type": "whatsapp"
+    },
+    {
+      "key": "walk_in",
+      "name": "Walk-in",
+      "type": "walk_in"
+    },
+    {
+      "key": "referral",
+      "name": "Doctor / patient referral",
+      "type": "manual"
+    }
+  ]
+}

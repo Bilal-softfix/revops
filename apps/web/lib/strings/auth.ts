@@ -7,6 +7,8 @@ export const authStrings = {
   passwordHint: 'At least 12 characters.',
   name: 'Your name',
   tenantName: 'Business name',
+  businessType: 'Business type',
+  businessTypeHint: 'Sets up your pipeline, fields and lead sources. You can change them later.',
   login: {
     title: 'Sign in to RevOps',
     submit: 'Sign in',

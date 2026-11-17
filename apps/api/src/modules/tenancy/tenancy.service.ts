@@ -4,7 +4,7 @@ import {
   type AcceptInvitationRequest,
   type Invitation,
   type InviteRequest,
-  MEMBER_JOINED_V1,
+  MEMBER_JOINED,
   type Member,
   type MemberJoinedV1,
   type MemberPage,
@@ -20,6 +20,7 @@ import type { ApiEnv } from '@revops/shared/env';
 import { API_ENV } from '../../config/env';
 import { Clock } from '../../platform/clock';
 import { Database } from '../../platform/database/database';
+import { recordAudit, recordEvent } from '../../platform/outbox/record';
 import { JobQueue } from '../../platform/queue/job-queue';
 import { DomainError } from '../../platform/errors/domain-error';
 import { RateLimiter } from '../../platform/rate-limit/rate-limiter';
@@ -140,7 +141,7 @@ export class TenancyService {
         await this.repository.updateMember(tx, targetUserId, patch);
         const before = { role: target.role, status: target.status };
         const after = { role: patch.role ?? target.role, status: patch.status ?? target.status };
-        await this.repository.insertAudit(tx, {
+        await recordAudit(tx, {
           tenantId: auth.tenantId,
           actorType: 'user',
           actorId: auth.userId,
@@ -166,7 +167,7 @@ export class TenancyService {
   async listInvitations(auth: TenantAuth): Promise<{ items: Invitation[] }> {
     const rows = await this.database.withContext(
       { tenantId: auth.tenantId, userId: auth.userId },
-      (tx) => this.repository.listOpenInvitations(tx),
+      (tx) => this.repository.listPendingInvitations(tx, this.clock.now()),
     );
     return { items: rows.map(toInvitation) };
   }
@@ -184,8 +185,21 @@ export class TenancyService {
         // only re-invitable by someone who may manage their current role (an admin can't
         // reactivate a disabled owner this way — M0 security review L3).
         if (member && !canManageRole(auth.role, member.role)) throw forbidden();
-        if (await this.repository.findOpenInvitationByEmail(tx, input.email)) {
-          throw invitationExists();
+        const open = await this.repository.findOpenInvitationByEmail(tx, input.email);
+        if (open && open.expiresAt > now) throw invitationExists();
+        if (open) {
+          // Expired: it no longer counts as pending, but still holds the open-email unique slot.
+          // Supersede it (revoked + audited) so the new invitation can take its place (M1-T0).
+          await this.repository.revokeInvitation(tx, open.id, now);
+          await recordAudit(tx, {
+            tenantId: auth.tenantId,
+            actorType: 'user',
+            actorId: auth.userId,
+            action: 'invitation.superseded',
+            entity: 'invitation',
+            entityId: open.id,
+            ip: meta.ip,
+          });
         }
         const inserted = await this.repository.insertInvitation(tx, {
           tenantId: auth.tenantId,
@@ -196,7 +210,7 @@ export class TenancyService {
           invitedBy: auth.userId,
           expiresAt: new Date(now.getTime() + INVITATION_TTL_MS),
         });
-        await this.repository.insertAudit(tx, {
+        await recordAudit(tx, {
           tenantId: auth.tenantId,
           actorType: 'user',
           actorId: auth.userId,
@@ -235,7 +249,7 @@ export class TenancyService {
           hashInvitationToken(newInvitationToken(auth.tenantId)),
           new Date(now.getTime() + INVITATION_TTL_MS),
         );
-        await this.repository.insertAudit(tx, {
+        await recordAudit(tx, {
           tenantId: auth.tenantId,
           actorType: 'user',
           actorId: auth.userId,
@@ -257,7 +271,7 @@ export class TenancyService {
         if (!invitation) throw notFound();
         if (!canManageRole(auth.role, invitation.role)) throw forbidden();
         await this.repository.revokeInvitation(tx, invitationId, this.clock.now());
-        await this.repository.insertAudit(tx, {
+        await recordAudit(tx, {
           tenantId: auth.tenantId,
           actorType: 'user',
           actorId: auth.userId,
@@ -356,7 +370,7 @@ export class TenancyService {
           });
         }
         await this.repository.upsertMembership(tx, tenantId, userId, invitation.role);
-        await this.repository.insertAudit(tx, {
+        await recordAudit(tx, {
           tenantId,
           actorType: 'user',
           actorId: userId,
@@ -367,9 +381,8 @@ export class TenancyService {
           ip: meta.ip,
         });
         const payload: MemberJoinedV1 = { tenantId, userId, invitationId: invitation.id };
-        await this.repository.insertOutboxEvent(tx, {
+        await recordEvent(tx, MEMBER_JOINED, {
           tenantId,
-          type: MEMBER_JOINED_V1,
           aggregateId: userId,
           payload,
         });

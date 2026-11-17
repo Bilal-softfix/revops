@@ -88,6 +88,19 @@ const publishedAt = (eventId: string) =>
     return row?.published_at ?? null;
   });
 
+const deadLetter = (eventId: string) =>
+  asTestOwner(async (sql) => {
+    const [row] = await sql<{ at: Date | null; reason: string | null }[]>`
+      select dead_lettered_at as at, dead_letter_reason as reason from outbox_events
+      where id = ${eventId}`;
+    return row;
+  });
+
+async function metricValue(name: string): Promise<number> {
+  const metric = await moduleRef.get(Metrics).registry.getSingleMetric(name)?.get();
+  return (metric?.values ?? []).reduce((sum, v) => sum + v.value, 0);
+}
+
 /** processed_events is FORCE RLS (binds the owner too): read it in the tenant's context. */
 const processedCount = async (eventId: string) =>
   (
@@ -135,10 +148,13 @@ describe('outbox relay → pg-boss → consumer', () => {
     expect(await jobsFor(eventId)).toHaveLength(1);
   });
 
-  it('events with no subscriber are marked published without any job', async () => {
+  it('an event type outside the shared registry is dead-lettered, never relayed', async () => {
     const eventId = await writeEvent('nobody.listens.v1');
     await relay.relayOnce();
-    expect(await publishedAt(eventId)).not.toBeNull();
+    expect(await publishedAt(eventId)).toBeNull();
+    expect(await deadLetter(eventId)).toMatchObject({
+      reason: expect.stringMatching(/unknown/) as unknown,
+    });
     expect(await jobsFor(eventId)).toHaveLength(0);
   });
 
@@ -154,6 +170,62 @@ describe('outbox relay → pg-boss → consumer', () => {
     ).rejects.toThrow('rollback');
     await relay.relayOnce();
     expect(await jobsFor(eventId)).toHaveLength(0);
+  });
+});
+
+describe('M1-T0: dead-lettering — one bad event never blocks other tenants', () => {
+  it('an invalid payload in one tenant is set aside; another tenant’s events behind it still deliver', async () => {
+    // The bad row is written first (oldest = head of the queue), bypassing recordEvent the way a
+    // buggy or legacy writer could. Its payload passes the DB CHECK (an object) but not the schema.
+    const otherTenant = randomUUID();
+    await withTenant(app.db, otherTenant, (tx) =>
+      tx.insert(tenants).values({ id: otherTenant, name: 'Other', slug: `other-${otherTenant}` }),
+    );
+    const [bad] = await withTenant(app.db, otherTenant, (tx) =>
+      tx
+        .insert(outboxEvents)
+        .values({
+          tenantId: otherTenant,
+          type: USER_SIGNED_UP_V1,
+          payload: { userId: 'asha@example.com' }, // not a uuid; and PII must not leak into logs
+          occurredAt: new Date(Date.now() - 60_000),
+        })
+        .returning({ id: outboxEvents.id }),
+    );
+    const good = await writeEvent();
+
+    expect(await relay.relayOnce()).toBeGreaterThanOrEqual(2);
+    const dead = await deadLetter(bad?.id ?? '');
+    expect(dead?.at).not.toBeNull();
+    expect(dead?.reason).toMatch(
+      /^invalid payload: userId: invalid_format; tenantId: invalid_type/,
+    );
+    expect(dead?.reason).not.toContain('asha');
+    expect(await publishedAt(bad?.id ?? '')).toBeNull();
+    expect(await jobsFor(bad?.id ?? '')).toHaveLength(0);
+    expect(await publishedAt(good)).not.toBeNull();
+    expect(await jobsFor(good)).toHaveLength(1);
+
+    // Later passes skip it: it is never claimed again.
+    expect(await relay.relayOnce()).toBe(0);
+    expect(await metricValue('outbox_events_dead_lettered_total')).toBeGreaterThanOrEqual(1);
+  });
+
+  it('the DB refuses unversioned types and non-object payloads outright (CHECK constraints)', async () => {
+    const insert = (type: string, payload: unknown) =>
+      withTenant(app.db, tenantId, (tx) =>
+        tx
+          .insert(outboxEvents)
+          .values({ tenantId, type, payload: payload as Record<string, unknown> }),
+      );
+    for (const [type, payload] of [
+      ['lead.created', {}],
+      ['Lead.created.v1', {}],
+      ['user.signed_up.v1', []],
+      ['user.signed_up.v1', 'text'],
+    ] as const) {
+      await expect(insert(type, payload)).rejects.toMatchObject({ cause: { code: '23514' } });
+    }
   });
 });
 

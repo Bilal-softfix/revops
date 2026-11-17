@@ -58,9 +58,15 @@ Without `--write-env` the script prints the four lines (with passwords) instead 
 ## Migrations, seed and integration tests
 - `pnpm db:migrate` applies `packages/db/migrations` to the dev DB as `revops_owner` over `DATABASE_URL_OWNER` (on Neon: the direct endpoint). `pnpm db:migrate --test` does the same for the test DB.
 - `pnpm db:generate --name=<change>` creates a migration from `packages/db/src/schema`; add `--custom` for hand-written SQL such as RLS. Migrations are forward-only, and a merged migration is never edited.
+- `pnpm db:reset:dev` (**dev only**): drops everything the migrations created in the dev database, then re-runs the migrations and the seed. Use it when the schema or the demo data/templates changed. Extensions stay, so no superuser is needed. It refuses unless the database name ends in `_dev`, `NODE_ENV` isn't `production`, and it isn't the test database.
 - `pnpm db:seed`: set `SEED_PASSWORD` (at least 12 characters) in `.env` first. It runs as `app_user`, through RLS, is idempotent, and refuses to run with `NODE_ENV=production`. It creates:
   - **Demo Realty** (`demo`): `owner|admin|manager|agent@demo.revops.test`;
-  - **Demo Clinic** (`demo-clinic`): `owner2@demo.revops.test`, `agent2@demo.revops.test`, and **`manager@demo.revops.test`, who belongs to both tenants**. Use them to try the tenant switcher and isolation.
+  - **Demo Clinic** (`demo-clinic`): `owner2@`, `agent2@demo.revops.test`;
+  - **Demo Software Agency** (`demo-agency`): `owner3@`, `agent3@demo.revops.test`;
+  - **Demo Repair Shop** (`demo-repair`): `owner4@`, `agent4@demo.revops.test`;
+  - **`manager@demo.revops.test` belongs to all four tenants.** Use it to try the tenant switcher and isolation;
+  - 60 demo leads per tenant (contacts, every stage incl. won/lost, owners, sources, custom fields; notes + overdue/today/upcoming tasks on every 4th lead). Reruns only top up.
+- `pnpm db:seed -- --volume` also adds 10,000 leads to Demo Realty. Then `pnpm db:explain-leads` prints EXPLAIN ANALYZE timings and indexes for the leads list/board queries (M1-T7 volume check). Wait a minute after the bulk seed (or `ANALYZE leads, contacts` as `revops_owner`) so autovacuum has fresh planner stats.
 - `pnpm test:integration` runs against `DATABASE_URL_TEST`:
   - a guard refuses any database whose name doesn't end in `_test`, or that is the dev database;
   - Vitest globalSetup migrates the test DB;

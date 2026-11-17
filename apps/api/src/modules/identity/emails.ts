@@ -21,6 +21,34 @@ export function verifyEmailMessage(to: string, appUrl: string, token: string): E
   };
 }
 
+/**
+ * A new signup for this email was refused because its pending (unverified) sign-up has been
+ * replaced too often today — possibly someone else squatting the address. The link opens the
+ * verify page, whose "This wasn't me — start over" deletes that pending sign-up and frees the
+ * address again (M1-T0).
+ */
+export function startOverMessage(to: string, appUrl: string, token: string): EmailMessage {
+  const link = new URL('/verify-email', appUrl);
+  link.searchParams.set('token', token);
+  return {
+    to,
+    subject: 'Finish or start over your RevOps sign-up',
+    text: [
+      'Someone (hopefully you) tried to sign up to RevOps with this email address, but an',
+      'unfinished sign-up for it already exists.',
+      '',
+      'Open this link:',
+      link.toString(),
+      '',
+      '- If that sign-up is yours, enter its password to verify your email.',
+      '- If it isn’t, or you don’t remember the password, choose “This wasn’t me — start over”.',
+      '  It is deleted and you can sign up again straight away.',
+      '',
+      'The link expires in 24 hours.',
+    ].join('\n'),
+  };
+}
+
 /** Signup with an email that already has a verified account: nothing is created. */
 export function accountExistsMessage(to: string, appUrl: string): EmailMessage {
   return {

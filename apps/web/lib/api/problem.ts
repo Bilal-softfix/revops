@@ -21,6 +21,8 @@ export class ApiError extends Error {
   readonly fieldErrors: Record<string, string>;
   /** Seconds to wait, from Retry-After (429). */
   readonly retryAfter: number | undefined;
+  /** The whole problem body, for code-specific extensions (e.g. `conflict` on contact_exists). */
+  readonly problem: Problem;
 
   constructor(status: number, problem: Problem, retryAfter?: number) {
     super(problem.title ?? `Request failed (${status})`);
@@ -30,6 +32,7 @@ export class ApiError extends Error {
     this.requestId = problem.requestId;
     this.fieldErrors = Object.fromEntries((problem.errors ?? []).map((e) => [e.path, e.message]));
     this.retryAfter = retryAfter;
+    this.problem = problem;
   }
 }
 

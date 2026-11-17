@@ -6,7 +6,8 @@ import {
   type BeforeApplicationShutdown,
 } from '@nestjs/common';
 import { sql } from '@revops/db';
-import type { OutboxEnvelope } from '@revops/shared';
+import { type OutboxEnvelope, eventDefinition, outboxEnvelopeSchema } from '@revops/shared';
+import type { z } from 'zod';
 import { Clock } from '../clock';
 import { Database } from '../database/database';
 import { safeErrorSummary } from '../errors/safe-error';
@@ -40,6 +41,10 @@ interface ClaimedRow extends Record<string, unknown> {
  *   event to the same queue is a no-op) → mark the batch published.
  * A crash before commit leaves the events unpublished and no jobs behind; consumers dedupe on
  * the event id anyway (processOnce), so delivery is effectively exactly-once.
+ *
+ * A row that can't be valid (type not in the shared event registry, or a payload failing its
+ * schema) is dead-lettered in the same pass (`outbox_dead_letter`, with a value-free reason)
+ * instead of failing the batch — one bad event never blocks delivery for any tenant (M1-T0).
  */
 @Injectable()
 export class OutboxRelay implements OnApplicationBootstrap, BeforeApplicationShutdown {
@@ -67,38 +72,54 @@ export class OutboxRelay implements OnApplicationBootstrap, BeforeApplicationShu
     return map;
   }
 
-  /** One pass. Returns how many events were published (0 = nothing pending). */
+  /**
+   * One pass. Returns how many events were handled — published or dead-lettered (0 = nothing
+   * pending; a full batch means more may be waiting).
+   */
   async relayOnce(): Promise<number> {
     const subscriptions = this.subscriptions();
-    const published = await this.database.db.transaction(async (tx) => {
+    const now = this.clock.now().toISOString();
+    const result = await this.database.db.transaction(async (tx) => {
       const rows = (await tx.execute<ClaimedRow>(
         sql`select * from outbox_claim_batch(${this.options.batchSize})`,
       )) as unknown as ClaimedRow[];
-      if (rows.length === 0) return 0;
+      const published: string[] = [];
+      const dead: { row: ClaimedRow; reason: string }[] = [];
       for (const row of rows) {
-        const envelope: OutboxEnvelope = {
-          eventId: row.id,
-          tenantId: row.tenant_id,
-          type: row.type,
-          aggregateId: row.aggregate_id,
-          payload: row.payload,
-          occurredAt: new Date(row.occurred_at).toISOString(),
-        };
-        for (const consumer of subscriptions.get(row.type) ?? []) {
-          await this.queue.send(consumer.job, envelope, { id: row.id, tx });
+        const checked = validate(row);
+        if ('reason' in checked) {
+          dead.push({ row, reason: checked.reason });
+          continue;
         }
+        for (const consumer of subscriptions.get(row.type) ?? []) {
+          await this.queue.send(consumer.job, checked.envelope, { id: row.id, tx });
+        }
+        published.push(row.id);
       }
-      const ids = sql.join(
-        rows.map((row) => sql`${row.id}`),
-        sql`, `,
-      );
-      await tx.execute(
-        sql`select outbox_mark_published(array[${ids}]::uuid[], ${this.clock.now().toISOString()}::timestamptz)`,
-      );
-      return rows.length;
+      if (published.length > 0) {
+        const ids = sql.join(
+          published.map((id) => sql`${id}`),
+          sql`, `,
+        );
+        await tx.execute(
+          sql`select outbox_mark_published(array[${ids}]::uuid[], ${now}::timestamptz)`,
+        );
+      }
+      for (const { row, reason } of dead) {
+        await tx.execute(
+          sql`select outbox_dead_letter(${row.id}::uuid, ${reason}, ${now}::timestamptz)`,
+        );
+      }
+      return { handled: rows.length, published: published.length, dead };
     });
-    if (published > 0) this.metrics.outboxPublished.inc(published);
-    return published;
+    if (result.published > 0) this.metrics.outboxPublished.inc(result.published);
+    for (const { row, reason } of result.dead) {
+      this.metrics.outboxDeadLettered.inc({ type: row.type.slice(0, 100) });
+      this.logger.error(
+        `dead-lettered outbox event ${row.id} (${row.type}, tenant ${row.tenant_id}): ${reason}`,
+      );
+    }
+    return result.handled;
   }
 
   onApplicationBootstrap(): void {
@@ -129,4 +150,30 @@ export class OutboxRelay implements OnApplicationBootstrap, BeforeApplicationShu
     clearTimeout(this.timer);
     await this.running;
   }
+}
+
+/** Paths and codes of Zod issues — never the offending values (payloads can hold PII). */
+function describeIssues(error: z.ZodError): string {
+  return error.issues
+    .slice(0, 5)
+    .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.code}`)
+    .join('; ');
+}
+
+/** The envelope to deliver, or why this row can never be delivered. */
+function validate(row: ClaimedRow): { envelope: OutboxEnvelope } | { reason: string } {
+  const definition = eventDefinition(row.type);
+  if (!definition) return { reason: 'unknown event type (not in the shared event registry)' };
+  const envelope = outboxEnvelopeSchema.safeParse({
+    eventId: row.id,
+    tenantId: row.tenant_id,
+    type: row.type,
+    aggregateId: row.aggregate_id,
+    payload: row.payload,
+    occurredAt: new Date(row.occurred_at).toISOString(),
+  });
+  if (!envelope.success) return { reason: `invalid envelope: ${describeIssues(envelope.error)}` };
+  const payload = definition.schema.safeParse(envelope.data.payload);
+  if (!payload.success) return { reason: `invalid payload: ${describeIssues(payload.error)}` };
+  return { envelope: envelope.data };
 }

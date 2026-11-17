@@ -1,0 +1,172 @@
+{
+  "key": "real-estate",
+  "name": "Real estate",
+  "description": "Builders, brokers and property consultants: enquiry → site visit → booking.",
+  "settings": {
+    "agentContactVisibility": "assigned"
+  },
+  "pipelines": [
+    {
+      "key": "property_sales",
+      "name": "Property sales",
+      "isDefault": true,
+      "stages": [
+        {
+          "key": "new_enquiry",
+          "name": "New enquiry",
+          "category": "open",
+          "probability": 10
+        },
+        {
+          "key": "contacted",
+          "name": "Contacted",
+          "category": "open",
+          "probability": 20
+        },
+        {
+          "key": "site_visit_scheduled",
+          "name": "Site visit scheduled",
+          "category": "open",
+          "probability": 40
+        },
+        {
+          "key": "site_visit_done",
+          "name": "Site visit done",
+          "category": "open",
+          "probability": 60
+        },
+        {
+          "key": "negotiation",
+          "name": "Negotiation",
+          "category": "open",
+          "probability": 80
+        },
+        {
+          "key": "booked",
+          "name": "Booked",
+          "category": "won",
+          "probability": 100
+        },
+        {
+          "key": "lost",
+          "name": "Lost",
+          "category": "lost",
+          "probability": 0
+        }
+      ],
+      "lostReasons": [
+        "Budget mismatch",
+        "Location not suitable",
+        "Bought elsewhere",
+        "Loan not approved",
+        "No response"
+      ]
+    }
+  ],
+  "customFields": [
+    {
+      "entity": "lead",
+      "key": "property_type",
+      "label": "Property type",
+      "type": "select",
+      "options": [
+        {
+          "value": "apartment",
+          "label": "Apartment"
+        },
+        {
+          "value": "villa",
+          "label": "Villa / independent house"
+        },
+        {
+          "value": "plot",
+          "label": "Plot"
+        },
+        {
+          "value": "commercial",
+          "label": "Commercial"
+        }
+      ]
+    },
+    {
+      "entity": "lead",
+      "key": "configuration",
+      "label": "Configuration",
+      "type": "select",
+      "options": [
+        {
+          "value": "1bhk",
+          "label": "1 BHK"
+        },
+        {
+          "value": "2bhk",
+          "label": "2 BHK"
+        },
+        {
+          "value": "3bhk",
+          "label": "3 BHK"
+        },
+        {
+          "value": "4bhk_plus",
+          "label": "4 BHK +"
+        }
+      ]
+    },
+    {
+      "entity": "lead",
+      "key": "budget_lakh",
+      "label": "Budget (₹ lakh)",
+      "type": "number"
+    },
+    {
+      "entity": "lead",
+      "key": "preferred_location",
+      "label": "Preferred location",
+      "type": "text"
+    },
+    {
+      "entity": "lead",
+      "key": "site_visit_date",
+      "label": "Site visit date",
+      "type": "date"
+    },
+    {
+      "entity": "lead",
+      "key": "home_loan_needed",
+      "label": "Home loan needed",
+      "type": "bool"
+    }
+  ],
+  "leadSources": [
+    {
+      "key": "website",
+      "name": "Website",
+      "type": "web_form"
+    },
+    {
+      "key": "meta_ads",
+      "name": "Facebook / Instagram ads",
+      "type": "meta"
+    },
+    {
+      "key": "property_portal",
+      "name": "Property portal",
+      "type": "csv"
+    },
+    {
+      "key": "phone",
+      "name": "Phone call",
+      "type": "phone"
+    },
+    {
+      "key": "site_walk_in",
+      "name": "Site walk-in",
+      "type": "walk_in"
+    },
+    {
+      "key": "referral",
+      "name": "Referral",
+      "type": "manual"
+    }
+  ]
+}

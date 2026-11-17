@@ -14,7 +14,7 @@ Lead capture channels (M2), calls (M3), automation (M5), scoring.
 **M1-T2 Custom fields** — definitions for contact/lead (text, number, date, select, multiselect, bool); validation of values against defs; render dynamically in forms.
 - AC: invalid value types rejected with field-level errors; deleting a def hides (not destroys) stored values.
 
-**M1-T3 Pipelines & stages** — default pipeline seeded from tenant's industry template JSON (`packages/shared/templates/{real-estate,education,clinic,generic}.json`); CRUD + reorder stages; stage category open/won/lost.
+**M1-T3 Pipelines & stages** — default pipeline seeded from tenant's industry template JSON (`packages/shared/src/templates/data/{real-estate,education,clinic,generic,software-agency,repair-shop}.json`; templates may define several pipelines); CRUD + reorder stages; stage category open/won/lost.
 - AC: cannot delete a stage with leads without choosing a target stage (bulk move).
 
 **M1-T4 Leads** — create/edit, owner assignment, stage change (records won_at/lost reason), value in paise, attribution jsonb, status; list view with filters (stage, owner, source, date range, custom fields), saved views, cursor pagination; kanban board with drag-drop stage change; agents see only assigned leads unless permission.
@@ -22,6 +22,7 @@ Lead capture channels (M2), calls (M3), automation (M5), scoring.
 
 **M1-T5 Notes, tasks, timeline** — notes; tasks with due date/assignee/type and "My tasks" view (overdue/today/upcoming); timeline_events written for create, assignment, stage change, note, task completion; lead detail page with timeline + side panel.
 - AC: timeline is ordered, paginated, and shows actor (user/ai/system).
+- AC (Dev, 2026-11-16): when deleting a stage moves leads (M1-T3b), each moved lead gets a timeline entry "stage changed because <stage> was deleted" in the same transaction; no per-lead `lead.stage_changed.v1`, one audit row.
 
 **M1-T6 Audit + bulk actions** — audit log for assignment/stage/delete; bulk assign, bulk stage move, CSV export (with formula-injection escaping) — permissioned.
 - AC: export respects agent visibility; audit entries created for bulk actions.
@@ -33,7 +34,7 @@ The segment is not decided, so nothing industry-specific may be hardcoded — in
 ```
 
 ## Review checklist
-- [ ] Indian phone formats normalise correctly (tests for at least 8 variants)
-- [ ] List & kanban usable with 10k leads (seed + quick check of query plans)
-- [ ] Every tenant table has leak test
-- [ ] Agent visibility enforced in API, not just UI
+- [x] Indian phone formats normalise correctly (tests for at least 8 variants) — 12 valid + 6 invalid in `packages/shared/src/crm/phone.test.ts`
+- [x] List & kanban usable with 10k leads (seed + quick check of query plans) — `leads-volume.int.test.ts`, `leads-volume.spec.ts`, `pnpm db:explain-leads` (0.5–26 ms)
+- [x] Every tenant table has leak test — `packages/db/test/tenant-tables.ts` registry + `rls-catalog.int.test.ts` meta-test
+- [x] Agent visibility enforced in API, not just UI — repository scope (`LeadsRepository.visible`); `leads.int.test.ts` "agent can't fetch, edit, move or delete a lead that isn't theirs (404)", export/activities/volume agent-scope tests

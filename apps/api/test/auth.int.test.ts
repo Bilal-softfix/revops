@@ -711,10 +711,58 @@ describe('security review of 83bdfb8: replace, forgot and cancel hardening', () 
     }
     const survivorToken = t.email.lastTokenTo(email);
     t.clock.advance(HOUR + 1000);
-    await signup(t, email, 'fifth passphrase!!'); // 4th replace: refused silently (still 202)
+    await signup(t, email, 'fifth passphrase!!'); // 4th replace: refused (still 202)
+    // M1-T0: the inbox still hears about it — a start-over link, not a new account.
+    expect(t.email.lastTo(email)?.subject).toBe('Finish or start over your RevOps sign-up');
+    expect(t.email.lastTokenTo(email)).not.toBe(survivorToken);
     // The account from the last allowed replace survives and still verifies with its password.
-    expect(t.email.lastTokenTo(email)).toBe(survivorToken);
     await verify(t, survivorToken, passwords[3]).expect(204);
+  });
+
+  it('M1-T0: a squatter can’t block an address — start over via the emailed link resets the allowance', async () => {
+    const email = uniqueEmail('squatted');
+    const ownerPassword = 'the real owner passphrase';
+    // The squatter signs up 4 times (create + 3 replaces) and so uses up the daily replaces.
+    await signup(t, email, 'squatter passphrase 0');
+    for (let i = 1; i <= 3; i++) {
+      t.clock.advance(HOUR + 1000);
+      await signup(t, email, `squatter passphrase ${i}`);
+    }
+    // The owner's own signup is refused as a replace — but they get a start-over link.
+    t.clock.advance(HOUR + 1000);
+    await signup(t, email, ownerPassword);
+    expect(t.email.lastTo(email)?.subject).toMatch(/start over/i);
+    const startOver = t.email.lastTokenTo(email);
+
+    // "This wasn't me — start over" via that link deletes the squatter's pending sign-up…
+    await request(t.server)
+      .post('/v1/auth/verify-email/cancel')
+      .send({ token: startOver })
+      .expect(204);
+    // …and gives the address its replace allowance back: even if the squatter re-creates a
+    // pending account at once, the owner's next signup replaces it.
+    t.clock.advance(HOUR + 1000);
+    await signup(t, email, 'squatter passphrase again');
+    t.clock.advance(HOUR + 1000);
+    await signup(t, email, ownerPassword);
+    expect(t.email.lastTo(email)?.subject).toBe('Verify your email for RevOps');
+    await verify(t, t.email.lastTokenTo(email), ownerPassword).expect(204);
+    await login(t, email, ownerPassword);
+  });
+
+  it('M1-T0: the start-over email still respects the per-address email limit', async () => {
+    const email = uniqueEmail('limited');
+    await signup(t, email, 'squatter passphrase 0');
+    for (let i = 1; i <= 3; i++) {
+      t.clock.advance(HOUR + 1000);
+      await signup(t, email, `squatter passphrase ${i}`);
+    }
+    // Same IP + email, same hour, 3 more refused replaces: only the first 3 emails of that (IP,
+    // email) hour go out (EMAILS_PER_ADDRESS_PER_HOUR), the rest are dropped silently.
+    t.clock.advance(HOUR + 1000);
+    const before = t.email.sent.filter((m) => m.to === email).length;
+    for (let i = 0; i < 5; i++) await signup(t, email, `owner try ${i} passphrase`);
+    expect(t.email.sent.filter((m) => m.to === email).length - before).toBe(3);
   });
 
   it('verify-email/cancel is rate-limited per IP', async () => {

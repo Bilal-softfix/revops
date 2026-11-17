@@ -113,6 +113,122 @@ Permissions are strings (`lead.read.all`, `lead.read.assigned`, `routing.manage`
   - The invitation is claimed atomically in the same transaction as the membership insert, the audit row and `member.joined.v1`.
 - **Tenant switcher:** `GET /v1/tenants` and `POST /v1/session/tenant` work only for the caller's own active memberships (user-only context, `self_select`).
 
+## CRM setup and industry templates (M1-T3a)
+- **Templates are data, not code:** `packages/shared/src/templates/data/*.json`, validated at import by `industryTemplateSchema`. The six templates are `generic`, `real-estate`, `education`, `clinic`, `software-agency` and `repair-shop`. Each one defines:
+  - one or more pipelines (exactly one default), with stages (category open/won/lost, probability) and lost-reason presets;
+  - suggested custom fields;
+  - lead sources.
+- **Provisioning:** `provisionCrm(tx, tenantId, templateKey)` (`packages/db`) copies a template into the tenant's own pipelines, stages, custom field definitions and lead sources.
+  - It runs once: a per-tenant advisory lock, and a tenant that already has a pipeline is left alone. Later template edits never change existing tenants.
+  - Signup's "Business type" (`industry`, default `generic`) provisions in the same transaction as the tenant.
+  - Tenants created earlier are provisioned lazily from `tenants.industry_template` by `CrmService.withCrm` on first CRM access.
+- **Cross-tenant references are impossible:** CRM child rows reference their parent through composite foreign keys on `(tenant_id, parent_id)` against `unique(tenant_id, id)`. FK checks bypass RLS, so a plain `pipeline_id` FK would let one tenant point at another tenant's row by its uuid. Every M1 table follows this rule.
+
+## Contacts and visibility (M1-T1)
+- **Phones:** normalised to E.164 by `normalizePhone` (libphonenumber-js, region IN) in `@revops/shared`, so the browser preview and the API agree. Phones and emails (citext) are each unique per tenant among non-deleted contacts.
+- **Agent visibility is a per-tenant setting:** `tenants.settings.agentContactVisibility`, `all` | `assigned`.
+  - The default comes from the industry template: repair-shop and clinic `all`; the others `assigned`.
+  - Owners and admins change it with `PATCH /v1/crm/settings` (`crm.settings.manage`, audited).
+  - Owner, admin and manager (`lead.read.all`) always see every contact.
+  - In `assigned` mode an agent sees contacts they created, plus (from M1-T4) contacts linked to leads assigned to them.
+  - The scope is built once (`ContactsRepository.visible`) and applied to list, get, search, update and delete. An invisible contact is a 404, not a 403.
+- **Duplicate phone or email → 409 `contact_exists`** with `conflict: { field, ownerName, contact? }`.
+  - `contact` (id + name) is included only if the caller can see it; otherwise the caller learns only that it exists and who is working it.
+  - `ownerName` is the creator for now; from M1-T4 it's the owner of the latest lead.
+  - A unique-index race maps to the same 409.
+
+## Custom fields (M1-T2)
+- **Definitions:** per tenant and entity (contact/lead), seeded from the industry template and edited in Settings → Custom fields (`customfield.manage`: owner, admin). Everyone can read them, because forms need them.
+  - Key and type are immutable (the update schema is strict).
+  - Select options can be relabelled or added, never removed, because stored values reference them.
+  - Keys are never reused, even after deletion.
+- **Values** live in `custom_fields` jsonb on the record and are validated by `buildCustomFieldsSchema(defs, 'create' | 'patch')` from `@revops/shared`. The API (authoritative) and the web forms share it, and errors land on `customFields.<key>`.
+  - Unknown keys are rejected, including keys of deleted fields.
+  - Required fields are enforced on create and can't be cleared with `null`.
+  - A patch only touches the keys it carries, merged in SQL with `||` and `-`.
+- **Deleting a definition** is a soft delete. Responses include only values of active definitions (`visibleCustomFields`), so old values are hidden but never destroyed.
+- **Web:** `CustomFieldInputs` renders any definition list (text, number, date, choice, multi-choice, yes/no). The contact form sends only changed fields on edit.
+- **Pipeline scoping of lead fields (M1-T3b):** each lead field is shown in all pipelines (default, `pipelineIds: null`) or in selected pipelines of the same tenant (`custom_field_pipelines` rows, composite FKs to the field and the pipeline).
+  - `customFieldsForPipeline(defs, pipelineId)` (`@revops/shared`) is the one filter: lead forms render it, `CustomFieldsService.validateValues(…, { pipelineId })` validates against it (required fields only where they apply; a value for a field of another pipeline is 400 "doesn't apply to this pipeline"), and lead responses show only its values (`visibleCustomFields`).
+  - Moving a lead to another pipeline keeps every stored value; values of fields that don't apply there are just hidden.
+  - Pipeline ids in a definition must be active pipelines of the caller's tenant: another tenant's id is invisible under RLS and answers 400 `unknown pipeline` (the composite FK refuses it too). Rows of a soft-deleted pipeline stay but aren't listed, so a field limited only to deleted pipelines shows `pipelineIds: []` (applies nowhere until edited).
+  - Templates scope fields by pipeline key (`"pipelines": ["repair_jobs"]`); provisioning maps keys to the tenant's pipeline ids.
+
+## Pipelines and stages (M1-T3b)
+- **Reads** stay on `GET /v1/pipelines` (every role). **Writes** are under `/v1/pipelines` with `pipeline.manage` (owner, admin), audited, and return the changed pipeline: create (default stages New / In progress / Won / Lost unless given), `PATCH` name / lost reasons / `isDefault: true`, `PUT /order`, soft `DELETE`; stages `POST`, `PATCH`, `PUT /:id/stages/order` (full list) and `DELETE`.
+- **Invariants:** exactly one default pipeline, which can't be deleted; a pipeline with (non-deleted) leads can't be deleted (409 `pipeline_has_leads`); every pipeline keeps at least one open stage (409 `last_open_stage`); pipeline names and stage names (per pipeline) are unique case-insensitively; a stage holding leads can't change category (409 `stage_category_locked`).
+- **Deleting a stage with leads (AC):** without `?moveTo=` the API answers 409 `stage_has_leads` with `leadCount` and `targetStageIds`. Targets are the other stages of the same pipeline **and category**, so a bulk move never makes leads won or lost without `won_at` / a lost reason. With a valid target, every lead row (soft-deleted ones too) moves and the stage is deleted in one transaction; the audit row records `movedLeads` and `movedTo`.
+- **Concurrency:** structural changes lock the pipeline row (`FOR UPDATE`); stage deletion also locks the pipeline's stage rows, so a concurrent lead insert into that stage (its FK check takes `KEY SHARE`) waits and then fails on the deleted stage instead of slipping in. The `leads → pipeline_stages` FK is `NO ACTION` as a last line of defence.
+- **`leads` table** exists from M1-T3b (so stage deletion has something to move); its API, list, kanban and `lead.stage_changed.v1` arrive in M1-T4. `(tenant_id, pipeline_id, stage_id)` references `pipeline_stages(tenant_id, pipeline_id, id)`, so a lead's stage always belongs to its pipeline.
+- **Web:** Settings → Pipelines (cards per pipeline: stages table with up/down reorder, add/edit/delete dialogs; delete asks for a target stage when the API reports leads) and Settings → CRM settings (agent contact visibility radio).
+
+## Leads (M1-T4)
+- **Visibility is built once** (`LeadsRepository` scope): `lead.read.all` (owner, admin,
+  manager) sees every lead; everyone else only leads they own. Unassigned leads are visible
+  to read-all roles only. An invisible lead is a 404 for get, edit, stage change and delete.
+  Contacts in `assigned` mode are visible to an agent who created them or owns a
+  (non-deleted) lead of theirs.
+- **Ownership:** a new lead belongs to its creator unless a `lead.assign` role (owner, admin,
+  manager) picks someone else or nobody. Owners must be active members of the tenant.
+  Reassignment writes `lead.assigned` audit + `lead.assigned.v1`.
+- **Bulk actions (M1-T6):** `POST /v1/leads/bulk-assign` and `POST /v1/leads/bulk-stage`
+  (`lead.bulk`: owner/admin/manager; assign also needs `lead.assign`). Explicit ids, max 500, one
+  transaction, rows locked in id order. Result `{updatedIds, unchangedIds, notFoundIds}`: invisible
+  or deleted ids are skipped, no-ops write nothing. Each changed lead gets the same audit row,
+  outbox event and timeline entry as a single change (marked `bulk: true`), plus one summary
+  audit row (`lead.bulk_assigned` / `lead.bulk_stage_changed`, entity id null).
+- **CSV export (M1-T6):** `GET /v1/exports/leads.csv` with the list's filters (`lead.export`, all
+  roles; same visibility scope as the list, so agents get only their leads). Max 10,000 rows, else
+  422 `export_too_large`. UTF-8 BOM, CRLF, RFC 4180 quoting; cells starting with `= + - @`, tab or
+  CR (after optional spaces) get a leading `'` (formula injection). Audited as `lead.exported`
+  with count + filters only.
+- **Contact:** `contactId` (one the caller can see) or `contact {name, phone|email}`. A new
+  contact whose phone/email already exists links to that contact (one person, one contact)
+  if the caller can see it; a concurrent duplicate insert is retried once and then links.
+  An agent in `assigned` mode matching a contact they can't see gets the contact-create 409
+  `contact_exists` (field + who handles it, no contact details) and nothing is created.
+- **Stage changes** only via `POST /v1/leads/:id/stage {stageId, pipelineId?, lostReason?}`:
+  locks the lead row, keeps `status` (= stage category), `won_at`, `lost_at`, `lost_reason`
+  in sync (reopening clears them; moving within won keeps the win date), writes the audit row
+  and `lead.stage_changed.v1` in the same transaction. A no-op move emits nothing. A stage
+  deleted concurrently answers 409 `stage_gone`. Moving to another pipeline keeps all stored
+  custom values (non-applicable ones hidden) and doesn't enforce the new pipeline's required
+  fields until the next edit.
+- **Money:** `valuePaise` is a safe JSON integer; the column is `bigint`. The web takes rupees
+  and converts with string maths (`lib/money.ts`), never floats.
+- **List:** keyset cursor on `(created_at, id)`; filters pipeline, stage(s), status, owner
+  (`me` / `unassigned` / user), source, created range (the web sends IST day bounds), search
+  on contact name / phone digits / email, and custom fields (`cf=<json>`: text contains, select
+  any-of, multiselect has, bool equals, number/date ranges; unknown fields 400). Containment
+  filters use a GIN `jsonb_path_ops` index on `leads.custom_fields`.
+- **Board:** `GET /v1/leads/board?pipelineId=` returns, per stage, the matching count and the
+  first `perStage` cards; more cards load from the list endpoint with `stageIds=<stage>`.
+  The web board uses native HTML5 drag and drop plus a per-card "Move to" select (keyboard
+  and touch), both through the same stage-change call (lost asks for a reason).
+- **Saved views** (`saved_views`, `/v1/lead-views`): name + layout + filters, private to the
+  user who saved them. Filters live in the URL, so views and links share one encoding.
+
+## Notes, tasks, timeline (M1-T5)
+- **Everything follows the lead's visibility**: a lead the caller can't see makes its notes,
+  tasks and timeline 404 (`ActivitiesService`, `ActivitiesRepository`).
+- **Timeline** (`timeline_events`, append-only: app_user SELECT + INSERT) is written in the
+  same transaction as the change: lead created, assignment, stage change (incl. one entry per
+  lead moved by a stage delete, `data.reason = stage_deleted`, no per-lead event), note, task
+  completed/reopened. `actor_type` user/ai/system + `actor_id`; `data` holds name snapshots
+  (stages, pipelines, owners) so renamed or deleted things read as they were. A note entry shows
+  the live note (`ref_id`) and disappears when the note is deleted. `GET /v1/leads/:id/timeline`:
+  newest first, keyset cursor on `(occurred_at, seq)`; `seq` (identity) keeps write order for
+  events of the same instant.
+- **Notes:** `POST /v1/leads/:id/notes`, `PATCH|DELETE /v1/notes/:id`. Only the author edits;
+  the author or a `lead.delete` role deletes (soft). Audit rows never copy the body.
+- **Tasks:** `GET|POST /v1/leads/:id/tasks`, `PATCH|DELETE /v1/tasks/:id` (PATCH `status`
+  completes/reopens). Assignee defaults to the caller; anyone else needs `lead.assign` and must
+  be an active member who can see the lead (read-all role or the lead's owner).
+- **My tasks:** `GET /v1/tasks?bucket=overdue|today|upcoming` (open tasks assigned to me, on leads
+  I can still see, by due date; cursor on `(due_at, id)`) and `GET /v1/tasks/counts`. Overdue =
+  due before now; today = due before the next local midnight; upcoming = later. Local day =
+  tenant timezone (`Asia/Kolkata` until tenants have one; `dayBounds` in `@revops/shared`).
+
 ## Web app (apps/web, M0-T7)
 - **The browser never calls the API directly.** It calls same-origin `/api/v1/*`, and the route handler `app/api/[...path]/route.ts` forwards that to `API_INTERNAL_URL`, which is read at runtime.
   - Only `/v1` is exposed: `/metrics`, `/docs` and the probes stay internal.
@@ -126,12 +242,19 @@ Permissions are strings (`lead.read.all`, `lead.read.assigned`, `routing.manage`
 - **UI kit:** shadcn/ui (radix-nova) in `components/ui` with the system font stack, so builds don't download fonts.
 
 ## Events
-Outbox row: `{ id, tenant_id, type, aggregate_id, payload jsonb, occurred_at, published_at }`. The worker's relay (`apps/api/src/platform/outbox`, M0-T6) runs one transaction every `OUTBOX_POLL_INTERVAL_MS`:
+Outbox row: `{ id, tenant_id, type, aggregate_id, payload jsonb, occurred_at, published_at, dead_lettered_at, dead_letter_reason }`.
+
+**Writing (M1-T0):** modules write events and audit rows only through `recordEvent(tx, EVENT, {…})` and `recordAudit(tx, {…})` (`apps/api/src/platform/outbox/record.ts`), inside their own tenant transaction.
+- Every event type is declared once in the shared registry (`packages/shared/src/events/registry.ts`: `defineEvent(type, zodSchema)`), and its payload is validated before insert.
+- DB CHECKs enforce the `<aggregate>.<verb>.v<N>` type format and an object payload.
+- Audit actions must be `<entity>.<verb>` and user actions need an actor.
+
+**Relaying:** The worker's relay (`apps/api/src/platform/outbox`, M0-T6) runs one transaction every `OUTBOX_POLL_INTERVAL_MS`:
 - `outbox_claim_batch(100)` claims up to 100 events (FOR UPDATE SKIP LOCKED);
 - it enqueues one pg-boss job per subscribed consumer queue, with job id = event id, carrying the `outboxEnvelopeSchema` envelope;
 - `outbox_mark_published` marks the batch published.
 
-Concurrent or repeated relay runs never publish an event twice. Consumers extend `OutboxConsumer` (`events` they subscribe to, one queue each) and wrap their side effects in `processOnce`, which records `processed_events(consumer, event_id)` in the same tenant transaction. `platform.demo-event-log` is the template consumer.
+Rows the relay can't validate (a type not in the registry, a payload failing its schema, or a bad envelope) are **dead-lettered** in the same pass, via `outbox_dead_letter` with a reason that has schema paths only and never values. Later claims skip them. They are counted in `outbox_events_dead_lettered_total{type}` and logged, so one bad row never blocks any tenant's delivery. Concurrent or repeated relay runs never publish an event twice. Consumers extend `OutboxConsumer` (`events` they subscribe to, one queue each) and wrap their side effects in `processOnce`, which records `processed_events(consumer, event_id)` in the same tenant transaction. `platform.demo-event-log` is the template consumer.
 
 ### Jobs and processes
 - **API (`main.ts`):** enqueues through `JobQueue` and runs no jobs.
