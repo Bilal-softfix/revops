@@ -164,7 +164,11 @@ export class LeadsExportService {
         action: 'lead.exported',
         entity: 'lead',
         entityId: null,
-        after: { count: rows.length - 1, filters },
+        // Search text is often a phone or email: record that a search was used, not what it was.
+        after: {
+          count: rows.length - 1,
+          filters: filters.q === undefined ? filters : { ...filters, q: '[redacted]' },
+        },
         ip: meta.ip,
       });
       return {

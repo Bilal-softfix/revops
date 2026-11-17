@@ -336,6 +336,21 @@ describe('GET /v1/exports/leads.csv', () => {
     expect(text).not.toContain(agentLead.contact.phoneE164 ?? '??');
   });
 
+  it('redacts the search text (often a phone or email) in the audit row', async () => {
+    const phone = agentLead.contact.phoneE164 ?? '+919876543210';
+    await exportCsv(owner, { q: phone });
+    const rows = await asTestOwner((sql) =>
+      sql.begin(async (tx) => {
+        await tx`select set_config('app.tenant_id', ${tenantId}, true)`;
+        return tx<{ after: Record<string, unknown> }[]>`
+          select after from audit_logs
+          where action = 'lead.exported' order by created_at desc limit 1`;
+      }),
+    );
+    expect(rows[0]?.after).toMatchObject({ filters: { q: '[redacted]' } });
+    expect(JSON.stringify(rows[0])).not.toContain(phone);
+  });
+
   it('over the row cap → 422 export_too_large with limit and count', async () => {
     const service = t.app.get(LeadsExportService);
     service.maxRows = 2;

@@ -34,7 +34,7 @@ The segment is not decided, so nothing industry-specific may be hardcoded — in
 ```
 
 ## Review checklist
-- [ ] Indian phone formats normalise correctly (tests for at least 8 variants)
-- [ ] List & kanban usable with 10k leads (seed + quick check of query plans)
-- [ ] Every tenant table has leak test
-- [ ] Agent visibility enforced in API, not just UI
+- [x] Indian phone formats normalise correctly (tests for at least 8 variants) — 12 valid + 6 invalid in `packages/shared/src/crm/phone.test.ts`
+- [x] List & kanban usable with 10k leads (seed + quick check of query plans) — `leads-volume.int.test.ts`, `leads-volume.spec.ts`, `pnpm db:explain-leads` (0.5–26 ms)
+- [x] Every tenant table has leak test — `packages/db/test/tenant-tables.ts` registry + `rls-catalog.int.test.ts` meta-test
+- [x] Agent visibility enforced in API, not just UI — repository scope (`LeadsRepository.visible`); `leads.int.test.ts` "agent can't fetch, edit, move or delete a lead that isn't theirs (404)", export/activities/volume agent-scope tests

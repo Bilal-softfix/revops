@@ -2,7 +2,7 @@
 
 ## Current
 Milestone: M1 — CRM Core (starting). Branch: `milestone/m1-crm-core` (from main after M0 merged, tag `m0-done`).
-M1-T0 (M0 follow-ups) done 2026-11-12. M1 plan approved 2026-11-12 (order: T3a → T1 → T2 → T3b → T4 → T5 → T6 → T7, sequential). Draft PR #2 open. Done: T3a, T1, T2, T3b, T4, T5 (2026-11-16), T6 (2026-11-17, Dev-reviewed + allowAgentExport change), T7 (2026-11-17). Next: `/review-milestone M1`.
+M1-T0 (M0 follow-ups) done 2026-11-12. M1 plan approved 2026-11-12 (order: T3a → T1 → T2 → T3b → T4 → T5 → T6 → T7, sequential). Draft PR #2 open. Done: T3a, T1, T2, T3b, T4, T5 (2026-11-16), T6 (2026-11-17, Dev-reviewed + allowAgentExport change), T7 (2026-11-17, approved incl. assumptions). Milestone review done 2026-11-17: no blockers (1 privacy fix), suite green, PR #2 marked ready. Next: Dev decides contact-delete behaviour (Tech debt), reviews/merges PR #2 → `/start-milestone M2`.
 
 M0 history:
 Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-11-05; M0-T5 done 2026-11-11. 2026-11-11: switched to local-first (ADR-011 no Redis/pg-boss, ADR-012 native Postgres). M0-T6, M0-T7 done 2026-11-11. M0 milestone review done 2026-11-12: blockers fixed, PR ready for review. Next: Dev merges PR #1 → start M1 (`/start-milestone M1`). PR #1 merged 2026-11-12 (tag `m0-done`).
@@ -149,7 +149,7 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
   - `seed.int.test.ts` +3 (four tenants, demo data validity, top-up/isolation).
 
 ## In progress
-_(none — M1 tasks done; next: `/review-milestone M1`)_
+_(none — M1 reviewed; awaiting merge of PR #2)_
 
 ## Assumptions made
 _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
@@ -371,7 +371,7 @@ _M0 milestone review (2026-11-12): non-blocking findings from the code-reviewer 
 - **No-env production run fails open (security L2).** `NODE_ENV` defaults to `development`, so a prod deploy that forgets it gets `/docs`, open `/metrics` and the console email driver (live reset links in logs). M8: require NODE_ENV explicitly outside local dev.
 - **Session and token retention (security L6).** Revoked or expired `sessions` (with IP and user agent) and used `auth_tokens` rows are never purged. Add a purge cron next to the rate-limit purge (DPDP).
 - **API and worker bind 0.0.0.0 (security L7).** In dev, `/metrics` and `/docs` are reachable from the LAN. Bind to 127.0.0.1 by default, or require `METRICS_TOKEN` when bound to a non-loopback address.
-- **Stale planner stats after bulk inserts (M1-T7).** With 10k leads inserted at once and no ANALYZE yet, leads list/board took 40–120 s until autovacuum analyzed (≈1 min). M2 CSV import must ANALYZE after large imports (app_user can't: needs a definer function or a worker job as owner, or `GRANT MAINTAIN` on PG17+).
+- **Stale planner stats after bulk inserts (M1-T7).** With 10k leads inserted at once and no ANALYZE yet, leads list/board took 40–120 s until autovacuum analyzed (≈1 min). **Dev-confirmed requirement (2026-11-17): M2 CSV import runs ANALYZE on the affected tables after large imports** (app_user can't: needs a definer function or a worker job as owner, or `GRANT MAINTAIN` on PG17+).
 - Published `outbox_events` and `processed_events` rows are never purged. Add a retention job when volumes matter (M6/M8).
 - The minimatch moderate advisory (transitive) is still reported by `pnpm audit`; it is dev-tooling only.
 - Worker jobs have no per-job log context (the job id is in the failure log only); add an AsyncLocalStorage child logger when consumers multiply.
@@ -388,3 +388,19 @@ _(non-blocking review findings)_
 - Docker images in CI are tag-pinned (`pgvector/pgvector:0.8.6-pg18`), not digest-pinned; pin digests in M8 if reproducibility matters.
 - `db:bootstrap` sends the app_user password to Postgres as a plain-text literal over TLS (Neon checks password entropy, so a pre-hashed SCRAM verifier may be rejected). Revisit if server-side statement logging is ever enabled.
 - Turbo `envMode: loose` + `test` uncached: simple and correct for now; tighten env declarations if CI time matters.
+
+_M1 milestone review (2026-11-17): code-reviewer + security-auditor (sonnet) on `main...milestone/m1-crm-core`. No blocking findings. Fixed in the review commit: the `lead.exported` audit row stored the raw search text `q` (often a phone/email) → now `[redacted]` (test in `leads-export.int.test.ts`). Non-blocking:_
+- **Contact soft-delete leaves its leads live (Dev decision needed).** Leads keep listing the deleted contact's name/phone, and the freed phone can be reused by a new contact. Options: refuse with 409 `contact_has_leads`, or soft-delete/detach the leads in the same tx. (`contacts.service.ts` `remove`, `leads.repository.ts` `baseQuery`.)
+- **Pipeline delete race.** `pipelines.service.ts` `remove` locks only the pipeline row; lead create / `changeStage` / bulk move read the pipeline without a lock, so a concurrent move can land a lead in a just-soft-deleted pipeline. Fix: `FOR SHARE` on the pipeline row in `activePipeline`/`activeStage`.
+- **Events gaps for M5/M6 consumers.** Stage-delete moves emit no per-lead `lead.stage_changed.v1` (Dev decision M1-T5 AC; consumers must handle `pipeline_stage.deleted`); lead delete writes audit only — no timeline entry or `lead.deleted.v1`.
+- **Bulk actions are N+1 inside the tx.** `recordAssignments`/`applyStageMoves` insert audit + outbox one row at a time (≈1,000 round trips for 500 leads while holding locks). Batch into multi-row inserts.
+- **Visibility rule duplicated** in `activities.repository.ts` (`leadVisible`) and `leads.repository.ts` (`visible`). Share one helper so notes/tasks/timeline can't drift from the lead list.
+- **Bad cursor = silent empty page.** Unknown/cross-tenant/tampered cursor ids resolve to NULL and return `nextCursor: null`. Return 400 `invalid_cursor` or use an opaque (createdAt, id) cursor.
+- `Number(lead.valuePaise)` in the API response: safe under the Zod MAX_SAFE_INTEGER cap, but an import path writing > 2^53 would corrupt silently. Assert or serialise as string.
+- Indexes: `leads_tenant_owner_idx` lacks `created_at desc, id desc` (agent list sorts); `board()` runs one query per stage sequentially. Fine at 10k.
+- Contact-create retry on concurrent duplicate phone (`LeadsService.create`) has no concurrency test.
+- Security LOW: no rate limit on authenticated create/bulk/export endpoints (duplicate-check is a phone/email existence oracle; the agent 409 also returns `ownerName` by Dev decision). Add `rate_limit_buckets` per-user buckets before M2 public capture.
+- Security LOW: no cap on custom field definitions per tenant/entity (CSV width, jsonb size). Add e.g. ≤100 active defs per entity.
+- Security LOW: `bin/seed.ts` refuses only on `NODE_ENV=production`; add the `_dev`/`_test` + localhost guard used by `reset-dev`.
+- `contacts` create/update and `changeLeadStageRequestSchema` use `z.object` (strips unknown keys) where others are strict; switch to `strictObject` for consistency.
+- Local tooling: the Bash/system PATH resolves Node 24 (`C:\Program Files\nodejs`); run `fnm use 22` first or every pnpm command fails on `engine-strict`.
