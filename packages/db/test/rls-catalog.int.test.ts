@@ -30,6 +30,8 @@ const EXTRA_TENANT_POLICIES: Record<string, string[]> = {
  */
 const OWNER_ONLY_POLICIES: Record<string, string[]> = {
   outbox_events: ['outbox_relay_select:SELECT', 'outbox_relay_update:UPDATE'],
+  lead_sources: ['capture_resolve_select:SELECT'],
+  tenants: ['capture_resolve_select:SELECT'],
 };
 /** SECURITY DEFINER functions → whether app_user may call them directly. */
 const DEFINER_FUNCTIONS: Record<string, boolean> = {
@@ -43,6 +45,7 @@ const DEFINER_FUNCTIONS: Record<string, boolean> = {
   auth_reset_password: true,
   auth_session_lookup: true,
   auth_verify_email: true,
+  capture_resolve_source: true,
   outbox_claim_batch: true,
   outbox_dead_letter: true,
   outbox_mark_published: true,

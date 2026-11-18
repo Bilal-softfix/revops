@@ -1,7 +1,7 @@
 # PROGRESS
 
 ## Current
-Milestone: M2 — Lead Capture & Dedupe. Branch: `milestone/m2-lead-capture`, cut 2026-11-17 from the tip of `milestone/m1-crm-core` (44b37dc): PR #2 was still open and tag `m1-done` points at the M0 merge (5f428c5); `gh pr merge` was denied by permissions. **Dev to do:** merge PR #2, move `m1-done` to the merge commit. M2-T0 done 2026-11-17. M2 plan approved 2026-11-17 (order: T1 → T4 → T6 → T2 → T3 → T5, sequential; plan incl. threat model in `docs/milestones/M2-lead-capture.md` tasks). M2-T1, M2-T4, M2-T6 done 2026-11-17. PR #2 merged by Dev (a655812). Next: M2-T2.
+Milestone: M2 — Lead Capture & Dedupe. Branch: `milestone/m2-lead-capture`, cut 2026-11-17 from the tip of `milestone/m1-crm-core` (44b37dc): PR #2 was still open and tag `m1-done` points at the M0 merge (5f428c5); `gh pr merge` was denied by permissions. **Dev to do:** merge PR #2, move `m1-done` to the merge commit. M2-T0 done 2026-11-17. M2 plan approved 2026-11-17 (order: T1 → T4 → T6 → T2 → T3 → T5, sequential; plan incl. threat model in `docs/milestones/M2-lead-capture.md` tasks). M2-T1, M2-T4, M2-T6 done 2026-11-17; M2-T2 done 2026-11-18. PR #2 merged by Dev (a655812). Next: M2-T3.
 
 M1 history:
 Milestone: M1 — CRM Core. Branch: `milestone/m1-crm-core` (from main after M0 merged, tag `m0-done`).
@@ -176,9 +176,14 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
   - `first_response_at` set once by human stage changes (single + bulk, not no-ops), never by stage-deletion moves; `LeadsRepository.markFirstResponse` is the hook for M3/M5 calls/messages. Exposed as `Lead.firstResponseAt`.
   - Web: lead page "First response N after the lead arrived" / "No response yet" (`lib/duration.ts`), Settings → Lead sources "Assign new leads to" picker.
   - Tests: `lead-assignment.int.test.ts` (10: AC 30 leads → 10/10/10 in strict rotation, concurrent fairness, disabled/new agents, no agents, fixed/unassigned, re-enquiry, first response timing/no-op/bulk/system move), `duration.test.ts` (9), Playwright additions in `leads.spec.ts` and `lead-sources.spec.ts`.
+- [x] M2-T2 Public form endpoint + embed (2026-11-18):
+  - Migrations 0033 (`capture_resolve_source` definer: active source of an active tenant by public key) and 0034 (owner-only SELECT policies on lead_sources/tenants so the definer can read under FORCE RLS; pinned in the catalog meta-test).
+  - API `capture` module: `GET /v1/public/embed.js`, `POST`/`OPTIONS /v1/public/forms/:publicKey` (limits per IP/source/tenant, origin allow-list, 16 kB `publicBodyReader`, honeypot + min fill time, captcha, field mapping, attribution sanitising → `LeadIntakeService`). `CaptchaVerifier` provider (Fake, Turnstile fail-closed); env `CAPTCHA_DRIVER` (production: turnstile + `TURNSTILE_SECRET`).
+  - Web: proxy forwards `Origin` + OPTIONS; Lead sources → "Form settings" (allowed websites, captcha, field names, copyable embed code).
+  - Tests: `public-forms.int.test.ts` (15), Turnstile unit (5), env, proxy and form-settings unit tests, Playwright `public-form.spec.ts` (AC: plain HTML page on another origin → attributed lead; honeypot silently dropped).
+  - Playwright note: that spec disables Chromium's local-network checks (a fake non-secure "public" page loading from localhost); production is public https on both sides.
 
 ## In progress
-- [ ] M2-T2 Public form endpoint + embed snippet
 - [ ] M2-T3 Signed generic webhook (`inbound_webhooks`, async, idempotent)
 - [ ] M2-T5 CSV import (LocalDiskStorage, mapping, preview, background, error report, ANALYZE)
 
@@ -188,6 +193,7 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - 2026-11-17 · M2-T1 (**Review**): the capture-config editors (origins, field mapping, captcha, pipeline, assignment) arrive in the UI with T2/T6, where they're used; the API accepts the full config now. Public key and webhook URL are shown for web_form/api sources only.
 - 2026-11-17 · M2-T4 (**Review**): inbound data never overwrites an existing contact (no enrichment of a missing email/name); merge UI picks name/phone/email/city only (custom fields follow the default rule: this contact's value unless empty — the API accepts per-key picks); round-robin sources leave leads unassigned until T6.
 - 2026-11-17 · M2-T6 (**Review**): round-robin is one rotation per tenant (shared by all round-robin sources), in stable user-id order (not by current load); managers/owners are never in the pool; manual leads also get first_response_at from their first human stage change.
+- 2026-11-18 · M2-T2 (**Review**): a missing Origin is refused (server-to-server senders use the signed webhook, T3); posts faster than 1.5 s after page load count as spam; the per-IP limit (30/10 min) is shared across all forms behind one IP (offices/CGNAT may need it raised with real traffic); the snippet is served through the web app proxy (no separate public API URL).
 - 2026-11-17 · M2 assumptions (**Review**): first_response_at is set by the first human stage change in M2 (calls/messages hook in M3/M5); contact merge = owner/admin/manager; webhook secrets use envelope encryption with a local KEK from `DATA_ENCRYPTION_KEY` (KMS in M8); raw webhook payloads purged after 30 days.
 - 2026-11-17 · M2-T0 (**Review**): rate-limit ceilings (300 creates, 60 bulk, 30 exports per user per hour) are my sizing for "normal team use"; refused requests (409 duplicates) count toward the create bucket, so the duplicate-check oracle is bounded too. A 403 export doesn't count.
 - 2026-11-17 · M1-T7 assumptions (**Review**):

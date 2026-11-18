@@ -111,6 +111,12 @@ export const apiEnvSchema = commonEnvSchema.extend(databaseEnvSchema.shape).exte
    * base64. Optional outside production — features that store secrets fail with a clear error
    * until it is set. Generate: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
    */
+  /**
+   * Captcha check for public forms whose source requires one (M2-T2): `fake` accepts the token
+   * "pass" (dev/tests), `turnstile` calls Cloudflare Turnstile with TURNSTILE_SECRET.
+   */
+  CAPTCHA_DRIVER: z.preprocess(blankAsUndefined, z.enum(['fake', 'turnstile']).default('fake')),
+  TURNSTILE_SECRET: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
   DATA_ENCRYPTION_KEY: z.preprocess(
     blankAsUndefined,
     z
@@ -138,6 +144,11 @@ export function productionEnvProblems(env: ApiEnv): string[] {
   if (!env.COOKIE_SECURE) problems.push('COOKIE_SECURE: must be true in production');
   if (!env.METRICS_TOKEN) problems.push('METRICS_TOKEN: is required in production');
   if (!env.DATA_ENCRYPTION_KEY) problems.push('DATA_ENCRYPTION_KEY: is required in production');
+  if (env.CAPTCHA_DRIVER === 'fake')
+    problems.push('CAPTCHA_DRIVER: "fake" is not allowed in production');
+  if (env.CAPTCHA_DRIVER === 'turnstile' && !env.TURNSTILE_SECRET) {
+    problems.push('TURNSTILE_SECRET: is required with CAPTCHA_DRIVER=turnstile');
+  }
   return problems;
 }
 

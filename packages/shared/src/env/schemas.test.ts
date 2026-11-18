@@ -102,6 +102,8 @@ const prod = (patch: Record<string, string>) =>
       APP_URL: 'https://app.revops.in',
       METRICS_TOKEN: 'a-long-metrics-token-value',
       DATA_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
+      CAPTCHA_DRIVER: 'turnstile',
+      TURNSTILE_SECRET: 'test-secret',
       ...patch,
     }),
   );
@@ -149,6 +151,18 @@ describe('DATA_ENCRYPTION_KEY', () => {
     expect(() =>
       parseEnv(apiEnvSchema, { ...validApiEnv, DATA_ENCRYPTION_KEY: 'c2hvcnQ=' }),
     ).toThrow(/DATA_ENCRYPTION_KEY/);
+  });
+});
+
+describe('CAPTCHA_DRIVER', () => {
+  it('defaults to fake outside production; production needs turnstile + secret', () => {
+    expect(parseEnv(apiEnvSchema, validApiEnv).CAPTCHA_DRIVER).toBe('fake');
+    expect(prod({ EMAIL_DRIVER: 'fake', CAPTCHA_DRIVER: 'fake' })).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^CAPTCHA_DRIVER: /)]),
+    );
+    expect(prod({ EMAIL_DRIVER: 'fake', TURNSTILE_SECRET: '' })).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^TURNSTILE_SECRET: /)]),
+    );
   });
 });
 

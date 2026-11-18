@@ -34,6 +34,7 @@ import { useMembers } from '@/features/team/queries';
 import { errorMessage } from '@/lib/api/messages';
 import { common } from '@/lib/strings/common';
 import { leadSourceStrings as s } from '@/lib/strings/lead-sources';
+import { FormSettingsDialog } from './form-settings-dialog';
 import {
   useCreateLeadSource,
   useDeleteLeadSource,
@@ -90,6 +91,7 @@ export function LeadSourcesView() {
   const [renaming, setRenaming] = useState<LeadSource | null>(null);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [secret, setSecret] = useState<string | null>(null);
+  const [formSettings, setFormSettings] = useState<LeadSource | null>(null);
 
   return (
     <div className="mx-auto grid max-w-4xl gap-6">
@@ -142,6 +144,11 @@ export function LeadSourcesView() {
                 >
                   {source.isActive ? s.deactivate : s.activate}
                 </Button>
+                {source.type === 'web_form' ? (
+                  <Button size="sm" variant="outline" onClick={() => setFormSettings(source)}>
+                    {s.form.open}
+                  </Button>
+                ) : null}
                 <Button size="sm" variant="outline" onClick={() => setRenaming(source)}>
                   {s.rename}
                 </Button>
@@ -180,6 +187,7 @@ export function LeadSourcesView() {
       <RenameDialog source={renaming} onClose={() => setRenaming(null)} />
       <ConfirmDialog confirm={confirm} onClose={() => setConfirm(null)} onSecret={setSecret} />
       <SecretDialog secret={secret} onClose={() => setSecret(null)} />
+      <FormSettingsDialog source={formSettings} onClose={() => setFormSettings(null)} />
     </div>
   );
 }

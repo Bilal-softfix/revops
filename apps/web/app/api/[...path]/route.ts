@@ -19,6 +19,8 @@ const FORWARD_REQUEST = [
   'x-csrf-token',
   'x-request-id',
   'x-forwarded-for',
+  // Public capture (M2-T2): the API checks the posting page's origin against the source allow-list.
+  'origin',
 ];
 /** Response headers never copied back (the runtime sets its own). */
 const DROP_RESPONSE = new Set([
@@ -116,4 +118,11 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
   });
 }
 
-export { forward as DELETE, forward as GET, forward as PATCH, forward as POST, forward as PUT };
+export {
+  forward as DELETE,
+  forward as GET,
+  forward as OPTIONS,
+  forward as PATCH,
+  forward as POST,
+  forward as PUT,
+};

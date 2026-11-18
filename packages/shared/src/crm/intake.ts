@@ -79,3 +79,30 @@ export const mergeContactsRequestSchema = z.strictObject({
   customFields: z.record(leadFieldKey, mergePickSchema).default({}),
 });
 export type MergeContactsRequest = z.infer<typeof mergeContactsRequestSchema>;
+
+// ---- public form submissions (M2-T2) ----
+
+const formValue = z.union([z.string().max(2000), z.number(), z.boolean(), z.null()]);
+
+/**
+ * What the embed snippet posts to `POST /v1/public/forms/:publicKey`. Field values are mapped via
+ * the source's fieldMapping; attribution is sanitised key by key (bad values dropped, not fatal).
+ * `_hp` is the honeypot (must stay empty), `_ts` how long the form was on screen (ms), `_captcha`
+ * the captcha token when the source requires one.
+ */
+export const publicFormSubmissionSchema = z.object({
+  fields: z
+    .record(z.string().min(1).max(64), formValue)
+    .refine((v) => Object.keys(v).length <= 50, 'at most 50 fields'),
+  attribution: z.record(z.string().max(64), z.unknown()).optional(),
+  /** Generated per form load by the snippet: double-submits create one lead. */
+  submissionId: z.uuid().optional(),
+  _hp: z.string().max(500).optional(),
+  _ts: z.number().int().min(0).optional(),
+  _captcha: z.string().max(4096).optional(),
+});
+export type PublicFormSubmission = z.infer<typeof publicFormSubmissionSchema>;
+
+/** Every accepted (or silently dropped) submission gets the same answer: nothing to learn. */
+export const publicFormResponseSchema = z.object({ ok: z.literal(true) });
+export type PublicFormResponse = z.infer<typeof publicFormResponseSchema>;

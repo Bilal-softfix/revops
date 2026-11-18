@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { GET, MAX_BODY_BYTES, POST } from './route';
+import { GET, MAX_BODY_BYTES, OPTIONS, POST } from './route';
 
 const ctx = (path: string[]) => ({ params: Promise.resolve({ path }) });
 
@@ -35,6 +35,31 @@ describe('/api/[...path] proxy', () => {
     expect(sent.get('authorization')).toBeNull();
     expect(res.status).toBe(200);
     expect(res.headers.get('x-request-id')).toBe('r-1');
+  });
+
+  it('public form posts (M2-T2): forwards Origin and returns the CORS answer; OPTIONS too', async () => {
+    const upstream = vi.fn(() =>
+      Promise.resolve(
+        new Response('{"ok":true}', {
+          status: 201,
+          headers: {
+            'content-type': 'application/json',
+            'access-control-allow-origin': 'https://shop.example.com',
+          },
+        }),
+      ),
+    );
+    vi.stubGlobal('fetch', upstream);
+    const req = new NextRequest('http://localhost:3000/api/v1/public/forms/k', {
+      method: 'POST',
+      headers: { origin: 'https://shop.example.com', 'content-type': 'text/plain' },
+      body: '{"fields":{}}',
+    });
+    const res = await POST(req, ctx(['v1', 'public', 'forms', 'k']));
+    const [, init] = upstream.mock.calls[0] as unknown as [URL, RequestInit];
+    expect((init.headers as Headers).get('origin')).toBe('https://shop.example.com');
+    expect(res.headers.get('access-control-allow-origin')).toBe('https://shop.example.com');
+    expect(typeof OPTIONS).toBe('function');
   });
 
   it('passes the body and every Set-Cookie back (login sets the session cookie)', async () => {

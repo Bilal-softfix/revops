@@ -232,6 +232,20 @@
       "when": 1794918142718,
       "tag": "0032_assignment_cursors_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1794919511908,
+      "tag": "0033_capture_resolve_source",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1794919890396,
+      "tag": "0034_capture_resolve_owner_policies",
+      "breakpoints": true
     }
   ]
 }
