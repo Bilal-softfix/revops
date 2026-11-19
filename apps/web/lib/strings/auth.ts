@@ -1,6 +1,17 @@
 // Copy for the signed-out pages (login, signup, verify, reset, accept invite).
 
 export const authStrings = {
+  /** Brand panel beside the signed-out forms. */
+  brand: {
+    headline: 'Every lead captured. Every call answered.',
+    body: 'One place for your enquiries, calls and follow-ups — built for Indian businesses that live on leads.',
+    points: [
+      'Leads from your website, WhatsApp, ads and imports land in one list',
+      'Calls go to your team first, with an AI assistant as backup',
+      'See which sources actually bring in revenue',
+    ],
+    footer: 'Each workspace’s data is private to that workspace.',
+  },
   email: 'Work email',
   password: 'Password',
   newPassword: 'New password',

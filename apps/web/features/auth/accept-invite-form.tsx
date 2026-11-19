@@ -92,7 +92,7 @@ export function AcceptInviteForm({ token, signedIn }: AcceptInviteProps) {
       footer={
         <>
           {s.accept.haveAccount}{' '}
-          <Link className="font-medium text-foreground underline" href={loginHref}>
+          <Link className="font-medium text-primary hover:underline" href={loginHref}>
             {s.accept.loginToAccept}
           </Link>
         </>

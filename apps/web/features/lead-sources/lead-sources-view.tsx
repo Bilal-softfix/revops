@@ -6,10 +6,28 @@ import {
   type LeadSource,
   type LeadSourceType,
 } from '@revops/shared';
+import {
+  FileSpreadsheet,
+  Globe,
+  KeyRound,
+  type LucideIcon,
+  Megaphone,
+  MessageCircle,
+  Pause,
+  PenLine,
+  Phone,
+  Play,
+  Plus,
+  RefreshCw,
+  Settings2,
+  Store,
+  Webhook,
+} from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { SimpleSelect } from '@/components/form/simple-select';
 import { FormError, TextField } from '@/components/form/text-field';
+import { PageHeader } from '@/components/layout/page-header';
 import { EmptyState, ErrorState, LoadingState } from '@/components/states/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -46,6 +64,26 @@ import {
   useRotateSecret,
   useUpdateLeadSource,
 } from './queries';
+
+const SOURCE_ICONS: Record<LeadSourceType, LucideIcon> = {
+  web_form: Globe,
+  api: Webhook,
+  csv: FileSpreadsheet,
+  phone: Phone,
+  whatsapp: MessageCircle,
+  meta: Megaphone,
+  manual: PenLine,
+  walk_in: Store,
+};
+
+function SourceIcon({ type }: { type: LeadSourceType }) {
+  const Icon = SOURCE_ICONS[type];
+  return (
+    <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+      <Icon className="size-5" aria-hidden />
+    </span>
+  );
+}
 
 type Confirm = { kind: 'rotateKey' | 'rotateSecret' | 'delete'; source: LeadSource };
 
@@ -191,14 +229,18 @@ export function LeadSourcesView() {
   const [formSettings, setFormSettings] = useState<LeadSource | null>(null);
 
   return (
-    <div className="mx-auto grid max-w-4xl gap-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">{s.title}</h1>
-          <p className="text-sm text-muted-foreground">{s.description}</p>
-        </div>
-        <Button onClick={() => setCreating(true)}>{s.newSource}</Button>
-      </div>
+    <div className="mx-auto grid max-w-5xl gap-6">
+      <PageHeader
+        eyebrow={s.eyebrow}
+        title={s.title}
+        description={s.description}
+        actions={
+          <Button onClick={() => setCreating(true)}>
+            <Plus aria-hidden />
+            {s.newSource}
+          </Button>
+        }
+      />
 
       {sources.isPending ? (
         <LoadingState rows={4} />
@@ -207,75 +249,91 @@ export function LeadSourcesView() {
       ) : sources.data.items.length === 0 ? (
         <EmptyState title={s.empty} />
       ) : (
-        <ul className="grid gap-3" aria-label={s.title}>
+        <ul className="grid gap-4" aria-label={s.title}>
           {sources.data.items.map((source) => (
-            <li key={source.id} className="grid gap-2 rounded-md border p-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-medium">{source.name}</span>
-                <Badge variant="outline">{s.types[source.type]}</Badge>
-                <Badge variant={source.isActive ? 'secondary' : 'outline'}>
-                  {source.isActive ? s.active : s.inactive}
-                </Badge>
-              </div>
-              {source.type === 'web_form' || source.type === 'api' ? (
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <span className="text-muted-foreground">{s.columns.publicKey}:</span>
-                  <code className="rounded bg-muted px-1.5 py-0.5 text-xs break-all">
-                    {source.publicKey}
-                  </code>
-                  <CopyButton value={source.publicKey} />
+            <li key={source.id} className="overflow-hidden rounded-xl border bg-card shadow-card">
+              <div className="flex flex-wrap items-start justify-between gap-3 p-4 sm:p-5">
+                <div className="flex min-w-0 items-center gap-3">
+                  <SourceIcon type={source.type} />
+                  <div className="grid min-w-0 gap-0.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="truncate font-semibold">{source.name}</span>
+                      <Badge variant={source.isActive ? 'success' : 'warning'}>
+                        {source.isActive ? s.active : s.inactive}
+                      </Badge>
+                    </div>
+                    <span className="text-xs text-muted-foreground">{s.types[source.type]}</span>
+                  </div>
                 </div>
-              ) : null}
-              {source.type === 'api' ? <WebhookInfo source={source} /> : null}
-              {source.type === 'csv' ? <CsvImports source={source} /> : null}
-              <AssignmentPicker source={source} />
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={update.isPending}
-                  onClick={() =>
-                    void update
-                      .mutateAsync({ id: source.id, isActive: !source.isActive })
-                      .then(() => toast.success(s.saved))
-                      .catch((error: unknown) => toast.error(errorMessage(error)))
-                  }
-                >
-                  {source.isActive ? s.deactivate : s.activate}
-                </Button>
-                {source.type === 'web_form' ? (
-                  <Button size="sm" variant="outline" onClick={() => setFormSettings(source)}>
-                    {s.form.open}
-                  </Button>
-                ) : null}
-                <Button size="sm" variant="outline" onClick={() => setRenaming(source)}>
-                  {s.rename}
-                </Button>
-                {source.type === 'web_form' || source.type === 'api' ? (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {source.type === 'web_form' ? (
+                    <Button size="sm" variant="outline" onClick={() => setFormSettings(source)}>
+                      <Settings2 aria-hidden />
+                      {s.form.open}
+                    </Button>
+                  ) : null}
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => setConfirm({ kind: 'rotateKey', source })}
+                    disabled={update.isPending}
+                    onClick={() =>
+                      void update
+                        .mutateAsync({ id: source.id, isActive: !source.isActive })
+                        .then(() => toast.success(s.saved))
+                        .catch((error: unknown) => toast.error(errorMessage(error)))
+                    }
                   >
-                    {s.rotateKey}
+                    {source.isActive ? <Pause aria-hidden /> : <Play aria-hidden />}
+                    {source.isActive ? s.deactivate : s.activate}
                   </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setRenaming(source)}>
+                    {s.rename}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    onClick={() => setConfirm({ kind: 'delete', source })}
+                  >
+                    {s.delete}
+                  </Button>
+                </div>
+              </div>
+              <div className="grid gap-4 border-t bg-muted/30 p-4 sm:p-5">
+                <AssignmentPicker source={source} />
+                {source.type === 'web_form' || source.type === 'api' ? (
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="text-muted-foreground">{s.columns.publicKey}:</span>
+                    <code className="rounded-md border bg-card px-2 py-0.5 text-xs break-all">
+                      {source.publicKey}
+                    </code>
+                    <CopyButton value={source.publicKey} />
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setConfirm({ kind: 'rotateKey', source })}
+                    >
+                      <RefreshCw aria-hidden />
+                      {s.rotateKey}
+                    </Button>
+                  </div>
                 ) : null}
                 {source.type === 'api' ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setConfirm({ kind: 'rotateSecret', source })}
-                  >
-                    {s.rotateSecret}
-                  </Button>
+                  <>
+                    <WebhookInfo source={source} />
+                    <div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setConfirm({ kind: 'rotateSecret', source })}
+                      >
+                        <KeyRound aria-hidden />
+                        {s.rotateSecret}
+                      </Button>
+                    </div>
+                  </>
                 ) : null}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setConfirm({ kind: 'delete', source })}
-                >
-                  {s.delete}
-                </Button>
+                {source.type === 'csv' ? <CsvImports source={source} /> : null}
               </div>
             </li>
           ))}

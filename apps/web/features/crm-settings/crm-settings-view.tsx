@@ -49,7 +49,7 @@ export function CrmSettingsView() {
       ) : (
         <form
           noValidate
-          className="grid gap-4 rounded-md border p-4"
+          className="grid gap-4 rounded-xl border bg-card p-5 shadow-card"
           onSubmit={(event) => {
             event.preventDefault();
             if (!visibility) return;
@@ -70,7 +70,10 @@ export function CrmSettingsView() {
             <legend className="mb-1 font-medium">{s.visibility.legend}</legend>
             <p className="text-sm text-muted-foreground">{s.visibility.hint}</p>
             {AGENT_CONTACT_VISIBILITY.map((option) => (
-              <label key={option} className="flex items-start gap-3 rounded-md border p-3 text-sm">
+              <label
+                key={option}
+                className="flex items-start gap-3 rounded-lg border bg-card p-3 text-sm"
+              >
                 <input
                   type="radio"
                   name="agentContactVisibility"
@@ -89,7 +92,7 @@ export function CrmSettingsView() {
           <fieldset className="grid gap-3">
             <legend className="mb-1 font-medium">{s.agentExport.legend}</legend>
             <p className="text-sm text-muted-foreground">{s.agentExport.hint}</p>
-            <label className="flex items-start gap-3 rounded-md border p-3 text-sm">
+            <label className="flex items-start gap-3 rounded-lg border bg-card p-3 text-sm">
               <input
                 type="checkbox"
                 name="allowAgentExport"
@@ -104,7 +107,10 @@ export function CrmSettingsView() {
             <legend className="mb-1 font-medium">{s.dedupe.legend}</legend>
             <p className="text-sm text-muted-foreground">{s.dedupe.hint}</p>
             {DEDUPE_POLICIES.map((option) => (
-              <label key={option} className="flex items-start gap-3 rounded-md border p-3 text-sm">
+              <label
+                key={option}
+                className="flex items-start gap-3 rounded-lg border bg-card p-3 text-sm"
+              >
                 <input
                   type="radio"
                   name="dedupePolicy"

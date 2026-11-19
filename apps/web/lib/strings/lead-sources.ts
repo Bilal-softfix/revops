@@ -1,6 +1,7 @@
 // Copy for Settings → Lead sources (M2-T1).
 
 export const leadSourceStrings = {
+  eyebrow: 'Settings',
   title: 'Lead sources',
   description:
     'Where your leads come from. Website forms and API sources get a public key; API sources also get a webhook secret.',

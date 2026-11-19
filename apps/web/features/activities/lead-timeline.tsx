@@ -1,6 +1,18 @@
 'use client';
 
-import type { TimelineItem } from '@revops/shared';
+import type { TimelineEventType, TimelineItem } from '@revops/shared';
+import {
+  ArrowRightLeft,
+  CheckSquare,
+  MessageSquare,
+  PhoneCall,
+  Repeat,
+  Sparkles,
+  StickyNote,
+  UserCheck,
+  type LucideIcon,
+  BadgeCheck,
+} from 'lucide-react';
 import { useId, useState } from 'react';
 import { toast } from 'sonner';
 import { FormError } from '@/components/form/text-field';
@@ -12,8 +24,21 @@ import { useSession } from '@/lib/session';
 import { activityStrings as s } from '@/lib/strings/activities';
 import { useCreateNote, useDeleteNote, useTimeline, useUpdateNote } from './queries';
 
+/** Icon and tint per event type (the timeline's left rail). */
+const EVENT_STYLE: Record<TimelineEventType, { icon: LucideIcon; tint: string }> = {
+  created: { icon: Sparkles, tint: 'bg-primary/10 text-primary' },
+  re_enquiry: { icon: Repeat, tint: 'bg-info/12 text-info-foreground' },
+  stage_changed: { icon: ArrowRightLeft, tint: 'bg-secondary text-secondary-foreground' },
+  assignment: { icon: UserCheck, tint: 'bg-info/12 text-info-foreground' },
+  note: { icon: StickyNote, tint: 'bg-warning/15 text-warning-foreground' },
+  task: { icon: CheckSquare, tint: 'bg-success/12 text-success-foreground' },
+  call: { icon: PhoneCall, tint: 'bg-success/12 text-success-foreground' },
+  message: { icon: MessageSquare, tint: 'bg-info/12 text-info-foreground' },
+  qualification: { icon: BadgeCheck, tint: 'bg-primary/10 text-primary' },
+};
+
 const textareaClass =
-  'min-h-20 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive';
+  'min-h-24 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive';
 
 /** Who did it: a member's name, or System / AI assistant. */
 function actorName(item: TimelineItem): string {
@@ -67,8 +92,11 @@ export function LeadTimeline({ leadId }: { leadId: string }) {
   const timeline = useTimeline(leadId);
   const items = timeline.data?.pages.flatMap((p) => p.items) ?? [];
   return (
-    <section className="grid gap-4" aria-labelledby="timeline-heading">
-      <h2 id="timeline-heading" className="text-lg font-medium">
+    <section
+      className="grid content-start gap-4 self-start rounded-xl border bg-card p-5 shadow-card"
+      aria-labelledby="timeline-heading"
+    >
+      <h2 id="timeline-heading" className="text-base font-semibold">
         {s.timeline.title}
       </h2>
       <NoteComposer leadId={leadId} />
@@ -79,7 +107,8 @@ export function LeadTimeline({ leadId }: { leadId: string }) {
       ) : items.length === 0 ? (
         <EmptyState title={s.timeline.empty} />
       ) : (
-        <ol className="grid gap-3" aria-label={s.timeline.title}>
+        <ol className="relative grid content-start gap-5 pt-1" aria-label={s.timeline.title}>
+          <span aria-hidden className="absolute top-2 bottom-2 left-4 w-px bg-border" />
           {items.map((item) => (
             <TimelineEntry key={item.id} item={item} />
           ))}
@@ -102,19 +131,32 @@ export function LeadTimeline({ leadId }: { leadId: string }) {
 }
 
 function TimelineEntry({ item }: { item: TimelineItem }) {
+  const style = EVENT_STYLE[item.type] ?? EVENT_STYLE.created;
   return (
-    <li className="grid gap-1 rounded-md border p-3 text-sm" data-type={item.type}>
-      <p>
-        <span className="font-medium">{actorName(item)}</span> {describe(item)}
-      </p>
-      {item.data.lostReason ? (
-        <p className="text-muted-foreground">{s.timeline.lostReason(item.data.lostReason)}</p>
-      ) : null}
-      {item.note ? <NoteBody note={item.note} /> : null}
-      <time dateTime={item.occurredAt} className="text-xs text-muted-foreground">
-        {formatDateTime(item.occurredAt)}
-        {item.note?.editedAt ? ` · ${s.timeline.edited}` : ''}
-      </time>
+    <li className="relative flex gap-3 text-sm" data-type={item.type}>
+      <span
+        aria-hidden
+        className={`relative z-10 grid size-8 shrink-0 place-items-center rounded-full ring-4 ring-card ${style.tint}`}
+      >
+        <style.icon className="size-4" />
+      </span>
+      <div className="grid min-w-0 flex-1 gap-1 pt-1">
+        <p>
+          <span className="font-medium">{actorName(item)}</span> {describe(item)}
+        </p>
+        {item.data.lostReason ? (
+          <p className="text-muted-foreground">{s.timeline.lostReason(item.data.lostReason)}</p>
+        ) : null}
+        {item.note ? (
+          <div className="rounded-lg border bg-muted/40 p-3">
+            <NoteBody note={item.note} />
+          </div>
+        ) : null}
+        <time dateTime={item.occurredAt} className="text-xs text-muted-foreground">
+          {formatDateTime(item.occurredAt)}
+          {item.note?.editedAt ? ` · ${s.timeline.edited}` : ''}
+        </time>
+      </div>
     </li>
   );
 }

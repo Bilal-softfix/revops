@@ -273,7 +273,8 @@ Permissions are strings (`lead.read.all`, `lead.read.assigned`, `routing.manage`
 - **Validation and errors:** forms use react-hook-form with the shared Zod request schemas, and responses are parsed with the shared response schemas. problem+json is mapped to `ApiError` (`code`, field errors, `requestId`, Retry-After), and user-facing copy comes from `lib/strings/*` (one file per feature, ready for Hindi).
 - **Navigation is data** (`lib/nav.ts`): each item names the permission that guards its API, and the sidebar shows only what the role can use. Pages re-check on the server (`notFound()`), and the API enforces it anyway.
 - **States:** every page has loading (skeletons, `loading.tsx`), empty and error (message + support reference + retry; `error.tsx`, `global-error.tsx`) states.
-- **UI kit:** shadcn/ui (radix-nova) in `components/ui` with the system font stack, so builds don't download fonts.
+- **UI kit:** shadcn/ui (radix-nova) in `components/ui`. Design (UI refresh, 2026-11-19): indigo theme tokens in `app/globals.css` (light + dark; `success`/`warning`/`info` status colours, `shadow-card`/`shadow-raised`), Inter bundled from `@fontsource-variable/inter` (no build-time font download). Page building blocks in `components/layout`: `PageHeader`, `StatCard`, `SectionCard`, `Logo`. Status badges: open = info, won = success, lost = muted.
+- **Dashboard:** `GET /v1/dashboard/summary` (CRM module, every role) — new leads today / last 7 days, open, won in 30 days, total, leads by source (30 days, top 6 + other), 5 recent leads, and the caller's overdue / due-today task counts. Scoped like the leads list (`LeadsService.scope`), days in the tenant timezone, one tenant transaction, no new table.
 
 ## Events
 Outbox row: `{ id, tenant_id, type, aggregate_id, payload jsonb, occurred_at, published_at, dead_lettered_at, dead_letter_reason }`.

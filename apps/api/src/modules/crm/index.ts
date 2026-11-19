@@ -11,6 +11,9 @@ import { CrmController } from './crm.controller';
 import { CrmRepository } from './crm.repository';
 import { CrmRateLimits } from './crm-rate-limits';
 import { CrmService } from './crm.service';
+import { DashboardController } from './dashboard.controller';
+import { DashboardRepository } from './dashboard.repository';
+import { DashboardService } from './dashboard.service';
 import { CustomFieldsController } from './custom-fields.controller';
 import { CustomFieldsRepository } from './custom-fields.repository';
 import { CustomFieldsService } from './custom-fields.service';
@@ -43,6 +46,7 @@ export { type CrmAuth, CrmService } from './crm.service';
     LeadSourcesController,
     LeadsExportController,
     ActivitiesController,
+    DashboardController,
   ],
   providers: [
     CrmRateLimits,
@@ -65,6 +69,8 @@ export { type CrmAuth, CrmService } from './crm.service';
     LeadsExportService,
     ActivitiesRepository,
     ActivitiesService,
+    DashboardRepository,
+    DashboardService,
   ],
   exports: [CrmService, LeadIntakeService],
 })
