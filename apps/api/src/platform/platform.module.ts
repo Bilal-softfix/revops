@@ -19,6 +19,7 @@ import { JobHandlers } from './queue/job-handlers';
 import { JobQueue } from './queue/job-queue';
 import { PgBossClient } from './queue/pg-boss-client';
 import { PgBossJobQueue } from './queue/pg-boss-job-queue';
+import { SecretBox } from './crypto/secret-box';
 import { PostgresRateLimiter, RateLimiter } from './rate-limit/rate-limiter';
 import { RateLimitPurgeJob } from './rate-limit/rate-limit-purge.job';
 import { shutdownTracing } from './tracing/tracing';
@@ -66,11 +67,13 @@ export class PlatformModule {
         { provide: JobQueue, useClass: PgBossJobQueue },
         JobHandlers,
         Readiness,
+        SecretBox,
         RateLimitPurgeJob,
         TracingShutdown,
       ],
       exports: [
         API_ENV,
+        SecretBox,
         Database,
         Clock,
         RateLimiter,

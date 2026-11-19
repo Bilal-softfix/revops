@@ -5,6 +5,7 @@ import { nameSchema, passwordSchema, sessionResponseSchema } from '@revops/share
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { FormError, TextField } from '@/components/form/text-field';
@@ -43,12 +44,15 @@ export function AcceptInviteForm({ token, signedIn }: AcceptInviteProps) {
   const accept = async (body: Record<string, string>) => {
     setFormError(null);
     try {
-      await api('/v1/invitations/accept', {
+      const session = await api('/v1/invitations/accept', {
         method: 'POST',
         body: { token, ...body },
         schema: sessionResponseSchema,
         csrfToken: signedIn?.csrfToken,
       });
+      if (session.tenant) {
+        toast.success(s.accept.joined(session.tenant.name), { description: s.accept.joinedBody });
+      }
       router.replace('/dashboard');
       router.refresh();
     } catch (error) {
@@ -92,7 +96,7 @@ export function AcceptInviteForm({ token, signedIn }: AcceptInviteProps) {
       footer={
         <>
           {s.accept.haveAccount}{' '}
-          <Link className="font-medium text-foreground underline" href={loginHref}>
+          <Link className="font-medium text-primary hover:underline" href={loginHref}>
             {s.accept.loginToAccept}
           </Link>
         </>

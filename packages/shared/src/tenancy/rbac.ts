@@ -32,12 +32,16 @@ export const PERMISSIONS = [
   'contact.write',
   /** Delete (soft) contacts. */
   'contact.delete',
+  /** Merge two contacts (field-level pick; leads and history move to the survivor). M2-T4. */
+  'contact.merge',
   /** Change the tenant's CRM settings (e.g. agent contact visibility). */
   'crm.settings.manage',
   /** Create, edit and delete custom field definitions. */
   'customfield.manage',
   /** Create, edit, reorder and delete pipelines and their stages. */
   'pipeline.manage',
+  /** Create and edit lead sources, rotate their public keys and webhook secrets (M2-T1). */
+  'source.manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -55,9 +59,11 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     'lead.export',
     'contact.write',
     'contact.delete',
+    'contact.merge',
     'crm.settings.manage',
     'customfield.manage',
     'pipeline.manage',
+    'source.manage',
   ],
   admin: [
     'member.read',
@@ -72,9 +78,11 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     'lead.export',
     'contact.write',
     'contact.delete',
+    'contact.merge',
     'crm.settings.manage',
     'customfield.manage',
     'pipeline.manage',
+    'source.manage',
   ],
   manager: [
     'member.read',
@@ -87,6 +95,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     'lead.export',
     'contact.write',
     'contact.delete',
+    'contact.merge',
   ],
   agent: ['member.read', 'lead.read.assigned', 'lead.write', 'contact.write'],
 };

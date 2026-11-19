@@ -246,7 +246,7 @@ export class LeadsRepository {
       wonAt: Date | null;
       lostAt: Date | null;
       lostReason: string | null;
-      createdBy: string;
+      createdBy: string | null;
     },
   ): Promise<LeadRow> {
     const [row] = await tx.insert(leads).values(values).returning();
@@ -312,23 +312,44 @@ export class LeadsRepository {
       .where(inArray(leads.id, [...ids]));
   }
 
+  /**
+   * First human response (M2-T6): set once. Callers: stage changes by a user (M2), outbound calls
+   * and messages by a user (M3/M5). Never for system or AI actions.
+   */
+  async markFirstResponse(tx: Tx, ids: readonly string[], at: Date): Promise<void> {
+    if (ids.length === 0) return;
+    await tx
+      .update(leads)
+      .set({ firstResponseAt: at })
+      .where(and(inArray(leads.id, [...ids]), isNull(leads.firstResponseAt)));
+  }
+
   async softDelete(tx: Tx, id: string, now: Date): Promise<void> {
     await tx.update(leads).set({ deletedAt: now, updatedAt: now }).where(eq(leads.id, id));
   }
 
   // ---- lookups the service validates against (all RLS-scoped to the tenant) ----
 
+  /**
+   * An active pipeline (by id, else the default). `lock: true` takes FOR SHARE on its row before
+   * a lead is written into it: pipeline and stage deletes hold FOR UPDATE on that row, so either
+   * the delete waits for the write (and then sees the lead), or the write waits and then finds
+   * the pipeline gone (deleted_at is re-checked after the wait). Lead writes take this lock
+   * BEFORE locking lead rows — the order the deletes use — so the two can't deadlock.
+   */
   async activePipeline(
     tx: Tx,
     id: string | undefined,
+    options: { lock?: boolean } = {},
   ): Promise<{ id: string; name: string } | undefined> {
-    const [row] = await tx
+    const query = tx
       .select({ id: pipelines.id, name: pipelines.name })
       .from(pipelines)
       .where(
         and(isNull(pipelines.deletedAt), id ? eq(pipelines.id, id) : eq(pipelines.isDefault, true)),
       )
       .limit(1);
+    const [row] = options.lock ? await query.for('share') : await query;
     return row;
   }
 
@@ -412,7 +433,7 @@ export class LeadsRepository {
     const [row] = await tx
       .select({ id: leadSources.id })
       .from(leadSources)
-      .where(eq(leadSources.id, id))
+      .where(and(eq(leadSources.id, id), isNull(leadSources.deletedAt)))
       .limit(1);
     return Boolean(row);
   }

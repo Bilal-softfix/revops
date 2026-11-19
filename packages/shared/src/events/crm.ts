@@ -37,3 +37,24 @@ export const leadAssignedV1Schema = z.object({
   actorUserId: z.uuid().nullable(),
 });
 export type LeadAssignedV1 = z.infer<typeof leadAssignedV1Schema>;
+
+/** An inbound enquiry matched a contact with an open lead and was added to it (M2-T4). */
+export const LEAD_REENQUIRED_V1 = 'lead.reenquired.v1';
+export const leadReenquiredV1Schema = z.object({
+  tenantId: z.uuid(),
+  leadId: z.uuid(),
+  contactId: z.uuid(),
+  sourceId: z.uuid().nullable(),
+});
+export type LeadReenquiredV1 = z.infer<typeof leadReenquiredV1Schema>;
+
+/** `mergedContactId` was merged into `contactId` (M2-T4): its leads now belong to `contactId`. */
+export const CONTACT_MERGED_V1 = 'contact.merged.v1';
+export const contactMergedV1Schema = z.object({
+  tenantId: z.uuid(),
+  contactId: z.uuid(),
+  mergedContactId: z.uuid(),
+  movedLeadIds: z.array(z.uuid()),
+  actorUserId: z.uuid().nullable(),
+});
+export type ContactMergedV1 = z.infer<typeof contactMergedV1Schema>;

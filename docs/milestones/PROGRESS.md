@@ -1,7 +1,10 @@
 # PROGRESS
 
 ## Current
-Milestone: M1 — CRM Core (starting). Branch: `milestone/m1-crm-core` (from main after M0 merged, tag `m0-done`).
+Milestone: M2 — Lead Capture & Dedupe. Branch: `milestone/m2-lead-capture`, cut 2026-11-17 from the tip of `milestone/m1-crm-core` (44b37dc): PR #2 was still open and tag `m1-done` points at the M0 merge (5f428c5); `gh pr merge` was denied by permissions. **Dev to do:** merge PR #2, move `m1-done` to the merge commit. M2-T0 done 2026-11-17. M2 plan approved 2026-11-17 (order: T1 → T4 → T6 → T2 → T3 → T5, sequential; plan incl. threat model in `docs/milestones/M2-lead-capture.md` tasks). M2-T1, M2-T4, M2-T6 done 2026-11-17; M2-T2, M2-T3 done 2026-11-18; M2-T3 review changes and M2-T5 done 2026-11-19. PR #2 merged by Dev (a655812). Next: `/review-milestone M2`.
+
+M1 history:
+Milestone: M1 — CRM Core. Branch: `milestone/m1-crm-core` (from main after M0 merged, tag `m0-done`).
 M1-T0 (M0 follow-ups) done 2026-11-12. M1 plan approved 2026-11-12 (order: T3a → T1 → T2 → T3b → T4 → T5 → T6 → T7, sequential). Draft PR #2 open. Done: T3a, T1, T2, T3b, T4, T5 (2026-11-16), T6 (2026-11-17, Dev-reviewed + allowAgentExport change), T7 (2026-11-17, approved incl. assumptions). Milestone review done 2026-11-17: no blockers (1 privacy fix), suite green, PR #2 marked ready. Next: Dev decides contact-delete behaviour (Tech debt), reviews/merges PR #2 → `/start-milestone M2`.
 
 M0 history:
@@ -148,11 +151,66 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
     global-setup + ANALYZE): list paging, "100 selected on this page", board column counts + load more.
   - `seed.int.test.ts` +3 (four tenants, demo data validity, top-up/isolation).
 
+- [x] M2-T0 Pre-M2 hardening (2026-11-17):
+  - Rate limits (`CrmRateLimits`, Postgres limiter, per user per tenant): contact + lead create 300/h (shared), bulk assign + bulk stage 60/h (shared), export 30/h (after the permission check). 429 + `Retry-After`.
+  - `db:seed` refuses unless the database name ends in `_dev` or `_test` (and NODE_ENV ≠ production): `assertSeedableDatabase` next to the reset guard.
+  - Pipeline-delete race: lead create / stage change / bulk stage lock the target pipeline `FOR SHARE` before any lead row (pipeline → leads, the deletes' order: no deadlock). New 409 `lead_moved` for a lead moved between read and lock.
+  - Contact delete with live leads → 409 `contact_has_leads` (`leadCount`, "delete them or move them to another contact first"); contact `FOR UPDATE` vs `FOR SHARE` in lead create; 409 `contact_gone` on the duplicate-link path.
+  - Tests: `crm-guards.int.test.ts` (9: lock-wait races driven from an owner transaction, a churn test for deadlocks, rate-limit buckets incl. window reset), `reset.test.ts` seed guard (6).
+- [x] M2-T1 Lead sources (2026-11-17):
+  - Migration 0027: `lead_sources.public_key` (unique, random DB default backfills template rows; API keys are 32-byte base64url), `config` jsonb, `webhook_secret_enc`, `deleted_at`; live names unique case-insensitively.
+  - Shared `crm/lead-sources.ts` (`LeadSourceConfig`: allowedOrigins normalised to exact origins, captcha, fieldMapping with safe field names → name/phone/email/city/`lead.<key>`, pipeline/open stage, assignment) + `@revops/shared/crypto` (AES-256-GCM envelope encryption, row-bound context). New env `DATA_ENCRYPTION_KEY` (required in production), new permission `source.manage` (owner/admin).
+  - API `/v1/lead-sources`: list (all roles), create/PATCH/soft DELETE/rotate-key/rotate-secret (audited, no secrets/config values in audit). `SecretBox` platform provider. Deleted sources can't be picked for leads.
+  - Web: Settings → Lead sources (create, rename, pause/resume, copy key, rotate key/secret with confirm, secret shown once, delete).
+  - Tests: `lead-sources.int.test.ts` (11), shared `lead-sources.test.ts` (21) + `crypto.test.ts` (6) + env tests, Playwright `lead-sources.spec.ts`.
+- [x] M2-T4 Dedupe engine + intake + contact merge (2026-11-17):
+  - Migrations 0028–0030: `lead_ingestions` (idempotency per tenant, FORCE RLS, leak fixture), timeline type `re_enquiry`, `GRANT UPDATE (contact_id)` on timeline_events for merge.
+  - Shared: `crm/intake.ts` (`intakeLeadInputSchema`, strict `inboundAttributionSchema`, merge request), `dedupePolicy` CRM setting, permission `contact.merge` (owner/admin/manager), events `lead.reenquired.v1`, `contact.merged.v1`.
+  - API: `LeadIntakeService` (exported from the CRM module for T2/T3/T5): normalise → claim key → phone-then-email match (locked; same-new-phone race retried in a savepoint) → re-enquiry on latest open lead or new lead (source pipeline/open stage, fixed-user owner; invalid lead fields dropped + listed). `POST /v1/contacts/:id/merge` (field-level pick, moves leads/notes/tasks/timeline/ingestions, alt phones, audit + event).
+  - Web: CRM settings → inbound dedupe radio; contact page → "Merge duplicate" dialog (search, per-field pick); timeline shows "enquired again via <source>" and "created … via <source>".
+  - Tests: `lead-intake.int.test.ts` (20: matrix incl. phone vs email precedence, closed leads, both policies, idempotent replay, concurrent same key / same new phone, cross-tenant keys, 422 unusable, dropped fields, source config, merge happy path / pick other phone / refusals), Playwright `contact-merge.spec.ts` (2).
+  - Fixed a date time-bomb in `my-tasks-buckets.int.test.ts` (fixed 2026-11-16 clock made signup tokens expire in real time after 24 h; instants now shift by whole days).
+- [x] M2-T6 Assignment on arrival + response time (2026-11-17):
+  - Migrations 0031/0032: `assignment_cursors` (per-tenant round-robin position, FORCE RLS, leak fixture keyed on tenant_id), `leads.first_response_at`.
+  - Intake owner per source assignment: round-robin over active agents in user-id order (cursor row locked → strict turns under concurrency; disabled agents skipped, new agents join; none → unassigned), fixed user while active, or unassigned. Re-enquiries keep the owner and don't advance the rotation.
+  - `first_response_at` set once by human stage changes (single + bulk, not no-ops), never by stage-deletion moves; `LeadsRepository.markFirstResponse` is the hook for M3/M5 calls/messages. Exposed as `Lead.firstResponseAt`.
+  - Web: lead page "First response N after the lead arrived" / "No response yet" (`lib/duration.ts`), Settings → Lead sources "Assign new leads to" picker.
+  - Tests: `lead-assignment.int.test.ts` (10: AC 30 leads → 10/10/10 in strict rotation, concurrent fairness, disabled/new agents, no agents, fixed/unassigned, re-enquiry, first response timing/no-op/bulk/system move), `duration.test.ts` (9), Playwright additions in `leads.spec.ts` and `lead-sources.spec.ts`.
+- [x] M2-T2 Public form endpoint + embed (2026-11-18):
+  - Migrations 0033 (`capture_resolve_source` definer: active source of an active tenant by public key) and 0034 (owner-only SELECT policies on lead_sources/tenants so the definer can read under FORCE RLS; pinned in the catalog meta-test).
+  - API `capture` module: `GET /v1/public/embed.js`, `POST`/`OPTIONS /v1/public/forms/:publicKey` (limits per IP/source/tenant, origin allow-list, 16 kB `publicBodyReader`, honeypot + min fill time, captcha, field mapping, attribution sanitising → `LeadIntakeService`). `CaptchaVerifier` provider (Fake, Turnstile fail-closed); env `CAPTCHA_DRIVER` (production: turnstile + `TURNSTILE_SECRET`).
+  - Web: proxy forwards `Origin` + OPTIONS; Lead sources → "Form settings" (allowed websites, captcha, field names, copyable embed code).
+  - Tests: `public-forms.int.test.ts` (15), Turnstile unit (5), env, proxy and form-settings unit tests, Playwright `public-form.spec.ts` (AC: plain HTML page on another origin → attributed lead; honeypot silently dropped).
+  - Playwright note: that spec disables Chromium's local-network checks (a fake non-secure "public" page loading from localhost); production is public https on both sides.
+- [x] M2-T3 Signed generic webhook (2026-11-18):
+  - Migrations 0035/0036: `inbound_webhooks` (FORCE RLS, leak fixture, partial unique on valid event ids), `capture_resolve_webhook_source` and `capture_purge_inbound_webhooks` definers + owner-only purge policies (catalog-pinned).
+  - API: `POST /v1/public/webhooks/:publicKey` (Stripe-style HMAC signature, ±300 s, raw bytes kept by `publicBodyReader` (64 kB, lenient JSON so unreadable deliveries are still stored), rejected/failed deliveries stored, 202/200 duplicate/401/400/404/413/429), `capture.webhook-process` job → `LeadIntakeService`, daily `capture.webhook-purge` (30 days). Shared field mapping (`capture/mapping.ts`) for form and webhook. Worker now loads CaptureModule.
+  - Web: API sources show the webhook URL (through the proxy, which forwards `x-revops-signature`) and the signing format.
+  - Tests: `webhooks.int.test.ts` (12: AC replay → one lead, AC bad signature → 401 + stored rejected, tamper, secret rotation, invalid/non-JSON payload, unusable payload, 404s, 413, rate limit, job re-run no-op, retention purge), signature unit (12), proxy/url unit tests, Playwright signed delivery through the proxy → lead.
+  - Dev review 2026-11-18: opt-in simple-token mode per source (`config.webhookAuth`, `X-Webhook-Token`, SHA-256 digests + timingSafeEqual; UI labels it less secure; idempotency + rate limits shared). Rejected deliveries: first 16 KB as text, ≤20 stored per source per hour, purged after 7 days (0037: two-cutoff purge + rejected index), owner/admin list `GET /v1/lead-sources/:id/rejected-deliveries` + UI. Tests: +8 integration (token ok/duplicate, wrong/missing token, HMAC ignores token, token rate limit, 16 KB cap, hourly cap + reset, owner/admin-only + cross-tenant 404, 7-day purge), +7 token unit, proxy header, Playwright rejected list + token delivery.
+
+- [x] M2-T5 CSV import (2026-11-19):
+  - Migrations 0038/0039: `csv_imports`, `csv_import_errors` (FORCE RLS, leak fixtures), `capture_analyze_lead_tables()` definer (catalog-pinned). 0040: `contacts.email_key` + index — email dedupe was a per-row scan under RLS (citext `=` not leakproof).
+  - API: `StorageProvider` (LocalDisk/InMemory, `STORAGE_DRIVER`/`STORAGE_DIR`), RFC 4180 parser, upload (raw text/csv read after guards, 10 MB/50k rows/100 cols, 30/h per tenant) → preview + guessed mapping, start → `capture.csv-import` (250-row batches, exact resume, per-row idempotency, error rows, ANALYZE after ≥1k created, file deleted), list/get/errors.csv. Owners/admins, audited.
+  - Web: CSV sources get "Import CSV" (upload → preview + per-column mapping → start) and recent imports with live progress and the error report download. Proxy: 10 MB only on the upload route, forwards `X-File-Name`.
+  - Tests: `csv-imports.int.test.ts` (14: AC 10k rows in background + ANALYZE, AC per-row failures + escaped report, AC re-run → duplicates only, resume, start validation, upload limits/415/413/422/404, rate limit, roles + cross-tenant 404), parser (8), storage (16), helpers (14), shared (4), proxy limit, Playwright upload → map → done → error report.
+
+- [x] UI refresh (2026-11-19, Dev request between M2-T5 and the M2 review; plan approved): indigo theme + Inter (`@fontsource-variable/inter`, bundled locally), new sidebar/header (logo, account card, breadcrumb, quick "Add lead"), split sign-in pages, live dashboard (`GET /v1/dashboard/summary` + KPI tiles, leads by source, recent leads, get-started checklist), compact leads toolbar ("More filters" panel for dates/fields), restyled table/board/lead detail/timeline/lead sources. Fixed: the board widened the whole page (hidden native selects escaped the scroll container) and the lead timeline stretched to the sidebar's height. Tests: `dashboard.int.test.ts` (5), shared `topSources` (3), web formatting helpers (16); accessible names kept, so e2e specs are unchanged.
+  - Toasts (Dev, 2026-11-19): sign-in ("Welcome back, <name>"), sign-out and invitation accepted now show a toast (other actions already did); toasts restyled to the theme (card, coloured accent bar and icon per type, bottom-right on desktop, top on phones).
+
 ## In progress
-_(none — M1 reviewed; awaiting merge of PR #2)_
 
 ## Assumptions made
 _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
+- 2026-11-17 · M2 Dev decisions (plan approval): dedupe policy per tenant `reenquiry` (default) | `always_new`, inbound channels only (manual UI create unchanged); CSV re-run skips already-imported rows per row (idempotency key); round-robin pool = active agents, inbound leads without an owner; captcha + object storage as interfaces + Fakes (LocalDiskStorage), Turnstile adapter off by default, S3 in M8.
+- 2026-11-17 · M2-T1 (**Review**): the capture-config editors (origins, field mapping, captcha, pipeline, assignment) arrive in the UI with T2/T6, where they're used; the API accepts the full config now. Public key and webhook URL are shown for web_form/api sources only.
+- 2026-11-17 · M2-T4 (**Review**): inbound data never overwrites an existing contact (no enrichment of a missing email/name); merge UI picks name/phone/email/city only (custom fields follow the default rule: this contact's value unless empty — the API accepts per-key picks); round-robin sources leave leads unassigned until T6.
+- 2026-11-17 · M2-T6 (**Review**): round-robin is one rotation per tenant (shared by all round-robin sources), in stable user-id order (not by current load); managers/owners are never in the pool; manual leads also get first_response_at from their first human stage change.
+- 2026-11-18 · M2-T3 (reviewed 2026-11-18: duplicate → 200 approved; simple-token mode and rejected-delivery limits added): signature format is Stripe-style (`t=…,v1=…`, ±5 min). A duplicate event id answers 200 `{ duplicate: true }` (not an error).
+- 2026-11-18 · M2-T3 review follow-up (**Review**): token mode trims surrounding whitespace from the header; switching mode takes effect at once (no grace period). Rejected cap = 20/source/hour, list shows newest 50. Managers can't see rejected deliveries (they lack `source.manage`).
+- 2026-11-18 · M2-T2 (**Review**): a missing Origin is refused (server-to-server senders use the signed webhook, T3); posts faster than 1.5 s after page load count as spam; the per-IP limit (30/10 min) is shared across all forms behind one IP (offices/CGNAT may need it raised with real traffic); the snippet is served through the web app proxy (no separate public API URL).
+- 2026-11-17 · M2 assumptions (**Review**): first_response_at is set by the first human stage change in M2 (calls/messages hook in M3/M5); contact merge = owner/admin/manager; webhook secrets use envelope encryption with a local KEK from `DATA_ENCRYPTION_KEY` (KMS in M8); raw webhook payloads purged after 30 days.
+- 2026-11-17 · M2-T0 (**Review**): rate-limit ceilings (300 creates, 60 bulk, 30 exports per user per hour) are my sizing for "normal team use"; refused requests (409 duplicates) count toward the create bucket, so the duplicate-check oracle is bounded too. A 403 export doesn't count.
 - 2026-11-17 · M1-T7 assumptions (**Review**):
   - "4 demo tenants" = the existing Realty + Clinic plus Software Agency + Repair Shop; 60 leads
     each; the 10k volume set is opt-in (`--volume`, Demo Realty only), not part of every seed.
@@ -347,6 +405,8 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - 2026-11-11 · M0-T6: OpenAPI comes from Nest's route scan, enriched from each route's `ZodBodyPipe` (body/query/path) and `@ZodResponse`. `@anatine/zod-openapi` and nestjs-zod were not added, so there are no DTO classes. `/health`, `/ready` and `/metrics` are excluded.
 - 2026-11-11 · M0-T6 deps: pg-boss 12.38.0, nestjs-pino 4.6.1, pino 9.14.0, pino-http 10.5.0, pino-pretty 13.2.0 (dev), prom-client 15.1.3, @nestjs/swagger 11.4.8, @opentelemetry/{api 1.10.0, sdk-node 0.300.0, exporter-trace-otlp-http 0.300.0, instrumentation-http 0.300.0, instrumentation-express 0.72.0}. These were picked as Nest-11 compatible and ≥2 weeks old; the http/express instrumentations replace the heavy auto-instrumentations bundle. The pnpm override `multer: 2.5.0` fixes the high advisory GHSA-q7qp-rjg7-q26m (via @nestjs/platform-express). `@scarf/scarf` and protobufjs install scripts are ignored.
 - 2026-11-11 · Rate limiter: `rate_limit_buckets` stores sha256(key) only (no IPs/emails), RLS enabled with no policies and no grants, reached via `rate_limit_consume/reset/purge` (definer). The app passes its Clock's now, so FakeClock tests keep working. RLS catalog meta-test gains a "system tables" class. Purge is scheduled in T6.
+- 2026-11-19 · M2-T5 (**Review**): imports are owner/admin only (`source.manage`) and only into CSV-type sources; mapping is per import (by column), not saved on the source. Re-run identity = source + trimmed row cells (a changed cell is a new row). Failed rows are reported but not retried; error rows (with their cells) are kept with the import (no purge yet — see Tech debt). Non-UTF-8 files are read as Windows-1252. Attribution columns aren't mappable.
+- 2026-11-19 · UI refresh (**Review**): lead-source actions stay as visible buttons (not a "…" menu as planned) so flows stay one click and e2e specs unchanged. Dashboard KPI tiles link to the leads list (open / won filters) and My tasks; agents see their own numbers. The sign-in brand panel copy describes the product, including calls handled by an AI assistant (planned, not built yet) — adjust if you want only shipped features there.
 
 ## Backlog
 - Shared team saved views (Dev, 2026-11-16, M1-T4 review): today saved views are private to their creator.
@@ -355,6 +415,8 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - Archive pipeline (Dev, 2026-11-16): hide a pipeline that still has leads without deleting it (today a pipeline with leads can't be deleted).
 
 ## Blocked on external
+- [ ] S3 bucket (ap-south-1) + IAM for the S3 `StorageProvider` adapter (M8; LocalDiskStorage until then)
+- [ ] Cloudflare Turnstile site/secret keys to switch `CAPTCHA_DRIVER=turnstile` on (optional; Fake in dev/tests)
 - [ ] Meta Business Verification + App Review
 - [ ] WhatsApp Cloud API number + templates
 - [ ] Telephony provider KYC + numbers
@@ -372,6 +434,9 @@ _M0 milestone review (2026-11-12): non-blocking findings from the code-reviewer 
 - **Session and token retention (security L6).** Revoked or expired `sessions` (with IP and user agent) and used `auth_tokens` rows are never purged. Add a purge cron next to the rate-limit purge (DPDP).
 - **API and worker bind 0.0.0.0 (security L7).** In dev, `/metrics` and `/docs` are reachable from the LAN. Bind to 127.0.0.1 by default, or require `METRICS_TOKEN` when bound to a non-loopback address.
 - **Stale planner stats after bulk inserts (M1-T7).** With 10k leads inserted at once and no ANALYZE yet, leads list/board took 40–120 s until autovacuum analyzed (≈1 min). **Dev-confirmed requirement (2026-11-17): M2 CSV import runs ANALYZE on the affected tables after large imports** (app_user can't: needs a definer function or a worker job as owner, or `GRANT MAINTAIN` on PG17+).
+- **CSV import speed (M2-T5).** ~15 queries + 3 savepoints per row through `LeadIntakeService` (unprepared statements, `prepare: false`): ~36 ms/row on the dev box, so 10k rows ≈ 6 min (AC test is slow in CI). A bulk intake path (batch lookups by phone/email, multi-row inserts) would cut this by an order of magnitude.
+- **Import retention (M2-T5).** Abandoned uploads (never started) keep their file and row; `csv_import_errors` keep row cells (PII) indefinitely. Add a daily purge (definer) — e.g. files of unstarted imports after 24 h, error cells after 30 days.
+- **Other non-leakproof filters under RLS (M2-T5 finding).** Trigram `ilike` search on contacts/leads can't use its GIN index under RLS either; measure with real volumes (M4/M8).
 - Published `outbox_events` and `processed_events` rows are never purged. Add a retention job when volumes matter (M6/M8).
 - The minimatch moderate advisory (transitive) is still reported by `pnpm audit`; it is dev-tooling only.
 - Worker jobs have no per-job log context (the job id is in the failure log only); add an AsyncLocalStorage child logger when consumers multiply.
@@ -390,8 +455,8 @@ _(non-blocking review findings)_
 - Turbo `envMode: loose` + `test` uncached: simple and correct for now; tighten env declarations if CI time matters.
 
 _M1 milestone review (2026-11-17): code-reviewer + security-auditor (sonnet) on `main...milestone/m1-crm-core`. No blocking findings. Fixed in the review commit: the `lead.exported` audit row stored the raw search text `q` (often a phone/email) → now `[redacted]` (test in `leads-export.int.test.ts`). Non-blocking:_
-- **Contact soft-delete leaves its leads live (Dev decision needed).** Leads keep listing the deleted contact's name/phone, and the freed phone can be reused by a new contact. Options: refuse with 409 `contact_has_leads`, or soft-delete/detach the leads in the same tx. (`contacts.service.ts` `remove`, `leads.repository.ts` `baseQuery`.)
-- **Pipeline delete race.** `pipelines.service.ts` `remove` locks only the pipeline row; lead create / `changeStage` / bulk move read the pipeline without a lock, so a concurrent move can land a lead in a just-soft-deleted pipeline. Fix: `FOR SHARE` on the pipeline row in `activePipeline`/`activeStage`.
+- ~~**Contact soft-delete leaves its leads live**~~ **Fixed M2-T0 (Dev: 409 `contact_has_leads`; DPDP erasure in M8).** Leads keep listing the deleted contact's name/phone, and the freed phone can be reused by a new contact. Options: refuse with 409 `contact_has_leads`, or soft-delete/detach the leads in the same tx. (`contacts.service.ts` `remove`, `leads.repository.ts` `baseQuery`.)
+- ~~**Pipeline delete race.**~~ **Fixed M2-T0** (target pipeline `FOR SHARE` before lead locks). `pipelines.service.ts` `remove` locks only the pipeline row; lead create / `changeStage` / bulk move read the pipeline without a lock, so a concurrent move can land a lead in a just-soft-deleted pipeline. Fix: `FOR SHARE` on the pipeline row in `activePipeline`/`activeStage`.
 - **Events gaps for M5/M6 consumers.** Stage-delete moves emit no per-lead `lead.stage_changed.v1` (Dev decision M1-T5 AC; consumers must handle `pipeline_stage.deleted`); lead delete writes audit only — no timeline entry or `lead.deleted.v1`.
 - **Bulk actions are N+1 inside the tx.** `recordAssignments`/`applyStageMoves` insert audit + outbox one row at a time (≈1,000 round trips for 500 leads while holding locks). Batch into multi-row inserts.
 - **Visibility rule duplicated** in `activities.repository.ts` (`leadVisible`) and `leads.repository.ts` (`visible`). Share one helper so notes/tasks/timeline can't drift from the lead list.
@@ -399,8 +464,8 @@ _M1 milestone review (2026-11-17): code-reviewer + security-auditor (sonnet) on 
 - `Number(lead.valuePaise)` in the API response: safe under the Zod MAX_SAFE_INTEGER cap, but an import path writing > 2^53 would corrupt silently. Assert or serialise as string.
 - Indexes: `leads_tenant_owner_idx` lacks `created_at desc, id desc` (agent list sorts); `board()` runs one query per stage sequentially. Fine at 10k.
 - Contact-create retry on concurrent duplicate phone (`LeadsService.create`) has no concurrency test.
-- Security LOW: no rate limit on authenticated create/bulk/export endpoints (duplicate-check is a phone/email existence oracle; the agent 409 also returns `ownerName` by Dev decision). Add `rate_limit_buckets` per-user buckets before M2 public capture.
+- ~~Security LOW: no rate limit on authenticated create/bulk/export endpoints~~ **Fixed M2-T0** (duplicate-check is a phone/email existence oracle; the agent 409 also returns `ownerName` by Dev decision). Add `rate_limit_buckets` per-user buckets before M2 public capture.
 - Security LOW: no cap on custom field definitions per tenant/entity (CSV width, jsonb size). Add e.g. ≤100 active defs per entity.
-- Security LOW: `bin/seed.ts` refuses only on `NODE_ENV=production`; add the `_dev`/`_test` + localhost guard used by `reset-dev`.
+- ~~Security LOW: `bin/seed.ts` refuses only on `NODE_ENV=production`~~ **Fixed M2-T0**; add the `_dev`/`_test` + localhost guard used by `reset-dev`.
 - `contacts` create/update and `changeLeadStageRequestSchema` use `z.object` (strips unknown keys) where others are strict; switch to `strictObject` for consistency.
 - Local tooling: the Bash/system PATH resolves Node 24 (`C:\Program Files\nodejs`); run `fnm use 22` first or every pnpm command fails on `engine-strict`.

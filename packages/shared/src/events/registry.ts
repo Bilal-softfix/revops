@@ -1,7 +1,11 @@
 import { EVENT_TYPE_PATTERN } from './outbox.js';
 import {
   LEAD_ASSIGNED_V1,
+  CONTACT_MERGED_V1,
   LEAD_CREATED_V1,
+  LEAD_REENQUIRED_V1,
+  contactMergedV1Schema,
+  leadReenquiredV1Schema,
   LEAD_STAGE_CHANGED_V1,
   leadAssignedV1Schema,
   leadCreatedV1Schema,
@@ -43,6 +47,8 @@ export const CONTACT_CREATED = defineEvent(
 export const LEAD_CREATED = defineEvent(LEAD_CREATED_V1, leadCreatedV1Schema);
 export const LEAD_STAGE_CHANGED = defineEvent(LEAD_STAGE_CHANGED_V1, leadStageChangedV1Schema);
 export const LEAD_ASSIGNED = defineEvent(LEAD_ASSIGNED_V1, leadAssignedV1Schema);
+export const LEAD_REENQUIRED = defineEvent(LEAD_REENQUIRED_V1, leadReenquiredV1Schema);
+export const CONTACT_MERGED = defineEvent(CONTACT_MERGED_V1, contactMergedV1Schema);
 
 /**
  * Every event type the system may write. The writer (`recordEvent`) and the relay both use it: an
@@ -57,6 +63,8 @@ export const EVENT_REGISTRY: ReadonlyMap<string, EventDefinition> = new Map(
     LEAD_CREATED,
     LEAD_STAGE_CHANGED,
     LEAD_ASSIGNED,
+    LEAD_REENQUIRED,
+    CONTACT_MERGED,
   ].map((def) => [def.type, def as EventDefinition]),
 );
 

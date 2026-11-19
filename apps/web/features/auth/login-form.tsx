@@ -5,6 +5,7 @@ import { type LoginRequest, loginRequestSchema, sessionResponseSchema } from '@r
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { useForm } from 'react-hook-form';
 import type { z } from 'zod';
 import { FormError, TextField } from '@/components/form/text-field';
@@ -28,10 +29,14 @@ export function LoginForm({ next, email }: { next: string; email?: string | unde
   const onSubmit = form.handleSubmit(async (values) => {
     setFormError(null);
     try {
-      await api('/v1/auth/login', {
+      const session = await api('/v1/auth/login', {
         method: 'POST',
         body: values,
         schema: sessionResponseSchema,
+      });
+      const firstName = session.user.name.split(/\s+/)[0] ?? session.user.name;
+      toast.success(s.login.welcome(firstName), {
+        description: session.tenant ? s.login.welcomeBody(session.tenant.name) : undefined,
       });
       router.replace(next);
       router.refresh();
@@ -49,7 +54,7 @@ export function LoginForm({ next, email }: { next: string; email?: string | unde
       footer={
         <>
           {s.login.noAccount}{' '}
-          <Link className="font-medium text-foreground underline" href="/signup">
+          <Link className="font-medium text-primary hover:underline" href="/signup">
             {s.login.signupLink}
           </Link>
         </>
@@ -67,21 +72,24 @@ export function LoginForm({ next, email }: { next: string; email?: string | unde
           error={errors.email?.message}
           {...form.register('email')}
         />
-        <TextField
-          label={s.password}
-          type="password"
-          autoComplete="current-password"
-          error={errors.password?.message}
-          {...form.register('password')}
-        />
-        <div className="flex items-center justify-between">
-          <Link className="text-sm underline" href="/forgot-password">
+        <div className="grid gap-1.5">
+          <TextField
+            label={s.password}
+            type="password"
+            autoComplete="current-password"
+            error={errors.password?.message}
+            {...form.register('password')}
+          />
+          <Link
+            className="justify-self-end text-sm font-medium text-primary hover:underline"
+            href="/forgot-password"
+          >
             {s.login.forgot}
           </Link>
-          <Button type="submit" disabled={isSubmitting}>
-            {s.login.submit}
-          </Button>
         </div>
+        <Button type="submit" disabled={isSubmitting}>
+          {s.login.submit}
+        </Button>
       </form>
     </AuthCard>
   );

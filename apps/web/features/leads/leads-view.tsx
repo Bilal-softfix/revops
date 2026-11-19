@@ -7,12 +7,13 @@ import {
   customFieldsForPipeline,
   formatPhone,
 } from '@revops/shared';
-import { Plus, Trash2 } from 'lucide-react';
+import { KanbanSquare, List, Plus, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { SimpleSelect } from '@/components/form/simple-select';
+import { PageHeader } from '@/components/layout/page-header';
 import { FormError, TextField } from '@/components/form/text-field';
 import { EmptyState, ErrorState, LoadingState } from '@/components/states/states';
 import { Badge } from '@/components/ui/badge';
@@ -70,7 +71,16 @@ function sameFilters(a: LeadFilters, b: LeadFilters): boolean {
   return JSON.stringify(canon(a)) === JSON.stringify(canon(b));
 }
 
-const categoryVariant = { open: 'secondary', won: 'default', lost: 'destructive' } as const;
+const categoryVariant = { open: 'info', won: 'success', lost: 'muted' } as const;
+
+/** "Asha Verma" → "AV". */
+const initials = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('') || '?';
 
 /** Leads (M1-T4): list or board, filters in the URL, private saved views, new lead. */
 export function LeadsView() {
@@ -85,7 +95,15 @@ export function LeadsView() {
     (m) => m.status === 'active',
   );
   const allDefs = useCustomFields('lead').data?.items ?? [];
-  const [creating, setCreating] = useState(false);
+  // `?new=1` (the header's quick "Add lead") opens the form once, then leaves the URL clean.
+  const [creating, setCreating] = useState(() => searchParams.get('new') === '1');
+  useEffect(() => {
+    if (searchParams.get('new') !== '1') return;
+    const rest = new URLSearchParams(searchParams.toString());
+    rest.delete('new');
+    const query = rest.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname);
+  }, [searchParams, router, pathname]);
 
   const navigate = (next: LeadFilters, nextLayout: LeadLayout = layout) => {
     const query = paramsFromFilters(next, nextLayout);
@@ -105,36 +123,49 @@ export function LeadsView() {
     layout === 'board' ? { ...filters, pipelineId: boardPipeline?.id } : filters;
 
   return (
-    <div className="grid gap-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">{s.title}</h1>
-          <p className="text-sm text-muted-foreground">{s.description}</p>
-        </div>
-        <div className="flex flex-wrap items-end gap-2">
-          <ExportLeadsButton filters={effective} />
-          <SavedViews filters={filters} layout={layout} onApply={(f, l) => navigate(f, l)} />
-          <div role="group" aria-label={s.layoutLabel} className="flex rounded-md border">
-            {(['list', 'board'] as const).map((l) => (
-              <Button
-                key={l}
-                variant={layout === l ? 'secondary' : 'ghost'}
-                size="sm"
-                aria-pressed={layout === l}
-                onClick={() => navigate(filters, l)}
-              >
-                {s.layouts[l]}
+    <div className="grid min-w-0 gap-6">
+      <PageHeader
+        title={s.title}
+        description={s.description}
+        actions={
+          <>
+            <div
+              role="group"
+              aria-label={s.layoutLabel}
+              className="flex rounded-lg border bg-muted/60 p-0.5"
+            >
+              {(['list', 'board'] as const).map((l) => {
+                const Icon = l === 'list' ? List : KanbanSquare;
+                return (
+                  <Button
+                    key={l}
+                    variant="ghost"
+                    size="sm"
+                    aria-pressed={layout === l}
+                    className={
+                      layout === l
+                        ? 'bg-card text-foreground shadow-card hover:bg-card'
+                        : 'text-muted-foreground'
+                    }
+                    onClick={() => navigate(filters, l)}
+                  >
+                    <Icon aria-hidden />
+                    {s.layouts[l]}
+                  </Button>
+                );
+              })}
+            </div>
+            <SavedViews filters={filters} layout={layout} onApply={(f, l) => navigate(f, l)} />
+            <ExportLeadsButton filters={effective} />
+            {can('lead.write') ? (
+              <Button onClick={() => setCreating(true)}>
+                <Plus aria-hidden />
+                {s.new}
               </Button>
-            ))}
-          </div>
-          {can('lead.write') ? (
-            <Button onClick={() => setCreating(true)}>
-              <Plus aria-hidden />
-              {s.new}
-            </Button>
-          ) : null}
-        </div>
-      </div>
+            ) : null}
+          </>
+        }
+      />
       <LeadFiltersBar
         filters={effective}
         onChange={(f) => navigate(f)}
@@ -225,7 +256,7 @@ function LeadList({
           onDone={() => setPicked(new Set())}
         />
       ) : null}
-      <div className="overflow-x-auto rounded-md border">
+      <div className="overflow-x-auto rounded-xl border bg-card shadow-card">
         <Table>
           <TableHeader>
             <TableRow>
@@ -272,11 +303,24 @@ function LeadList({
                   </TableCell>
                 ) : null}
                 <TableCell>
-                  <Link href={`/leads/${lead.id}`} className="font-medium hover:underline">
-                    {lead.contact.name}
-                  </Link>
-                  <div className="text-xs text-muted-foreground">
-                    {formatPhone(lead.contact.phoneE164) || lead.contact.email}
+                  <div className="flex items-center gap-3">
+                    <span
+                      aria-hidden
+                      className="grid size-8 shrink-0 place-items-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary"
+                    >
+                      {initials(lead.contact.name)}
+                    </span>
+                    <div className="grid">
+                      <Link
+                        href={`/leads/${lead.id}`}
+                        className="font-medium hover:text-primary hover:underline"
+                      >
+                        {lead.contact.name}
+                      </Link>
+                      <span className="text-xs text-muted-foreground">
+                        {formatPhone(lead.contact.phoneE164) || lead.contact.email}
+                      </span>
+                    </div>
                   </div>
                 </TableCell>
                 <TableCell>
@@ -284,10 +328,16 @@ function LeadList({
                     {stageName(lead.pipelineId, lead.stageId)}
                   </Badge>
                 </TableCell>
-                <TableCell>{lead.owner?.name ?? s.unassigned}</TableCell>
+                <TableCell className={lead.owner ? undefined : 'text-muted-foreground'}>
+                  {lead.owner?.name ?? s.unassigned}
+                </TableCell>
                 <TableCell>{lead.source?.name ?? s.noSource}</TableCell>
-                <TableCell className="text-right">{formatPaise(lead.valuePaise)}</TableCell>
-                <TableCell>{formatDate(lead.createdAt)}</TableCell>
+                <TableCell className="text-right font-medium tabular-nums">
+                  {formatPaise(lead.valuePaise)}
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {formatDate(lead.createdAt)}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -358,7 +408,7 @@ function SavedViews({
           <Trash2 aria-hidden />
         </Button>
       ) : null}
-      <Button variant="outline" size="sm" onClick={() => setSaving(true)}>
+      <Button variant="outline" onClick={() => setSaving(true)}>
         {s.views.save}
       </Button>
       <Dialog open={saving} onOpenChange={setSaving}>

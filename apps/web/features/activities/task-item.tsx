@@ -22,7 +22,10 @@ export function TaskItem({ task, showLead = false }: { task: Task; showLead?: bo
   const done = task.status === 'done';
   const overdue = !done && Date.parse(task.dueAt) < now;
   return (
-    <li className="flex items-start gap-3 rounded-md border p-3 text-sm" data-task-id={task.id}>
+    <li
+      className="flex items-start gap-3 rounded-lg border bg-card p-3 text-sm"
+      data-task-id={task.id}
+    >
       <input
         type="checkbox"
         className="mt-0.5 size-4 accent-primary"

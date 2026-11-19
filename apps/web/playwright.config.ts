@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { resolve } from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 import { loadTestDatabaseEnv } from '@revops/db/testing';
@@ -24,6 +25,8 @@ const backendEnv = {
   EMAIL_FILE_DIR: MAIL_DIR,
   OUTBOX_POLL_INTERVAL_MS: '500',
   METRICS_TOKEN: '',
+  // Throwaway key-encryption key per run (webhook secrets live only in the test database).
+  DATA_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
 };
 
 export default defineConfig({

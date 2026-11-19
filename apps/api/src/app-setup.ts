@@ -6,6 +6,11 @@ import { API_ENV } from './config/env';
 import { bodyParserErrorHandler } from './platform/errors/body-parser-errors';
 import { Metrics } from './platform/metrics/metrics';
 import { setupOpenApi } from './platform/openapi/openapi';
+import {
+  PUBLIC_BODY_LIMIT,
+  WEBHOOK_BODY_LIMIT,
+  publicBodyReader,
+} from './platform/validation/public-body';
 
 /**
  * Nest's default parsers include urlencoded, which would let a cross-site HTML form POST to our
@@ -29,6 +34,9 @@ export function configureApp(app: INestApplication): void {
   // Client IP for rate limits and audit logs, from X-Forwarded-For set by trusted hops only.
   express.set('trust proxy', trustProxySetting(env.TRUST_PROXY));
   express.use(app.get(Metrics).httpMiddleware());
+  // Unauthenticated capture routes: 16 kB, JSON as application/json or text/plain (M2-T2).
+  express.use('/v1/public/webhooks', publicBodyReader(WEBHOOK_BODY_LIMIT, { lenientJson: true }));
+  express.use('/v1/public', publicBodyReader(PUBLIC_BODY_LIMIT));
   express.useBodyParser('json', { limit: '100kb' });
   express.use(bodyParserErrorHandler);
   express.use(cookieParser());

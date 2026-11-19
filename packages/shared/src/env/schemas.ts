@@ -106,6 +106,30 @@ export const apiEnvSchema = commonEnvSchema.extend(databaseEnvSchema.shape).exte
   ),
   /** Secure cookies. Browsers treat http://localhost as secure, so keep true in dev too. */
   COOKIE_SECURE: z.preprocess(blankAsUndefined, booleanFlag.default(true)),
+  /**
+   * Key-encryption key for secrets at rest (webhook secrets, provider tokens): 32 random bytes,
+   * base64. Optional outside production — features that store secrets fail with a clear error
+   * until it is set. Generate: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+   */
+  /**
+   * Captcha check for public forms whose source requires one (M2-T2): `fake` accepts the token
+   * "pass" (dev/tests), `turnstile` calls Cloudflare Turnstile with TURNSTILE_SECRET.
+   */
+  CAPTCHA_DRIVER: z.preprocess(blankAsUndefined, z.enum(['fake', 'turnstile']).default('fake')),
+  TURNSTILE_SECRET: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  /**
+   * Object storage (M2-T5 CSV uploads): `local` = files under STORAGE_DIR (dev), `memory` =
+   * in-process (tests). S3 arrives in M8.
+   */
+  STORAGE_DRIVER: z.preprocess(blankAsUndefined, z.enum(['local', 'memory']).default('local')),
+  STORAGE_DIR: z.preprocess(blankAsUndefined, z.string().min(1).default('.data/storage')),
+  DATA_ENCRYPTION_KEY: z.preprocess(
+    blankAsUndefined,
+    z
+      .string()
+      .refine((v) => Buffer.from(v, 'base64').length === 32, 'must be 32 bytes, base64-encoded')
+      .optional(),
+  ),
 });
 
 /**
@@ -125,6 +149,15 @@ export function productionEnvProblems(env: ApiEnv): string[] {
   }
   if (!env.COOKIE_SECURE) problems.push('COOKIE_SECURE: must be true in production');
   if (!env.METRICS_TOKEN) problems.push('METRICS_TOKEN: is required in production');
+  if (!env.DATA_ENCRYPTION_KEY) problems.push('DATA_ENCRYPTION_KEY: is required in production');
+  if (env.STORAGE_DRIVER === 'memory') {
+    problems.push('STORAGE_DRIVER: "memory" is not allowed in production');
+  }
+  if (env.CAPTCHA_DRIVER === 'fake')
+    problems.push('CAPTCHA_DRIVER: "fake" is not allowed in production');
+  if (env.CAPTCHA_DRIVER === 'turnstile' && !env.TURNSTILE_SECRET) {
+    problems.push('TURNSTILE_SECRET: is required with CAPTCHA_DRIVER=turnstile');
+  }
   return problems;
 }
 

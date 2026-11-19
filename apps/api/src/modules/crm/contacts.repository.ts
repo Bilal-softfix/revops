@@ -16,6 +16,7 @@ import {
 } from '@revops/db';
 import {
   type AgentContactVisibility,
+  type DedupePolicy,
   type Contact,
   type Consent,
   agentContactVisibilitySchema,
@@ -84,6 +85,29 @@ export class ContactsRepository {
     await this.mergeSettings(tx, tenantId, { allowAgentExport: value });
   }
 
+  /** M2-T4: inbound dedupe policy; anything but `always_new` reads as the default. */
+  async dedupePolicy(tx: Tx, tenantId: string): Promise<DedupePolicy> {
+    const [row] = await tx
+      .select({ settings: tenants.settings })
+      .from(tenants)
+      .where(eq(tenants.id, tenantId));
+    return row?.settings.dedupePolicy === 'always_new' ? 'always_new' : 'reenquiry';
+  }
+
+  async setDedupePolicy(tx: Tx, tenantId: string, value: DedupePolicy): Promise<void> {
+    await this.mergeSettings(tx, tenantId, { dedupePolicy: value });
+  }
+
+  /** A live contact by id regardless of visibility, locked (intake, merge). */
+  async lockLive(tx: Tx, id: string): Promise<ContactRow | undefined> {
+    const [row] = await tx
+      .select()
+      .from(contacts)
+      .where(and(eq(contacts.id, id), isNull(contacts.deletedAt)))
+      .for('update');
+    return row;
+  }
+
   private async mergeSettings(
     tx: Tx,
     tenantId: string,
@@ -134,12 +158,32 @@ export class ContactsRepository {
       .limit(page.limit);
   }
 
-  async findVisible(tx: Tx, scope: ContactScope, id: string): Promise<ContactRow | undefined> {
-    const [row] = await tx
+  /**
+   * A live contact the scope may see. `lock`: 'share' when a lead is about to reference it (so a
+   * concurrent delete waits and then counts that lead), 'update' for the delete itself. The
+   * deleted_at filter is re-checked after the wait, so a just-deleted contact is not returned.
+   */
+  async findVisible(
+    tx: Tx,
+    scope: ContactScope,
+    id: string,
+    options: { lock?: 'share' | 'update' } = {},
+  ): Promise<ContactRow | undefined> {
+    const query = tx
       .select()
       .from(contacts)
       .where(and(eq(contacts.id, id), isNull(contacts.deletedAt), this.visible(scope)));
+    const [row] = options.lock ? await query.for(options.lock, { of: contacts }) : await query;
     return row;
+  }
+
+  /** Live (not soft-deleted) leads of a contact, whoever owns them. */
+  async liveLeadCount(tx: Tx, contactId: string): Promise<number> {
+    const [row] = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(leads)
+      .where(and(eq(leads.contactId, contactId), isNull(leads.deletedAt)));
+    return row?.n ?? 0;
   }
 
   /**
@@ -154,13 +198,17 @@ export class ContactsRepository {
     for (const field of ['phone', 'email'] as const) {
       const value = field === 'phone' ? match.phoneE164 : match.email;
       if (!value) continue;
-      const column = field === 'phone' ? contacts.phoneE164 : contacts.email;
+      // Email via email_key (leakproof text `=`, indexed): see the column's note.
+      const condition =
+        field === 'phone'
+          ? eq(contacts.phoneE164, value)
+          : eq(contacts.emailKey, sql`lower(${value}::text)`);
       const [row] = await tx
         .select()
         .from(contacts)
         .where(
           and(
-            eq(column, value),
+            condition,
             isNull(contacts.deletedAt),
             excludeId ? ne(contacts.id, excludeId) : undefined,
           ),
@@ -203,7 +251,7 @@ export class ContactsRepository {
       city: string | null;
       consent: Consent;
       customFields: Record<string, unknown>;
-      createdBy: string;
+      createdBy: string | null;
     },
   ): Promise<ContactRow> {
     const [row] = await tx.insert(contacts).values(values).returning();
@@ -215,7 +263,10 @@ export class ContactsRepository {
     tx: Tx,
     id: string,
     patch: Partial<
-      Pick<ContactRow, 'name' | 'phoneE164' | 'altPhones' | 'email' | 'city' | 'consent'>
+      Pick<
+        ContactRow,
+        'name' | 'phoneE164' | 'altPhones' | 'email' | 'city' | 'consent' | 'customFields'
+      >
     >,
     customFields: Record<string, unknown> = {},
   ): Promise<ContactRow> {

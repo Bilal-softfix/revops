@@ -77,7 +77,7 @@ export function SignupForm() {
       footer={
         <>
           {s.signup.haveAccount}{' '}
-          <Link className="font-medium text-foreground underline" href="/login">
+          <Link className="font-medium text-primary hover:underline" href="/login">
             {s.signup.loginLink}
           </Link>
         </>

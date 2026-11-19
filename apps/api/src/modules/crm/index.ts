@@ -9,7 +9,11 @@ import { ContactsRepository } from './contacts.repository';
 import { ContactsService } from './contacts.service';
 import { CrmController } from './crm.controller';
 import { CrmRepository } from './crm.repository';
+import { CrmRateLimits } from './crm-rate-limits';
 import { CrmService } from './crm.service';
+import { DashboardController } from './dashboard.controller';
+import { DashboardRepository } from './dashboard.repository';
+import { DashboardService } from './dashboard.service';
 import { CustomFieldsController } from './custom-fields.controller';
 import { CustomFieldsRepository } from './custom-fields.repository';
 import { CustomFieldsService } from './custom-fields.service';
@@ -18,6 +22,11 @@ import { LeadsExportController } from './leads-export.controller';
 import { LeadsExportService } from './leads-export.service';
 import { LeadsController } from './leads.controller';
 import { LeadsRepository } from './leads.repository';
+import { LeadIntakeRepository } from './lead-intake.repository';
+import { LeadIntakeService } from './lead-intake.service';
+import { LeadSourcesController } from './lead-sources.controller';
+import { LeadSourcesRepository } from './lead-sources.repository';
+import { LeadSourcesService } from './lead-sources.service';
 import { LeadsService } from './leads.service';
 import { PipelinesController } from './pipelines.controller';
 import { PipelinesRepository } from './pipelines.repository';
@@ -34,10 +43,13 @@ export { type CrmAuth, CrmService } from './crm.service';
     ContactsController,
     CustomFieldsController,
     LeadsController,
+    LeadSourcesController,
     LeadsExportController,
     ActivitiesController,
+    DashboardController,
   ],
   providers: [
+    CrmRateLimits,
     CrmRepository,
     CrmService,
     ContactsRepository,
@@ -48,12 +60,26 @@ export { type CrmAuth, CrmService } from './crm.service';
     PipelinesService,
     LeadsRepository,
     LeadsService,
+    LeadSourcesRepository,
+    LeadSourcesService,
+    LeadIntakeRepository,
+    LeadIntakeService,
     LeadViewsRepository,
     LeadViewsService,
     LeadsExportService,
     ActivitiesRepository,
     ActivitiesService,
+    DashboardRepository,
+    DashboardService,
   ],
-  exports: [CrmService],
+  exports: [CrmService, LeadIntakeService],
 })
 export class CrmModule {}
+export {
+  type IntakeRequest,
+  type IntakeResult,
+  type IntakeSource,
+  LeadIntakeService,
+  intakeUnusable,
+} from './lead-intake.service';
+export { webhookSecretContext } from './lead-sources.service';

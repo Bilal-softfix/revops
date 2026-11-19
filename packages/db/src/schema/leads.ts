@@ -50,6 +50,11 @@ export const leads = pgTable(
     wonAt: timestamp('won_at', { withTimezone: true }),
     lostAt: timestamp('lost_at', { withTimezone: true }),
     lostReason: text('lost_reason'),
+    /**
+     * M2-T6: when a person first acted on the lead (stage change now; outbound call/message from
+     * M3/M5). Set once, never by the system or AI. Response time = first_response_at - created_at.
+     */
+    firstResponseAt: timestamp('first_response_at', { withTimezone: true }),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     ...timestamps(),

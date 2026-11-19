@@ -34,6 +34,12 @@ export const contacts = pgTable(
       .notNull()
       .default(sql`'{}'::text[]`),
     email: citext('email'),
+    /**
+     * lower(email) as plain text, for exact lookups (dedupe). citext's `=` isn't LEAKPROOF, so
+     * under RLS Postgres won't use it as an index condition and every lookup scanned the tenant's
+     * contacts; text `=` is leakproof, so `email_key = lower($1)` uses the index below (M2-T5).
+     */
+    emailKey: text('email_key').generatedAlwaysAs(sql`lower(email::text)`),
     city: text('city'),
     customFields: jsonb('custom_fields').$type<Record<string, unknown>>().notNull().default({}),
     /** Per channel: { granted, at, source } (docs/03-india-compliance.md). */
@@ -52,6 +58,9 @@ export const contacts = pgTable(
       .on(t.tenantId, t.email)
       .where(sql`${t.deletedAt} is null and ${t.email} is not null`),
     index('contacts_tenant_created_idx').on(t.tenantId, t.createdAt, t.id),
+    index('contacts_tenant_email_key_idx')
+      .on(t.tenantId, t.emailKey)
+      .where(sql`${t.deletedAt} is null and ${t.emailKey} is not null`),
     // Trigram search (pg_trgm) for `?q=` on name, phone and email fragments.
     index('contacts_name_trgm_idx').using('gin', sql`${t.name} gin_trgm_ops`),
     index('contacts_phone_trgm_idx').using('gin', sql`${t.phoneE164} gin_trgm_ops`),

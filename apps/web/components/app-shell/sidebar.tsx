@@ -2,31 +2,42 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { cn } from '@/lib/utils';
+import { Logo } from '@/components/layout/logo';
 import { navFor } from '@/lib/nav';
 import { useSession } from '@/lib/session';
-import { common } from '@/lib/strings/common';
+import { cn } from '@/lib/utils';
 import { TenantSwitcher } from './tenant-switcher';
+import { UserMenu } from './user-menu';
 
-/** Workspace switcher + the nav items this member's role may see. */
+/** Logo, workspace switcher, the nav items this member's role may see, and the account card. */
 export function Sidebar({
   className,
   onNavigate,
+  showAccount = true,
 }: {
   className?: string;
   onNavigate?: () => void;
+  /** The account card at the bottom (off in the mobile drawer: the header has the menu). */
+  showAccount?: boolean;
 }) {
   const { session } = useSession();
   const pathname = usePathname();
   const sections = navFor(session.tenant?.role);
   return (
-    <aside className={cn('flex-col gap-4 p-3', className)}>
-      <div className="px-2 py-1 text-lg font-semibold tracking-tight">{common.appName}</div>
+    <aside
+      className={cn(
+        'flex-col gap-5 border-sidebar-border bg-sidebar px-3 py-4 text-sidebar-foreground',
+        className,
+      )}
+    >
+      <Link href="/dashboard" onClick={onNavigate} className="px-2">
+        <Logo />
+      </Link>
       <TenantSwitcher />
-      <nav aria-label="Main" className="flex flex-col gap-4">
+      <nav aria-label="Main" className="flex flex-1 flex-col gap-5 overflow-y-auto">
         {sections.map((section) => (
           <div key={section.label} className="grid gap-1">
-            <p className="px-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            <p className="px-2.5 text-[11px] font-semibold tracking-wider text-muted-foreground/80 uppercase">
               {section.label}
             </p>
             <ul className="grid gap-0.5">
@@ -39,11 +50,27 @@ export function Sidebar({
                       onClick={onNavigate}
                       aria-current={active ? 'page' : undefined}
                       className={cn(
-                        'flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent',
-                        active && 'bg-accent font-medium',
+                        'group relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors',
+                        active
+                          ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                          : 'text-sidebar-foreground/75 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground',
                       )}
                     >
-                      <item.icon className="size-4" aria-hidden />
+                      {active ? (
+                        <span
+                          aria-hidden
+                          className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-sidebar-primary"
+                        />
+                      ) : null}
+                      <item.icon
+                        className={cn(
+                          'size-4.5 shrink-0',
+                          active
+                            ? 'text-sidebar-primary'
+                            : 'text-muted-foreground group-hover:text-sidebar-foreground',
+                        )}
+                        aria-hidden
+                      />
                       {item.label}
                     </Link>
                   </li>
@@ -53,6 +80,7 @@ export function Sidebar({
           </div>
         ))}
       </nav>
+      {showAccount ? <UserMenu variant="sidebar" /> : null}
     </aside>
   );
 }

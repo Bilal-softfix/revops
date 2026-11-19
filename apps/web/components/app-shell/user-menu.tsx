@@ -1,8 +1,9 @@
 'use client';
 
 import { useQueryClient } from '@tanstack/react-query';
-import { LogOut } from 'lucide-react';
+import { ChevronsUpDown, LogOut } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import {
@@ -16,6 +17,7 @@ import {
 import { api } from '@/lib/api/client';
 import { useSession } from '@/lib/session';
 import { shellStrings as s } from '@/lib/strings/shell';
+import { cn } from '@/lib/utils';
 
 function initials(name: string): string {
   return (
@@ -28,7 +30,8 @@ function initials(name: string): string {
   );
 }
 
-export function UserMenu() {
+/** `header`: avatar button (mobile top bar). `sidebar`: account card at the sidebar's foot. */
+export function UserMenu({ variant = 'header' }: { variant?: 'header' | 'sidebar' }) {
   const { session } = useSession();
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -39,6 +42,7 @@ export function UserMenu() {
       () => undefined,
     );
     queryClient.clear();
+    toast(s.userMenu.signedOut, { description: s.userMenu.signedOutBody });
     router.replace('/login');
     router.refresh();
   };
@@ -46,14 +50,43 @@ export function UserMenu() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="gap-2" aria-label={s.userMenu.label}>
-          <Avatar className="size-7">
-            <AvatarFallback>{initials(session.user.name)}</AvatarFallback>
-          </Avatar>
-          <span className="hidden text-sm sm:inline">{session.user.name}</span>
-        </Button>
+        {variant === 'sidebar' ? (
+          <button
+            type="button"
+            aria-label={s.userMenu.label}
+            className="flex w-full items-center gap-2.5 rounded-lg border border-sidebar-border bg-card/70 p-2 text-left shadow-card transition-colors hover:bg-card"
+          >
+            <Avatar className="size-8">
+              <AvatarFallback className="bg-primary/12 text-xs font-semibold text-primary">
+                {initials(session.user.name)}
+              </AvatarFallback>
+            </Avatar>
+            <span className="grid min-w-0 flex-1">
+              <span className="truncate text-sm font-medium">{session.user.name}</span>
+              {session.tenant ? (
+                <span className="truncate text-xs text-muted-foreground">
+                  {s.roles[session.tenant.role]}
+                </span>
+              ) : null}
+            </span>
+            <ChevronsUpDown className="size-4 text-muted-foreground" aria-hidden />
+          </button>
+        ) : (
+          <Button variant="ghost" className={cn('gap-2')} aria-label={s.userMenu.label}>
+            <Avatar className="size-7">
+              <AvatarFallback className="bg-primary/12 text-xs font-semibold text-primary">
+                {initials(session.user.name)}
+              </AvatarFallback>
+            </Avatar>
+            <span className="hidden text-sm sm:inline">{session.user.name}</span>
+          </Button>
+        )}
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-60">
+      <DropdownMenuContent
+        align={variant === 'sidebar' ? 'start' : 'end'}
+        side={variant === 'sidebar' ? 'top' : 'bottom'}
+        className="w-60"
+      >
         <DropdownMenuLabel className="grid">
           <span className="truncate">{session.user.name}</span>
           <span className="truncate text-xs font-normal text-muted-foreground">

@@ -7,7 +7,7 @@ import {
   customFieldsForPipeline,
   formatPhone,
 } from '@revops/shared';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Clock, MessageCircle, Phone } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
@@ -33,6 +33,7 @@ import { useCustomFields } from '@/features/custom-fields/queries';
 import { usePipelines } from '@/features/pipelines/queries';
 import { useMembers } from '@/features/team/queries';
 import { errorMessage } from '@/lib/api/messages';
+import { formatDuration } from '@/lib/duration';
 import { ApiError } from '@/lib/api/problem';
 import {
   type CustomFieldFormValues,
@@ -48,6 +49,17 @@ import { useDeleteLead, useLead, useLeadSources, useUpdateLead } from './queries
 import { useStageChange } from './use-stage-change';
 
 /** Lead page: timeline (notes) on the left; side panel with stage, owner, tasks and details. */
+const STATUS_BADGE = { open: 'info', won: 'success', lost: 'muted' } as const;
+
+/** "Asha Verma" → "AV". */
+const initials = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('') || '?';
+
 export function LeadDetail({ id }: { id: string }) {
   const lead = useLead(id);
   const pipelines = usePipelines();
@@ -84,38 +96,83 @@ function LeadPage({
 
   return (
     <div className="mx-auto grid max-w-6xl gap-6">
-      <Link href="/leads" className="flex items-center gap-1 text-sm text-muted-foreground">
+      <Link
+        href="/leads"
+        className="flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
         <ArrowLeft className="size-4" aria-hidden />
         {s.detail.back}
       </Link>
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">{lead.contact.name}</h1>
-          <p className="text-sm text-muted-foreground">
-            {[formatPhone(lead.contact.phoneE164), lead.contact.email].filter(Boolean).join(' · ')}{' '}
-            ·{' '}
-            <Link href={`/contacts/${lead.contact.id}`} className="underline">
-              {s.detail.openContact}
-            </Link>
-          </p>
+      <div className="grid gap-4 rounded-xl border bg-card p-5 shadow-card sm:flex sm:items-start sm:justify-between">
+        <div className="flex min-w-0 items-start gap-4">
+          <span
+            aria-hidden
+            className="grid size-12 shrink-0 place-items-center rounded-full bg-primary/10 text-base font-semibold text-primary"
+          >
+            {initials(lead.contact.name)}
+          </span>
+          <div className="grid min-w-0 gap-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-2xl font-semibold">{lead.contact.name}</h1>
+              <Badge variant={STATUS_BADGE[lead.status]}>{s.status[lead.status]}</Badge>
+              {stage ? <Badge variant="outline">{stage.name}</Badge> : null}
+            </div>
+            <p className="text-sm text-muted-foreground">
+              {[formatPhone(lead.contact.phoneE164), lead.contact.email]
+                .filter(Boolean)
+                .join(' · ')}{' '}
+              ·{' '}
+              <Link
+                href={`/contacts/${lead.contact.id}`}
+                className="font-medium text-primary hover:underline"
+              >
+                {s.detail.openContact}
+              </Link>
+            </p>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5" data-testid="first-response">
+                <Clock className="size-3.5" aria-hidden />
+                {lead.firstResponseAt
+                  ? s.detail.firstResponse(formatDuration(lead.createdAt, lead.firstResponseAt))
+                  : s.detail.awaitingResponse}
+              </span>
+              {lead.wonAt ? (
+                <span className="text-success-foreground">
+                  {s.detail.won(formatDate(lead.wonAt))}
+                </span>
+              ) : null}
+              {lead.lostAt ? (
+                <span>{s.detail.lost(formatDate(lead.lostAt), lead.lostReason)}</span>
+              ) : null}
+            </div>
+          </div>
         </div>
-        <Badge
-          variant={
-            lead.status === 'lost' ? 'destructive' : lead.status === 'won' ? 'default' : 'secondary'
-          }
-        >
-          {s.status[lead.status]}
-        </Badge>
+        {lead.contact.phoneE164 ? (
+          <div className="flex shrink-0 gap-2">
+            <Button asChild variant="outline" size="sm">
+              <a href={`tel:${lead.contact.phoneE164}`}>
+                <Phone aria-hidden />
+                {s.detail.call}
+              </a>
+            </Button>
+            <Button asChild variant="outline" size="sm">
+              <a
+                href={`https://wa.me/${lead.contact.phoneE164.replace(/^\+/, '')}`}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                <MessageCircle aria-hidden />
+                {s.detail.whatsapp}
+              </a>
+            </Button>
+          </div>
+        ) : null}
       </div>
-      {lead.wonAt ? <p className="text-sm">{s.detail.won(formatDate(lead.wonAt))}</p> : null}
-      {lead.lostAt ? (
-        <p className="text-sm">{s.detail.lost(formatDate(lead.lostAt), lead.lostReason)}</p>
-      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <LeadTimeline leadId={lead.id} />
         <aside className="grid content-start gap-6" aria-label={s.detail.details}>
-          <section className="grid gap-4 rounded-md border p-4">
+          <section className="grid gap-4 rounded-xl border bg-card p-5 shadow-card">
             <div className="grid gap-1.5">
               <span className="text-sm font-medium">{s.detail.pipeline}</span>
               <span className="text-sm">{pipeline.name}</span>
@@ -275,20 +332,20 @@ function LeadDetailsForm({ lead }: { lead: Lead }) {
   return (
     <form
       noValidate
-      className="grid gap-4 rounded-md border p-4"
+      className="grid gap-4 rounded-xl border bg-card p-5 shadow-card"
       aria-label={s.detail.details}
       onSubmit={(event) => {
         event.preventDefault();
         void submit();
       }}
     >
-      <h2 className="text-lg font-medium">{s.detail.details}</h2>
+      <h2 className="text-base font-semibold">{s.detail.details}</h2>
       <FormError message={formError} />
       <div className="grid gap-4">
         <SimpleSelect
           label={s.form.source}
           value={sourceId}
-          noneLabel={s.filters.anySource}
+          noneLabel={s.filters.noSource}
           options={sources.map((x) => ({ value: x.id, label: x.name }))}
           error={errors.sourceId}
           onChange={setSourceId}

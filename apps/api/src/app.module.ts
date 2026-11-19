@@ -1,11 +1,14 @@
 import { type DynamicModule, Module } from '@nestjs/common';
 import type { ApiEnv } from '@revops/shared/env';
+import { CaptureModule } from './modules/capture';
 import { CrmModule } from './modules/crm';
 import { IdentityModule } from './modules/identity';
 import { TenancyModule } from './modules/tenancy';
 import { HealthController } from './platform/health/health.controller';
 import { MetricsController } from './platform/metrics/metrics.controller';
 import { PlatformModule } from './platform/platform.module';
+import { CaptchaModule } from './providers/captcha';
+import { StorageModule } from './providers/storage';
 import { EmailModule } from './providers/email';
 
 @Module({})
@@ -16,9 +19,12 @@ export class AppModule {
       imports: [
         PlatformModule.register(env, 'api'),
         EmailModule.register(env),
+        CaptchaModule.register(env),
+        StorageModule.register(env),
         IdentityModule,
         TenancyModule,
         CrmModule,
+        CaptureModule,
       ],
       controllers: [HealthController, MetricsController],
     };

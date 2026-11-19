@@ -10,6 +10,17 @@ export const AGENT_CONTACT_VISIBILITY = ['all', 'assigned'] as const;
 export const agentContactVisibilitySchema = z.enum(AGENT_CONTACT_VISIBILITY);
 export type AgentContactVisibility = z.infer<typeof agentContactVisibilitySchema>;
 
+/**
+ * What an inbound lead (form, webhook, CSV — not manual entry) does when its phone/email matches
+ * an existing contact (M2-T4):
+ * - `reenquiry` (default): if the contact has an open lead, add a "re-enquiry" to it; if all its
+ *   leads are closed (or it has none), create a new lead for the same contact;
+ * - `always_new`: always create a new lead for the same contact.
+ */
+export const DEDUPE_POLICIES = ['reenquiry', 'always_new'] as const;
+export const dedupePolicySchema = z.enum(DEDUPE_POLICIES);
+export type DedupePolicy = z.infer<typeof dedupePolicySchema>;
+
 /** Per-tenant CRM settings (GET/PATCH /v1/crm/settings). */
 export const crmSettingsSchema = z.object({
   agentContactVisibility: agentContactVisibilitySchema,
@@ -18,6 +29,7 @@ export const crmSettingsSchema = z.object({
    * owners, admins and managers (`lead.export`) export.
    */
   allowAgentExport: z.boolean(),
+  dedupePolicy: dedupePolicySchema,
 });
 export type CrmSettings = z.infer<typeof crmSettingsSchema>;
 

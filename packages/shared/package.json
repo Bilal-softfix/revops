@@ -11,6 +11,10 @@
     "./env": {
       "types": "./dist/env/index.d.ts",
       "default": "./dist/env/index.js"
+    },
+    "./crypto": {
+      "types": "./dist/crypto/index.d.ts",
+      "default": "./dist/crypto/index.js"
     }
   },
   "files": [

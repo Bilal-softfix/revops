@@ -8,6 +8,7 @@ import type {
   Member,
   Pipeline,
 } from '@revops/shared';
+import { Search, SlidersHorizontal, X } from 'lucide-react';
 import { useState } from 'react';
 import { SimpleSelect } from '@/components/form/simple-select';
 import { Button } from '@/components/ui/button';
@@ -56,6 +57,43 @@ function CommitInput({
   );
 }
 
+/** The toolbar's search box: label kept for screen readers, value sent on blur / Enter. */
+function SearchInput({
+  label,
+  value,
+  onCommit,
+}: {
+  label: string;
+  value: string;
+  onCommit: (value: string) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = () => {
+    if (draft !== null && draft !== value) onCommit(draft);
+    setDraft(null);
+  };
+  return (
+    <div className="relative min-w-56 flex-1">
+      <Search
+        className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+        aria-hidden
+      />
+      <Input
+        type="search"
+        aria-label={label}
+        placeholder={label}
+        className="pl-9"
+        value={draft ?? value}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') commit();
+        }}
+      />
+    </div>
+  );
+}
+
 /**
  * The filter bar: pipeline, stage, status, owner, source, created range, search, and filters on
  * the custom fields of the chosen pipeline (all lead fields when no pipeline is chosen).
@@ -85,19 +123,33 @@ export function LeadFiltersBar({
   const pipeline = pipelines.find((p) => p.id === filters.pipelineId);
   const cf = filters.customFields ?? {};
   const fieldFilterCount = Object.keys(cf).length;
+  // Open by default when a date or field filter is already set (e.g. from a saved view).
+  const [moreOpen, setMoreOpen] = useState(
+    () => fieldFilterCount > 0 || !!filters.createdFrom || !!filters.createdTo,
+  );
+
+  const dateCount = (filters.createdFrom ? 1 : 0) + (filters.createdTo ? 1 : 0);
+  const moreCount = dateCount + fieldFilterCount;
+  const active = Object.keys(filters).some((k) => k !== 'pipelineId' || showStage);
 
   return (
-    <div className="grid gap-3 rounded-md border p-3" role="search" aria-label={s.filters.title}>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <CommitInput
+    <div
+      className="grid gap-3 rounded-xl border bg-card p-3 shadow-card"
+      role="search"
+      aria-label={s.filters.title}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <SearchInput
           label={s.filters.search}
           value={filters.q ?? ''}
           onCommit={(q) => set({ q: q.trim() || undefined })}
         />
         <SimpleSelect
+          hideLabel
+          className="w-44"
           label={s.filters.pipeline}
           value={filters.pipelineId ?? ''}
-          noneLabel={showStage ? s.filters.any : undefined}
+          noneLabel={showStage ? s.filters.anyPipeline : undefined}
           options={pipelines.map((p) => ({ value: p.id, label: p.name }))}
           onChange={(id) =>
             set({ pipelineId: id || undefined, stageIds: undefined, customFields: undefined })
@@ -105,6 +157,8 @@ export function LeadFiltersBar({
         />
         {showStage && pipeline ? (
           <SimpleSelect
+            hideLabel
+            className="w-40"
             label={s.filters.stage}
             value={filters.stageIds?.[0] ?? ''}
             noneLabel={s.filters.anyStage}
@@ -113,6 +167,8 @@ export function LeadFiltersBar({
           />
         ) : null}
         <SimpleSelect
+          hideLabel
+          className="w-36"
           label={s.filters.status}
           value={filters.status ?? ''}
           noneLabel={s.filters.anyStatus}
@@ -124,6 +180,8 @@ export function LeadFiltersBar({
         />
         {canSeeAll ? (
           <SimpleSelect
+            hideLabel
+            className="w-40"
             label={s.filters.owner}
             value={filters.owner ?? ''}
             noneLabel={s.filters.anyOwner}
@@ -136,48 +194,69 @@ export function LeadFiltersBar({
           />
         ) : null}
         <SimpleSelect
+          hideLabel
+          className="w-44"
           label={s.filters.source}
           value={filters.sourceId ?? ''}
           noneLabel={s.filters.anySource}
           options={sources.map((x) => ({ value: x.id, label: x.name }))}
           onChange={(v) => set({ sourceId: v || undefined })}
         />
-        <CommitInput
-          type="date"
-          label={s.filters.from}
-          value={dayOf(filters.createdFrom, 'from')}
-          onCommit={(d) => set({ createdFrom: d ? dayStart(d) : undefined })}
-        />
-        <CommitInput
-          type="date"
-          label={s.filters.to}
-          value={dayOf(filters.createdTo, 'to')}
-          onCommit={(d) => set({ createdTo: d ? dayEnd(d) : undefined })}
-        />
-      </div>
-      {defs.length > 0 ? (
-        <details open={fieldFilterCount > 0}>
-          <summary className="cursor-pointer text-sm font-medium">
-            {s.filters.more}
-            {fieldFilterCount > 0 ? ` (${fieldFilterCount})` : ''}
-          </summary>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {defs.map((def) => (
-              <FieldFilter
-                key={def.key}
-                def={def}
-                value={cf[def.key]}
-                onChange={(v) => setField(def.key, v)}
-              />
-            ))}
-          </div>
-        </details>
-      ) : null}
-      <div>
-        <Button variant="ghost" size="sm" onClick={() => onChange({})}>
-          {s.filters.clear}
+        <Button
+          variant={moreOpen || moreCount > 0 ? 'secondary' : 'outline'}
+          aria-expanded={moreOpen}
+          onClick={() => setMoreOpen((v) => !v)}
+        >
+          <SlidersHorizontal aria-hidden />
+          {s.filters.moreButton}
+          {moreCount > 0 ? (
+            <span className="rounded-full bg-primary px-1.5 text-xs text-primary-foreground">
+              {moreCount}
+            </span>
+          ) : null}
         </Button>
+        {active ? (
+          <Button variant="ghost" onClick={() => onChange({})}>
+            <X aria-hidden />
+            {s.filters.clear}
+          </Button>
+        ) : null}
       </div>
+      {moreOpen ? (
+        <div className="grid gap-4 border-t pt-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <CommitInput
+              type="date"
+              label={s.filters.from}
+              value={dayOf(filters.createdFrom, 'from')}
+              onCommit={(d) => set({ createdFrom: d ? dayStart(d) : undefined })}
+            />
+            <CommitInput
+              type="date"
+              label={s.filters.to}
+              value={dayOf(filters.createdTo, 'to')}
+              onCommit={(d) => set({ createdTo: d ? dayEnd(d) : undefined })}
+            />
+          </div>
+          {defs.length > 0 ? (
+            <div className="grid gap-2">
+              <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                {s.filters.more}
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {defs.map((def) => (
+                  <FieldFilter
+                    key={def.key}
+                    def={def}
+                    value={cf[def.key]}
+                    onChange={(v) => setField(def.key, v)}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

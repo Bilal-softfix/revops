@@ -14,6 +14,7 @@ import { recordAudit } from '../../platform/outbox/record';
 import type { RequestMeta } from '../../platform/request-meta';
 import { ContactsRepository } from './contacts.repository';
 import { type CrmAuth, CrmService } from './crm.service';
+import { CrmRateLimits } from './crm-rate-limits';
 import { CustomFieldsService } from './custom-fields.service';
 import { type LeadRecord, LeadsRepository } from './leads.repository';
 import { LeadsService } from './leads.service';
@@ -116,6 +117,7 @@ export class LeadsExportService {
     private readonly repository: LeadsRepository,
     private readonly clock: Clock,
     private readonly contacts: ContactsRepository,
+    private readonly limits: CrmRateLimits,
   ) {}
 
   async exportCsv(auth: CrmAuth, query: LeadExportQuery, meta: RequestMeta): Promise<LeadExport> {
@@ -129,6 +131,7 @@ export class LeadsExportService {
       ) {
         throw forbidden();
       }
+      await this.limits.consume(auth, 'export');
       const defs = await this.fields.definitions(tx, 'lead');
       // Same custom-field filter validation as the list (400 validation_failed).
       this.leads.checkFilters(filters, defs);

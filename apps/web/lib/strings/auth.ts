@@ -1,6 +1,17 @@
 // Copy for the signed-out pages (login, signup, verify, reset, accept invite).
 
 export const authStrings = {
+  /** Brand panel beside the signed-out forms. */
+  brand: {
+    headline: 'Every lead captured. Every call answered.',
+    body: 'One place for your enquiries, calls and follow-ups — built for Indian businesses that live on leads.',
+    points: [
+      'Leads from your website, WhatsApp, ads and imports land in one list',
+      'Calls go to your team first, with an AI assistant as backup',
+      'See which sources actually bring in revenue',
+    ],
+    footer: 'Each workspace’s data is private to that workspace.',
+  },
   email: 'Work email',
   password: 'Password',
   newPassword: 'New password',
@@ -15,6 +26,9 @@ export const authStrings = {
     forgot: 'Forgot password?',
     noAccount: 'New to RevOps?',
     signupLink: 'Create an account',
+    /** Toast after a successful sign-in. */
+    welcome: (name: string) => `Welcome back, ${name}`,
+    welcomeBody: (tenant: string) => `You’re signed in to ${tenant}.`,
     unverifiedHint:
       'If you haven’t verified your email yet, we’ve sent a fresh verification link to your inbox.',
   },
@@ -62,6 +76,9 @@ export const authStrings = {
     missingToken: 'This reset link is incomplete. Open the link from your email again.',
   },
   accept: {
+    /** Toast after accepting an invitation. */
+    joined: (tenant: string) => `You’ve joined ${tenant}`,
+    joinedBody: 'Your new workspace is ready.',
     title: 'Join your team on RevOps',
     newUserBody: 'Create your account to accept the invitation.',
     signedInBody: (email: string) => `You’re signed in as ${email}.`,

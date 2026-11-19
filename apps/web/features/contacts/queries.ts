@@ -2,6 +2,7 @@
 
 import {
   type CreateContactRequest,
+  type MergeContactsRequest,
   type UpdateContactRequest,
   contactPageSchema,
   contactSchema,
@@ -62,6 +63,25 @@ export const useUpdateContact = (id: string) =>
   useContactMutation((body: UpdateContactRequest, csrfToken) =>
     api(`/v1/contacts/${id}`, { method: 'PATCH', body, schema: contactSchema, csrfToken }),
   );
+
+/** Merge `otherContactId` into `id` (M2-T4). Leads move too, so lead caches are refreshed. */
+export function useMergeContact(id: string) {
+  const { session } = useSession();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: MergeContactsRequest) =>
+      api(`/v1/contacts/${id}/merge`, {
+        method: 'POST',
+        body,
+        schema: contactSchema,
+        csrfToken: session.csrfToken,
+      }),
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: contactKeys.all(session.tenant?.id ?? '') });
+      await queryClient.invalidateQueries({ queryKey: ['leads'] });
+    },
+  });
+}
 
 export const useDeleteContact = (id: string) =>
   useContactMutation((_: void, csrfToken) =>

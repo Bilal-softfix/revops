@@ -1,11 +1,9 @@
 import { Body, Controller, Get, Patch, Req } from '@nestjs/common';
 import {
   type CrmSettings,
-  type LeadSourceList,
   type PipelineList,
   type UpdateCrmSettingsRequest,
   crmSettingsSchema,
-  leadSourceListSchema,
   pipelineListSchema,
   updateCrmSettingsRequestSchema,
 } from '@revops/shared';
@@ -45,12 +43,5 @@ export class CrmController {
     @Req() req: Request,
   ): Promise<CrmSettings> {
     return this.crm.updateSettings(auth, body, requestMeta(req));
-  }
-
-  @Get('lead-sources')
-  @ZodResponse(200, leadSourceListSchema)
-  @RequirePermission('lead.read.assigned')
-  listLeadSources(@CurrentAuth() auth: CrmAuth): Promise<LeadSourceList> {
-    return this.crm.listLeadSources(auth);
   }
 }

@@ -24,7 +24,7 @@ Everything runs on the dev machine: Node 22, Python 3.12 (uv) and a natively ins
 | Tracing | Off by default; set an OTLP/HTTP endpoint to export | `OTEL_EXPORTER_OTLP_ENDPOINT` |
 | Metrics | `/metrics` on api :4000 and worker :4001, open in dev | `METRICS_TOKEN` (required in prod) |
 | Rate limits | Postgres table `rate_limit_buckets` | — |
-| Object storage | Local disk `./.data/storage` (gitignored) | `STORAGE_DRIVER=local` |
+| Object storage (CSV uploads, M2-T5) | Local disk `.data/storage` under the process directory (`apps/api/` for api + worker; gitignored); tests use `memory` | `STORAGE_DRIVER=local`, `STORAGE_DIR` |
 | Email | Console provider (prints to terminal) | `EMAIL_DRIVER=console` |
 | LiveKit (S1/M4) | LiveKit Cloud free project (decided in S1) | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` |
 
@@ -74,7 +74,7 @@ Without `--write-env` the script prints the four lines (with passwords) instead 
   - files run one at a time.
 
 ## Trying auth locally (M0-T4)
-- `apps/api/.env` holds API-only vars (see `apps/api/.env.example`): `APP_URL` (web origin used in email links), `EMAIL_DRIVER=console`, `EMAIL_FROM`, `COOKIE_SECURE=true`.
+- `apps/api/.env` holds API-only vars (see `apps/api/.env.example`): `APP_URL` (web origin used in email links), `EMAIL_DRIVER=console`, `EMAIL_FROM`, `COOKIE_SECURE=true`. From M2: `DATA_ENCRYPTION_KEY` (32 random bytes, base64 — generate with `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`); without it, creating an API lead source answers 503 `encryption_unavailable`. Keep it stable: secrets encrypted with one key don't decrypt with another.
 - `pnpm dev`, then `POST http://localhost:4000/v1/auth/signup`. The console email provider prints the verify link to the API terminal, with the recipient masked. `POST /v1/auth/verify-email {"token": …}`, then `POST /v1/auth/login`.
 - Send JSON only (`content-type: application/json`). On unsafe authenticated calls such as logout, send the `csrfToken` from the login/me response as `x-csrf-token`.
 - Rate limits live in Postgres (`rate_limit_buckets`), so they survive API restarts. To clear them in dev, truncate that table as `revops_owner`.

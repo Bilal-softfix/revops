@@ -21,7 +21,10 @@ export function LeadTasks({ lead }: { lead: Lead }) {
   const tasks = useLeadTasks(lead.id);
   const [adding, setAdding] = useState(false);
   return (
-    <section className="grid gap-3 rounded-md border p-4" aria-labelledby="tasks-heading">
+    <section
+      className="grid gap-3 rounded-xl border bg-card p-5 shadow-card"
+      aria-labelledby="tasks-heading"
+    >
       <div className="flex items-center justify-between gap-2">
         <h2 id="tasks-heading" className="text-lg font-medium">
           {s.tasks.title}

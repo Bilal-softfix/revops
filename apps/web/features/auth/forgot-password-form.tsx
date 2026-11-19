@@ -45,7 +45,7 @@ export function ForgotPasswordForm() {
       title={s.forgot.title}
       description={s.forgot.body}
       footer={
-        <Link className="underline" href="/login">
+        <Link className="font-medium text-primary hover:underline" href="/login">
           {s.toLogin}
         </Link>
       }

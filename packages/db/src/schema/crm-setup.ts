@@ -156,6 +156,19 @@ export const leadSources = pgTable(
     name: text('name').notNull(),
     type: leadSourceType('type').notNull(),
     isActive: boolean('is_active').notNull().default(true),
+    /**
+     * M2-T1: unguessable id used by the public form / webhook URLs to find the source (and so the
+     * tenant) without a session. Globally unique; rotatable. Not a secret on its own (it is
+     * embedded in customers' pages) — webhooks also need the HMAC secret.
+     */
+    publicKey: text('public_key')
+      .notNull()
+      .default(sql`replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '')`),
+    /** LeadSourceConfig (packages/shared crm/lead-sources.ts), validated on write. */
+    config: jsonb('config').$type<Record<string, unknown>>().notNull().default({}),
+    /** `api` sources: HMAC secret, envelope-encrypted (@revops/shared/crypto). Never logged. */
+    webhookSecretEnc: text('webhook_secret_enc'),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
     ...timestamps(),
   },
   (t) => [
@@ -163,5 +176,9 @@ export const leadSources = pgTable(
     uniqueIndex('lead_sources_tenant_key_unique')
       .on(t.tenantId, t.key)
       .where(sql`${t.key} is not null`),
+    uniqueIndex('lead_sources_public_key_unique').on(t.publicKey),
+    uniqueIndex('lead_sources_tenant_name_unique')
+      .on(t.tenantId, sql`lower(${t.name})`)
+      .where(sql`${t.deletedAt} is null`),
   ],
 );

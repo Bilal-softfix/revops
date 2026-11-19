@@ -108,6 +108,8 @@ export const leadSchema = z.object({
   wonAt: z.iso.datetime().nullable(),
   lostAt: z.iso.datetime().nullable(),
   lostReason: z.string().nullable(),
+  /** M2-T6: first human action (stage change; calls/messages from M3/M5). */
+  firstResponseAt: z.iso.datetime().nullable(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });

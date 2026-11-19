@@ -93,19 +93,22 @@ describe('testDatabaseEnvSchema', () => {
   });
 });
 
-describe('productionEnvProblems', () => {
-  const prod = (patch: Record<string, string>) =>
-    productionEnvProblems(
-      parseEnv(apiEnvSchema, {
-        ...validApiEnv,
-        NODE_ENV: 'production',
-        EMAIL_DRIVER: 'console',
-        APP_URL: 'https://app.revops.in',
-        METRICS_TOKEN: 'a-long-metrics-token-value',
-        ...patch,
-      }),
-    );
+const prod = (patch: Record<string, string>) =>
+  productionEnvProblems(
+    parseEnv(apiEnvSchema, {
+      ...validApiEnv,
+      NODE_ENV: 'production',
+      EMAIL_DRIVER: 'console',
+      APP_URL: 'https://app.revops.in',
+      METRICS_TOKEN: 'a-long-metrics-token-value',
+      DATA_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
+      CAPTCHA_DRIVER: 'turnstile',
+      TURNSTILE_SECRET: 'test-secret',
+      ...patch,
+    }),
+  );
 
+describe('productionEnvProblems', () => {
   it('ignores non-production environments', () => {
     expect(productionEnvProblems(parseEnv(apiEnvSchema, validApiEnv))).toEqual([]);
   });
@@ -132,6 +135,33 @@ describe('productionEnvProblems', () => {
   it('requires METRICS_TOKEN in production (metrics are not public)', () => {
     expect(prod({ EMAIL_DRIVER: 'fake', METRICS_TOKEN: '' })).toEqual(
       expect.arrayContaining([expect.stringMatching(/^METRICS_TOKEN: /)]),
+    );
+  });
+});
+
+describe('DATA_ENCRYPTION_KEY', () => {
+  it('is required in production', () => {
+    expect(prod({ EMAIL_DRIVER: 'fake', DATA_ENCRYPTION_KEY: '' })).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^DATA_ENCRYPTION_KEY: /)]),
+    );
+  });
+
+  it('is optional elsewhere but must be 32 bytes when set', () => {
+    expect(parseEnv(apiEnvSchema, validApiEnv).DATA_ENCRYPTION_KEY).toBeUndefined();
+    expect(() =>
+      parseEnv(apiEnvSchema, { ...validApiEnv, DATA_ENCRYPTION_KEY: 'c2hvcnQ=' }),
+    ).toThrow(/DATA_ENCRYPTION_KEY/);
+  });
+});
+
+describe('CAPTCHA_DRIVER', () => {
+  it('defaults to fake outside production; production needs turnstile + secret', () => {
+    expect(parseEnv(apiEnvSchema, validApiEnv).CAPTCHA_DRIVER).toBe('fake');
+    expect(prod({ EMAIL_DRIVER: 'fake', CAPTCHA_DRIVER: 'fake' })).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^CAPTCHA_DRIVER: /)]),
+    );
+    expect(prod({ EMAIL_DRIVER: 'fake', TURNSTILE_SECRET: '' })).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^TURNSTILE_SECRET: /)]),
     );
   });
 });

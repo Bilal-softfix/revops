@@ -17,6 +17,7 @@ test.describe('M0-T7 AC: invite → accept as agent → restricted nav', () => {
       'Team',
       'Custom fields',
       'Pipelines',
+      'Lead sources',
       'CRM settings',
     ]);
     await page

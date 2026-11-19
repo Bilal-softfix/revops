@@ -254,7 +254,11 @@ describe('agentContactVisibility = "assigned" (software-agency default)', () => 
 
   it('the template default is "assigned"', async () => {
     const res = await withSession(request(t.server).get('/v1/crm/settings'), tm.agentA).expect(200);
-    expect(res.body as CrmSettings).toEqual({ agentContactVisibility: 'assigned', allowAgentExport: false });
+    expect(res.body as CrmSettings).toEqual({
+      agentContactVisibility: 'assigned',
+      allowAgentExport: false,
+      dedupePolicy: 'reenquiry',
+    });
   });
 
   it('an agent sees contacts they created; another agent sees nothing of them (404, not 403)', async () => {
@@ -306,7 +310,11 @@ describe('agentContactVisibility = "all" (repair-shop default) and switching it'
 
   it('the template default is "all": every agent sees and searches every contact', async () => {
     const res = await withSession(request(t.server).get('/v1/crm/settings'), tm.agentB).expect(200);
-    expect(res.body).toEqual({ agentContactVisibility: 'all', allowAgentExport: false });
+    expect(res.body).toEqual({
+      agentContactVisibility: 'all',
+      allowAgentExport: false,
+      dedupePolicy: 'reenquiry',
+    });
     await get(tm.agentB, contact.id).expect(200);
     expect((await list(tm.agentB, { q: 'Ravi' })).items.map((c) => c.id)).toEqual([contact.id]);
   });

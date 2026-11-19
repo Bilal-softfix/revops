@@ -165,7 +165,7 @@ function PipelineCard({
   return (
     <section
       aria-labelledby={headingId}
-      className="grid gap-3 rounded-md border p-4"
+      className="grid gap-3 rounded-xl border bg-card p-5 shadow-card"
       data-testid={`pipeline-${pipeline.name}`}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">

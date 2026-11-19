@@ -257,7 +257,7 @@ export function LeadForm({
         <SimpleSelect
           label={s.form.source}
           value={sourceId}
-          noneLabel={s.filters.anySource}
+          noneLabel={s.filters.noSource}
           options={sources.map((x) => ({ value: x.id, label: x.name }))}
           error={errors.sourceId}
           onChange={setSourceId}

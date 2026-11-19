@@ -1,11 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { type Tx, provisionCrm } from '@revops/db';
-import type {
-  CrmSettings,
-  LeadSourceList,
-  PipelineList,
-  UpdateCrmSettingsRequest,
-} from '@revops/shared';
+import type { CrmSettings, PipelineList, UpdateCrmSettingsRequest } from '@revops/shared';
 import { recordAudit } from '../../platform/outbox/record';
 import type { RequestMeta } from '../../platform/request-meta';
 import { ContactsRepository } from './contacts.repository';
@@ -36,6 +31,7 @@ export class CrmService {
     return {
       agentContactVisibility: await this.contacts.agentContactVisibility(tx, tenantId),
       allowAgentExport: await this.contacts.allowAgentExport(tx, tenantId),
+      dedupePolicy: await this.contacts.dedupePolicy(tx, tenantId),
     };
   }
 
@@ -65,6 +61,11 @@ export class CrmService {
           await this.contacts.setAllowAgentExport(tx, auth.tenantId, after.allowAgentExport);
           changed.allowAgentExport = after.allowAgentExport;
           was.allowAgentExport = before.allowAgentExport;
+        }
+        if (after.dedupePolicy !== before.dedupePolicy) {
+          await this.contacts.setDedupePolicy(tx, auth.tenantId, after.dedupePolicy);
+          changed.dedupePolicy = after.dedupePolicy;
+          was.dedupePolicy = before.dedupePolicy;
         }
         if (Object.keys(changed).length > 0) {
           await recordAudit(tx, {
@@ -107,11 +108,5 @@ export class CrmService {
 
   listPipelines(auth: CrmAuth): Promise<PipelineList> {
     return this.withCrm(auth, async (tx) => ({ items: await this.repository.listPipelines(tx) }));
-  }
-
-  listLeadSources(auth: CrmAuth): Promise<LeadSourceList> {
-    return this.withCrm(auth, async (tx) => ({
-      items: await this.repository.listLeadSources(tx),
-    }));
   }
 }

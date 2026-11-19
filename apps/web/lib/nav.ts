@@ -5,6 +5,7 @@ import {
   KanbanSquare,
   LayoutDashboard,
   ListPlus,
+  Radio,
   type LucideIcon,
   SlidersHorizontal,
   ListTodo,
@@ -74,6 +75,12 @@ export const NAV: readonly NavSection[] = [
         label: shellStrings.nav.pipelines,
         icon: KanbanSquare,
         permission: 'pipeline.manage',
+      },
+      {
+        href: '/settings/lead-sources',
+        label: shellStrings.nav.leadSources,
+        icon: Radio,
+        permission: 'source.manage',
       },
       {
         href: '/settings/crm',

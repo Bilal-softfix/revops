@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -46,9 +46,12 @@ export async function createTestApp(): Promise<TestApp> {
     ...process.env,
     DATABASE_URL: appUrl,
     EMAIL_DRIVER: 'fake',
+    STORAGE_DRIVER: 'memory',
     APP_URL: 'http://localhost:3000',
     COOKIE_SECURE: 'true',
     LOG_LEVEL: 'fatal',
+    // A throwaway key-encryption key per test app (secrets never outlive the test database).
+    DATA_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
   });
   const clock = new FakeClock(new Date());
   const jobs = new InMemoryJobQueue();
