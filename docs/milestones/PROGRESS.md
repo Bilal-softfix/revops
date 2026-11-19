@@ -196,6 +196,7 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
   - Tests: `csv-imports.int.test.ts` (14: AC 10k rows in background + ANALYZE, AC per-row failures + escaped report, AC re-run → duplicates only, resume, start validation, upload limits/415/413/422/404, rate limit, roles + cross-tenant 404), parser (8), storage (16), helpers (14), shared (4), proxy limit, Playwright upload → map → done → error report.
 
 - [x] UI refresh (2026-11-19, Dev request between M2-T5 and the M2 review; plan approved): indigo theme + Inter (`@fontsource-variable/inter`, bundled locally), new sidebar/header (logo, account card, breadcrumb, quick "Add lead"), split sign-in pages, live dashboard (`GET /v1/dashboard/summary` + KPI tiles, leads by source, recent leads, get-started checklist), compact leads toolbar ("More filters" panel for dates/fields), restyled table/board/lead detail/timeline/lead sources. Fixed: the board widened the whole page (hidden native selects escaped the scroll container) and the lead timeline stretched to the sidebar's height. Tests: `dashboard.int.test.ts` (5), shared `topSources` (3), web formatting helpers (16); accessible names kept, so e2e specs are unchanged.
+  - Toasts (Dev, 2026-11-19): sign-in ("Welcome back, <name>"), sign-out and invitation accepted now show a toast (other actions already did); toasts restyled to the theme (card, coloured accent bar and icon per type, bottom-right on desktop, top on phones).
 
 ## In progress
 

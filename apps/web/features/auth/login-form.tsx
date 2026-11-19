@@ -5,6 +5,7 @@ import { type LoginRequest, loginRequestSchema, sessionResponseSchema } from '@r
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { useForm } from 'react-hook-form';
 import type { z } from 'zod';
 import { FormError, TextField } from '@/components/form/text-field';
@@ -28,10 +29,14 @@ export function LoginForm({ next, email }: { next: string; email?: string | unde
   const onSubmit = form.handleSubmit(async (values) => {
     setFormError(null);
     try {
-      await api('/v1/auth/login', {
+      const session = await api('/v1/auth/login', {
         method: 'POST',
         body: values,
         schema: sessionResponseSchema,
+      });
+      const firstName = session.user.name.split(/\s+/)[0] ?? session.user.name;
+      toast.success(s.login.welcome(firstName), {
+        description: session.tenant ? s.login.welcomeBody(session.tenant.name) : undefined,
       });
       router.replace(next);
       router.refresh();

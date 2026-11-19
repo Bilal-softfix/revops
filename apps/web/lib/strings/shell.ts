@@ -24,6 +24,8 @@ export const shellStrings = {
   userMenu: {
     label: 'Account menu',
     signOut: 'Sign out',
+    signedOut: 'You’ve been signed out',
+    signedOutBody: 'See you soon.',
     role: (role: string) => `Role: ${role}`,
   },
   noTenant: {

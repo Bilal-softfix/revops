@@ -3,6 +3,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { ChevronsUpDown, LogOut } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import {
@@ -41,6 +42,7 @@ export function UserMenu({ variant = 'header' }: { variant?: 'header' | 'sidebar
       () => undefined,
     );
     queryClient.clear();
+    toast(s.userMenu.signedOut, { description: s.userMenu.signedOutBody });
     router.replace('/login');
     router.refresh();
   };
