@@ -1,0 +1,19 @@
+[project]
+name = "voice-spike"
+version = "0.0.0"
+description = "S1 throwaway spike: Hinglish qualification bot on LiveKit Agents (not production)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "livekit-agents[sarvam,turn-detector]==1.8.13",
+    "python-dotenv==1.2.1",
+]
+
+[dependency-groups]
+dev = ["ruff==0.17.3"]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

@@ -1,7 +1,7 @@
 # PROGRESS
 
 ## Current
-Milestone: M2 — Lead Capture & Dedupe. Branch: `milestone/m2-lead-capture`, cut 2026-11-17 from the tip of `milestone/m1-crm-core` (44b37dc): PR #2 was still open and tag `m1-done` points at the M0 merge (5f428c5); `gh pr merge` was denied by permissions. **Dev to do:** merge PR #2, move `m1-done` to the merge commit. M2-T0 done 2026-11-17. M2 plan approved 2026-11-17 (order: T1 → T4 → T6 → T2 → T3 → T5, sequential; plan incl. threat model in `docs/milestones/M2-lead-capture.md` tasks). M2-T1, M2-T4, M2-T6 done 2026-11-17; M2-T2, M2-T3 done 2026-11-18; M2-T3 review changes and M2-T5 done 2026-11-19. PR #2 merged by Dev (a655812). Next: `/review-milestone M2`.
+Milestone: M2 — Lead Capture & Dedupe. Branch: `milestone/m2-lead-capture`, cut 2026-11-17 from the tip of `milestone/m1-crm-core` (44b37dc): PR #2 was still open and tag `m1-done` points at the M0 merge (5f428c5); `gh pr merge` was denied by permissions. **Dev to do:** merge PR #2, move `m1-done` to the merge commit. M2-T0 done 2026-11-17. M2 plan approved 2026-11-17 (order: T1 → T4 → T6 → T2 → T3 → T5, sequential; plan incl. threat model in `docs/milestones/M2-lead-capture.md` tasks). M2-T1, M2-T4, M2-T6 done 2026-11-17; M2-T2, M2-T3 done 2026-11-18; M2-T3 review changes and M2-T5 done 2026-11-19. PR #2 merged by Dev (a655812). M2 review deferred by Dev (2026-11-19). **S1 voice spike started 2026-11-19** on branch `spike/s1-voice` (code in `spikes/voice/`, throwaway).
 
 M1 history:
 Milestone: M1 — CRM Core. Branch: `milestone/m1-crm-core` (from main after M0 merged, tag `m0-done`).
@@ -199,6 +199,7 @@ Plan approved 2026-11-04. M0-T1, M0-T2 done 2026-11-04; M0-T3, M0-T4 done 2026-1
   - Toasts (Dev, 2026-11-19): sign-in ("Welcome back, <name>"), sign-out and invitation accepted now show a toast (other actions already did); toasts restyled to the theme (card, coloured accent bar and icon per type, bottom-right on desktop, top on phones).
 
 ## In progress
+- [ ] S1 voice spike — S1-T2 bot scaffolded (2026-11-19): Hinglish qualification bot on LiveKit Agents 1.8.13 with `save_qualification` / `transfer_to_human` tools; three pipelines (A: LiveKit Inference Deepgram Nova-3 multi + Gemma 4 + Cartesia Sonic-3 hi; B: Sarvam Saaras v4 codemix + Bulbul v4 flash; C: Inference GPT-Live Transcribe + Gemini flash-lite + Gemini TTS); per-turn latency logged + `summarize.py` (p50/p90). **Waiting on LiveKit Cloud keys** to run it. Next: run A/B/C in the playground, S1-T1 provider matrix, S1-T3 real number, S1-T4 benchmark, S1-T5 ADR-007.
 
 ## Assumptions made
 _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
@@ -420,6 +421,8 @@ _(Claude logs product assumptions here — Dev reviews at each checkpoint)_
 - [ ] Meta Business Verification + App Review
 - [ ] WhatsApp Cloud API number + templates
 - [ ] Telephony provider KYC + numbers
+- [ ] S1: LiveKit Cloud project (free tier) — LIVEKIT_URL / API key / secret in `spikes/voice/.env.local` (also unlocks LiveKit Inference for combos A and C)
+- [ ] S1: Sarvam AI API key (combo B); a Hindi Cartesia voice id (combo A, optional)
 - [ ] Legal review (DPDP, consent texts)
 - [ ] Segment decision + design partners
 - [ ] Dev: install pgvector on the local Postgres 18 before M4 (optional until then)
