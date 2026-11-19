@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { GET, MAX_BODY_BYTES, OPTIONS, POST } from './route';
+import { GET, MAX_BODY_BYTES, MAX_UPLOAD_BYTES, OPTIONS, POST, bodyLimit } from './route';
 
 const ctx = (path: string[]) => ({ params: Promise.resolve({ path }) });
 
@@ -52,12 +52,19 @@ describe('/api/[...path] proxy', () => {
     vi.stubGlobal('fetch', upstream);
     const req = new NextRequest('http://localhost:3000/api/v1/public/forms/k', {
       method: 'POST',
-      headers: { origin: 'https://shop.example.com', 'content-type': 'text/plain' },
+      headers: {
+        origin: 'https://shop.example.com',
+        'content-type': 'text/plain',
+        'x-revops-signature': 't=1,v1=abc',
+        'x-webhook-token': 'whsec_x',
+      },
       body: '{"fields":{}}',
     });
     const res = await POST(req, ctx(['v1', 'public', 'forms', 'k']));
     const [, init] = upstream.mock.calls[0] as unknown as [URL, RequestInit];
     expect((init.headers as Headers).get('origin')).toBe('https://shop.example.com');
+    expect((init.headers as Headers).get('x-revops-signature')).toBe('t=1,v1=abc');
+    expect((init.headers as Headers).get('x-webhook-token')).toBe('whsec_x');
     expect(res.headers.get('access-control-allow-origin')).toBe('https://shop.example.com');
     expect(typeof OPTIONS).toBe('function');
   });
@@ -126,5 +133,16 @@ describe('/api/[...path] proxy', () => {
     expect(res.status).toBe(503);
     expect(res.headers.get('content-type')).toMatch(/problem\+json/);
     expect(await res.json()).toMatchObject({ code: 'api_unavailable' });
+  });
+});
+
+describe('bodyLimit', () => {
+  it('allows 10 MB only for CSV uploads', () => {
+    const id = '00000000-0000-4000-8000-000000000000';
+    expect(bodyLimit('POST', ['v1', 'lead-sources', id, 'imports'])).toBe(MAX_UPLOAD_BYTES);
+    expect(bodyLimit('GET', ['v1', 'lead-sources', id, 'imports'])).toBe(MAX_BODY_BYTES);
+    expect(bodyLimit('POST', ['v1', 'lead-sources', id, 'imports', 'x'])).toBe(MAX_BODY_BYTES);
+    expect(bodyLimit('POST', ['v1', 'leads'])).toBe(MAX_BODY_BYTES);
+    expect(bodyLimit('POST', ['v1', 'public', 'webhooks', 'k'])).toBe(MAX_BODY_BYTES);
   });
 });

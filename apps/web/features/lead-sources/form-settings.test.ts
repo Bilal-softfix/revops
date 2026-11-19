@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { embedSnippet, parseMapping } from './form-settings';
+import { embedSnippet, parseMapping, webhookUrl } from './form-settings';
 
 describe('parseMapping', () => {
   it('reads "field = target" lines, ignoring blanks and spaces', () => {
@@ -23,5 +23,13 @@ describe('embedSnippet', () => {
       '<script src="https://app.revops.in/api/v1/public/embed.js" data-revops-key="KEY123" async></script>',
     );
     expect(snippet).toContain('<form data-revops-form>');
+  });
+});
+
+describe('webhookUrl', () => {
+  it('points at the public webhook route through the app proxy', () => {
+    expect(webhookUrl('https://app.revops.in', 'K')).toBe(
+      'https://app.revops.in/api/v1/public/webhooks/K',
+    );
   });
 });

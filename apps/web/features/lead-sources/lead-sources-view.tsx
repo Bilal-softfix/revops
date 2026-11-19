@@ -34,17 +34,114 @@ import { useMembers } from '@/features/team/queries';
 import { errorMessage } from '@/lib/api/messages';
 import { common } from '@/lib/strings/common';
 import { leadSourceStrings as s } from '@/lib/strings/lead-sources';
+import { webhookUrl } from './form-settings';
+import { CsvImports } from './csv-imports';
 import { FormSettingsDialog } from './form-settings-dialog';
 import {
   useCreateLeadSource,
   useDeleteLeadSource,
   useLeadSources,
+  useRejectedDeliveries,
   useRotateKey,
   useRotateSecret,
   useUpdateLeadSource,
 } from './queries';
 
 type Confirm = { kind: 'rotateKey' | 'rotateSecret' | 'delete'; source: LeadSource };
+
+/** Requests that failed authentication (owners/admins; last 7 days, capped, first 16 KB). */
+function RejectedDeliveries({ sourceId }: { sourceId: string }) {
+  const list = useRejectedDeliveries(sourceId, true);
+  return (
+    <div className="grid gap-2 rounded-md border p-3" data-testid="rejected-deliveries">
+      <div>
+        <p className="font-medium">{s.webhook.rejected.title}</p>
+        <p className="text-xs text-muted-foreground">{s.webhook.rejected.hint}</p>
+      </div>
+      {list.isPending ? (
+        <LoadingState rows={2} />
+      ) : list.isError ? (
+        <ErrorState error={list.error} onRetry={() => void list.refetch()} />
+      ) : list.data.items.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{s.webhook.rejected.empty}</p>
+      ) : (
+        <ul className="grid gap-2">
+          {list.data.items.map((item) => (
+            <li key={item.id} className="grid gap-1">
+              <div className="flex flex-wrap gap-2 text-xs">
+                <span>{new Date(item.receivedAt).toLocaleString()}</span>
+                <span className="text-muted-foreground">
+                  {s.webhook.rejected.reasons[item.reason] ?? item.reason}
+                </span>
+                {item.truncated ? (
+                  <span className="text-muted-foreground">{s.webhook.rejected.truncated}</span>
+                ) : null}
+              </div>
+              <pre className="max-h-32 overflow-auto rounded bg-muted p-2 text-xs break-all whitespace-pre-wrap">
+                {item.raw}
+              </pre>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** API sources (M2-T3): where to send deliveries, how they authenticate, and what was rejected. */
+function WebhookInfo({ source }: { source: LeadSource }) {
+  const url = webhookUrl(window.location.origin, source.publicKey);
+  const update = useUpdateLeadSource();
+  const [showRejected, setShowRejected] = useState(false);
+  const mode = source.config.webhookAuth;
+  return (
+    <div className="grid gap-2 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-muted-foreground">{s.webhook.url}:</span>
+        <code
+          className="rounded bg-muted px-1.5 py-0.5 text-xs break-all"
+          data-testid="webhook-url"
+        >
+          {url}
+        </code>
+        <CopyButton value={url} />
+      </div>
+      <SimpleSelect
+        label={s.webhook.auth.label}
+        value={mode}
+        disabled={update.isPending}
+        className="max-w-sm"
+        options={[
+          { value: 'hmac', label: s.webhook.auth.hmac },
+          { value: 'token', label: s.webhook.auth.token },
+        ]}
+        onChange={(v) =>
+          void update
+            .mutateAsync({
+              id: source.id,
+              config: { ...source.config, webhookAuth: v === 'token' ? 'token' : 'hmac' },
+            })
+            .then(() => toast.success(s.saved))
+            .catch((error: unknown) => toast.error(errorMessage(error)))
+        }
+      />
+      {mode === 'token' ? (
+        <p className="text-xs text-amber-700 dark:text-amber-400" role="note">
+          {s.webhook.auth.tokenWarning}
+        </p>
+      ) : null}
+      <p className="text-xs text-muted-foreground">
+        {mode === 'token' ? s.webhook.tokenUsage : s.webhook.signing}
+      </p>
+      <div>
+        <Button size="sm" variant="ghost" onClick={() => setShowRejected((v) => !v)}>
+          {showRejected ? s.webhook.rejected.close : s.webhook.rejected.open}
+        </Button>
+      </div>
+      {showRejected ? <RejectedDeliveries sourceId={source.id} /> : null}
+    </div>
+  );
+}
 
 const ROUND_ROBIN = 'round_robin';
 const UNASSIGNED = 'unassigned';
@@ -129,6 +226,8 @@ export function LeadSourcesView() {
                   <CopyButton value={source.publicKey} />
                 </div>
               ) : null}
+              {source.type === 'api' ? <WebhookInfo source={source} /> : null}
+              {source.type === 'csv' ? <CsvImports source={source} /> : null}
               <AssignmentPicker source={source} />
               <div className="flex flex-wrap gap-2">
                 <Button

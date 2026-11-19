@@ -7,6 +7,9 @@ import {
   customFieldPipelines,
   leadSources,
   assignmentCursors,
+  csvImportErrors,
+  csvImports,
+  inboundWebhooks,
   leadIngestions,
   leads,
   savedViews,
@@ -290,7 +293,70 @@ export const TENANT_TABLES: readonly TenantTableFixture[] = [
       return row?.id ?? '';
     },
   },
+  {
+    table: 'inbound_webhooks',
+    tenantColumn: 'tenant_id',
+    privileges: ['SELECT', 'INSERT', 'UPDATE'],
+    insert: async (tx, tenantId) => {
+      const [source] = await tx
+        .insert(leadSources)
+        .values({ tenantId, name: `W ${randomUUID()}`, type: 'api' })
+        .returning({ id: leadSources.id });
+      const [row] = await tx
+        .insert(inboundWebhooks)
+        .values({
+          tenantId,
+          sourceId: source?.id ?? '',
+          externalEventId: randomUUID(),
+          signatureValid: true,
+          payload: {},
+          status: 'received',
+        })
+        .returning({ id: inboundWebhooks.id });
+      return row?.id ?? '';
+    },
+  },
+  {
+    table: 'csv_imports',
+    tenantColumn: 'tenant_id',
+    privileges: ['SELECT', 'INSERT', 'UPDATE'],
+    insert: async (tx, tenantId) => (await insertCsvImport(tx, tenantId)).id,
+  },
+  {
+    table: 'csv_import_errors',
+    tenantColumn: 'tenant_id',
+    privileges: ['SELECT', 'INSERT'],
+    insert: async (tx, tenantId) => {
+      const csv = await insertCsvImport(tx, tenantId);
+      const [row] = await tx
+        .insert(csvImportErrors)
+        .values({ tenantId, importId: csv.id, rowNumber: 1, reason: 'unusable', cells: ['x'] })
+        .returning({ id: csvImportErrors.id });
+      return row?.id ?? '';
+    },
+  },
 ];
+
+async function insertCsvImport(tx: Tx, tenantId: string): Promise<{ id: string }> {
+  const [source] = await tx
+    .insert(leadSources)
+    .values({ tenantId, name: `C ${randomUUID()}`, type: 'csv' })
+    .returning({ id: leadSources.id });
+  const [row] = await tx
+    .insert(csvImports)
+    .values({
+      tenantId,
+      sourceId: source?.id ?? '',
+      createdBy: randomUUID(),
+      fileName: 'leads.csv',
+      sizeBytes: 3,
+      fileSha256: 'x',
+      headers: ['phone'],
+      totalRows: 1,
+    })
+    .returning({ id: csvImports.id });
+  return { id: row?.id ?? '' };
+}
 
 async function insertLead(tx: Tx, tenantId: string): Promise<{ id: string; contactId: string }> {
   const pipeline = await insertPipeline(tx, tenantId);

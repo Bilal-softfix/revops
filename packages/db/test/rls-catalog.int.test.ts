@@ -32,6 +32,7 @@ const OWNER_ONLY_POLICIES: Record<string, string[]> = {
   outbox_events: ['outbox_relay_select:SELECT', 'outbox_relay_update:UPDATE'],
   lead_sources: ['capture_resolve_select:SELECT'],
   tenants: ['capture_resolve_select:SELECT'],
+  inbound_webhooks: ['webhook_purge_select:SELECT', 'webhook_purge_delete:DELETE'],
 };
 /** SECURITY DEFINER functions → whether app_user may call them directly. */
 const DEFINER_FUNCTIONS: Record<string, boolean> = {
@@ -45,7 +46,10 @@ const DEFINER_FUNCTIONS: Record<string, boolean> = {
   auth_reset_password: true,
   auth_session_lookup: true,
   auth_verify_email: true,
+  capture_analyze_lead_tables: true,
+  capture_purge_inbound_webhooks: true,
   capture_resolve_source: true,
+  capture_resolve_webhook_source: true,
   outbox_claim_batch: true,
   outbox_dead_letter: true,
   outbox_mark_published: true,

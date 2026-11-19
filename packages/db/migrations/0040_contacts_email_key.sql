@@ -1,0 +1,2 @@
+ALTER TABLE "contacts" ADD COLUMN "email_key" text GENERATED ALWAYS AS (lower(email::text)) STORED;--> statement-breakpoint
+CREATE INDEX "contacts_tenant_email_key_idx" ON "contacts" USING btree ("tenant_id","email_key") WHERE "contacts"."deleted_at" is null and "contacts"."email_key" is not null;

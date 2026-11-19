@@ -10,6 +10,8 @@ export interface ApiRequest<S extends z.ZodType | undefined> {
   /** CSRF token from the session; sent on unsafe methods. */
   csrfToken?: string | undefined;
   signal?: AbortSignal;
+  /** A raw (non-JSON) body, e.g. a CSV file; `body` must be unset. */
+  raw?: { data: Blob; contentType: string; headers?: Record<string, string> };
 }
 
 type Result<S> = S extends z.ZodType ? z.infer<S> : undefined;
@@ -26,6 +28,8 @@ export async function api<S extends z.ZodType | undefined = undefined>(
   const method = request.method ?? 'GET';
   const headers: Record<string, string> = { accept: 'application/json' };
   if (request.body !== undefined) headers['content-type'] = 'application/json';
+  if (request.raw)
+    Object.assign(headers, request.raw.headers, { 'content-type': request.raw.contentType });
   if (method !== 'GET' && request.csrfToken) headers[CSRF_HEADER] = request.csrfToken;
   let res: Response;
   try {
@@ -35,6 +39,7 @@ export async function api<S extends z.ZodType | undefined = undefined>(
       credentials: 'same-origin',
       cache: 'no-store',
       ...(request.body !== undefined ? { body: JSON.stringify(request.body) } : {}),
+      ...(request.raw ? { body: request.raw.data } : {}),
       ...(request.signal ? { signal: request.signal } : {}),
     });
   } catch (error) {

@@ -25,3 +25,8 @@ export function embedSnippet(appOrigin: string, publicKey: string): string {
     '</form>',
   ].join('\n');
 }
+
+/** Where an API source's sender posts signed deliveries (M2-T3), through the app's API proxy. */
+export function webhookUrl(appOrigin: string, publicKey: string): string {
+  return `${appOrigin}/api/v1/public/webhooks/${publicKey}`;
+}

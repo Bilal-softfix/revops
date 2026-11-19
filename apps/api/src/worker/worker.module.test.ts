@@ -32,6 +32,9 @@ describe('WorkerModule', () => {
       .map((h) => h.job.name)
       .sort();
     expect(names).toEqual([
+      'capture.csv-import',
+      'capture.webhook-process',
+      'capture.webhook-purge',
       'identity.forgot-password',
       'identity.purge-expired-unverified',
       'identity.resend-verification',
@@ -42,7 +45,7 @@ describe('WorkerModule', () => {
     ]);
   });
 
-  it('schedules the two purges as cron jobs', () => {
+  it('schedules the purges as cron jobs', () => {
     const crons = Object.fromEntries(
       moduleRef
         .get(JobHandlers)
@@ -51,6 +54,7 @@ describe('WorkerModule', () => {
         .map((h) => [h.job.name, h.cron]),
     );
     expect(crons).toEqual({
+      'capture.webhook-purge': '15 3 * * *',
       'identity.purge-expired-unverified': '15 * * * *',
       'platform.rate-limit-purge': '*/10 * * * *',
     });

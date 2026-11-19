@@ -9,6 +9,19 @@ export const dynamic = 'force-dynamic';
 
 /** Same limit as the API's JSON parser; enforced here so the web server never buffers more. */
 export const MAX_BODY_BYTES = 100 * 1024;
+/** CSV uploads (M2-T5): `POST v1/lead-sources/<id>/imports`, the API's 10 MB cap plus slack. */
+export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024 + 64 * 1024;
+
+/** The body cap for this request: uploads get the larger one, everything else 100 kB. */
+export function bodyLimit(method: string, path: readonly string[]): number {
+  const isUpload =
+    method === 'POST' &&
+    path.length === 4 &&
+    path[0] === 'v1' &&
+    path[1] === 'lead-sources' &&
+    path[3] === 'imports';
+  return isUpload ? MAX_UPLOAD_BYTES : MAX_BODY_BYTES;
+}
 
 /** Request headers the API needs; everything else (incl. hop-by-hop) is dropped. */
 const FORWARD_REQUEST = [
@@ -21,6 +34,11 @@ const FORWARD_REQUEST = [
   'x-forwarded-for',
   // Public capture (M2-T2): the API checks the posting page's origin against the source allow-list.
   'origin',
+  // Signed webhooks (M2-T3): the API verifies this against the exact body bytes forwarded below.
+  'x-revops-signature',
+  'x-webhook-token',
+  // CSV uploads (M2-T5): the original file name, shown in the import list.
+  'x-file-name',
 ];
 /** Response headers never copied back (the runtime sets its own). */
 const DROP_RESPONSE = new Set([
@@ -39,9 +57,9 @@ function problem(status: number, code: string, title: string): Response {
   );
 }
 
-/** The request body, or null once it exceeds MAX_BODY_BYTES (streamed: never fully buffered). */
-async function readBody(req: NextRequest): Promise<Uint8Array<ArrayBuffer> | null> {
-  if (Number(req.headers.get('content-length') ?? 0) > MAX_BODY_BYTES) return null;
+/** The request body, or null once it exceeds `limit` (streamed: never fully buffered). */
+async function readBody(req: NextRequest, limit: number): Promise<Uint8Array<ArrayBuffer> | null> {
+  if (Number(req.headers.get('content-length') ?? 0) > limit) return null;
   const chunks: Uint8Array[] = [];
   let size = 0;
   const reader = req.body?.getReader();
@@ -50,7 +68,7 @@ async function readBody(req: NextRequest): Promise<Uint8Array<ArrayBuffer> | nul
     const { done, value } = await reader.read();
     if (done) break;
     size += value.byteLength;
-    if (size > MAX_BODY_BYTES) {
+    if (size > limit) {
       await reader.cancel();
       return null;
     }
@@ -83,7 +101,7 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
     if (value) headers.set(name, value);
   }
   const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
-  const body = hasBody ? await readBody(req) : undefined;
+  const body = hasBody ? await readBody(req, bodyLimit(req.method, path)) : undefined;
   if (body === null) return problem(413, 'payload_too_large', 'Request body too large');
 
   let upstream: Response;

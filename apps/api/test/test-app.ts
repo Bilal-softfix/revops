@@ -46,6 +46,7 @@ export async function createTestApp(): Promise<TestApp> {
     ...process.env,
     DATABASE_URL: appUrl,
     EMAIL_DRIVER: 'fake',
+    STORAGE_DRIVER: 'memory',
     APP_URL: 'http://localhost:3000',
     COOKIE_SECURE: 'true',
     LOG_LEVEL: 'fatal',

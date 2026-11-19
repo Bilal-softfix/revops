@@ -52,6 +52,14 @@ export const assignmentConfigSchema = z.discriminatedUnion('strategy', [
 ]);
 export type AssignmentConfig = z.infer<typeof assignmentConfigSchema>;
 
+/**
+ * How webhook deliveries to an API source authenticate (M2-T3). `hmac` (default): signed
+ * `X-RevOps-Signature`. `token`: the secret itself in `X-Webhook-Token` — for no-code tools
+ * (Zapier, Make) that can't sign; less secure (no replay window, the secret travels each time).
+ */
+export const WEBHOOK_AUTH_MODES = ['hmac', 'token'] as const;
+export type WebhookAuthMode = (typeof WEBHOOK_AUTH_MODES)[number];
+
 export const leadSourceConfigSchema = z.strictObject({
   /** Browser origins allowed to post the public form (CORS). Empty = no browser posts. */
   allowedOrigins: z
@@ -79,6 +87,8 @@ export const leadSourceConfigSchema = z.strictObject({
   stageId: z.uuid().nullable().default(null),
   /** Owner of new leads from this source (M2-T6). */
   assignment: assignmentConfigSchema.default({ strategy: 'round_robin' }),
+  /** API sources: webhook authentication (M2-T3). */
+  webhookAuth: z.enum(WEBHOOK_AUTH_MODES).default('hmac'),
 });
 export type LeadSourceConfig = z.infer<typeof leadSourceConfigSchema>;
 export type LeadSourceConfigInput = z.input<typeof leadSourceConfigSchema>;

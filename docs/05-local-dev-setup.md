@@ -24,7 +24,7 @@ Everything runs on the dev machine: Node 22, Python 3.12 (uv) and a natively ins
 | Tracing | Off by default; set an OTLP/HTTP endpoint to export | `OTEL_EXPORTER_OTLP_ENDPOINT` |
 | Metrics | `/metrics` on api :4000 and worker :4001, open in dev | `METRICS_TOKEN` (required in prod) |
 | Rate limits | Postgres table `rate_limit_buckets` | — |
-| Object storage | Local disk `./.data/storage` (gitignored) | `STORAGE_DRIVER=local` |
+| Object storage (CSV uploads, M2-T5) | Local disk `.data/storage` under the process directory (`apps/api/` for api + worker; gitignored); tests use `memory` | `STORAGE_DRIVER=local`, `STORAGE_DIR` |
 | Email | Console provider (prints to terminal) | `EMAIL_DRIVER=console` |
 | LiveKit (S1/M4) | LiveKit Cloud free project (decided in S1) | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` |
 

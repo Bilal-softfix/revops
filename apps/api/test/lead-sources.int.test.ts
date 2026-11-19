@@ -91,6 +91,7 @@ describe('lead sources', () => {
         pipelineId: null,
         stageId: null,
         assignment: { strategy: 'round_robin' },
+        webhookAuth: 'hmac',
       });
       expect(s.hasWebhookSecret).toBe(false);
     }

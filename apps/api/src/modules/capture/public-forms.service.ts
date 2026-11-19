@@ -1,12 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import {
-  type IntakeLeadInput,
   type LeadSourceConfig,
-  MAPPING_BUILTINS,
   PUBLIC_KEY_PATTERN,
-  type PublicFormSubmission,
-  inboundAttributionSchema,
   leadSourceConfigSchema,
   publicFormSubmissionSchema,
 } from '@revops/shared';
@@ -16,6 +12,7 @@ import { RateLimiter } from '../../platform/rate-limit/rate-limiter';
 import { CaptchaVerifier } from '../../providers/captcha';
 import { LeadIntakeService } from '../crm';
 import { CaptureRepository, type ResolvedSource } from './capture.repository';
+import { toIntakeInput } from './mapping';
 
 const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
@@ -32,18 +29,6 @@ export const PUBLIC_FORM_LIMITS = {
 
 /** A human needs more than this to fill a form; faster posts are treated like the honeypot. */
 export const MIN_FILL_MS = 1500;
-
-/** Field names the snippet maps without configuration (common form `name` attributes). */
-const DEFAULT_MAPPING: Record<string, (typeof MAPPING_BUILTINS)[number]> = {
-  name: 'name',
-  full_name: 'name',
-  fullname: 'name',
-  phone: 'phone',
-  mobile: 'phone',
-  tel: 'phone',
-  email: 'email',
-  city: 'city',
-};
 
 const notFound = () => new DomainError('not_found', 404, 'Not found');
 const rateLimited = (retryAfter: number) =>
@@ -118,7 +103,7 @@ export class PublicFormsService {
       }
     }
 
-    const input = this.map(submission, config);
+    const input = toIntakeInput(submission.fields, submission.attribution, config);
     await this.database.withContext({ tenantId: source.tenantId }, (tx) =>
       this.intake.ingest(tx, {
         tenantId: source.tenantId,
@@ -129,40 +114,4 @@ export class PublicFormsService {
     );
     return 'accepted';
   }
-
-  /** Form fields → intake input via the source's mapping (unmapped fields are ignored). */
-  map(submission: PublicFormSubmission, config: LeadSourceConfig): IntakeLeadInput {
-    const input: IntakeLeadInput = {};
-    const leadFields: Record<string, string | number | boolean | null> = {};
-    for (const [field, value] of Object.entries(submission.fields)) {
-      const target = config.fieldMapping[field] ?? DEFAULT_MAPPING[field.toLowerCase()];
-      if (!target || value === null) continue;
-      if (target.startsWith('lead.')) {
-        leadFields[target.slice(5)] = value;
-        continue;
-      }
-      const text = String(value).trim();
-      if (text === '') continue;
-      const builtin = target as (typeof MAPPING_BUILTINS)[number];
-      const cap = { name: 200, phone: 40, email: 254, city: 100 }[builtin];
-      input[builtin] = text.slice(0, cap);
-    }
-    if (Object.keys(leadFields).length > 0) input.leadFields = leadFields;
-    const attribution = sanitizeAttribution(submission.attribution);
-    if (Object.keys(attribution).length > 0) input.attribution = attribution;
-    return input;
-  }
-}
-
-/** Keeps only known attribution keys whose value is valid; anything else is silently dropped. */
-export function sanitizeAttribution(raw: Record<string, unknown> | undefined) {
-  const out: Record<string, string> = {};
-  if (!raw) return out;
-  for (const [key, schema] of Object.entries(inboundAttributionSchema.shape)) {
-    const value = raw[key];
-    if (typeof value !== 'string' || value.trim() === '') continue;
-    const parsed = schema.safeParse(value);
-    if (parsed.success && typeof parsed.data === 'string') out[key] = parsed.data;
-  }
-  return out;
 }

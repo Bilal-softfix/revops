@@ -198,13 +198,17 @@ export class ContactsRepository {
     for (const field of ['phone', 'email'] as const) {
       const value = field === 'phone' ? match.phoneE164 : match.email;
       if (!value) continue;
-      const column = field === 'phone' ? contacts.phoneE164 : contacts.email;
+      // Email via email_key (leakproof text `=`, indexed): see the column's note.
+      const condition =
+        field === 'phone'
+          ? eq(contacts.phoneE164, value)
+          : eq(contacts.emailKey, sql`lower(${value}::text)`);
       const [row] = await tx
         .select()
         .from(contacts)
         .where(
           and(
-            eq(column, value),
+            condition,
             isNull(contacts.deletedAt),
             excludeId ? ne(contacts.id, excludeId) : undefined,
           ),

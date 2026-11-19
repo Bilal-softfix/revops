@@ -106,3 +106,54 @@ export type PublicFormSubmission = z.infer<typeof publicFormSubmissionSchema>;
 /** Every accepted (or silently dropped) submission gets the same answer: nothing to learn. */
 export const publicFormResponseSchema = z.object({ ok: z.literal(true) });
 export type PublicFormResponse = z.infer<typeof publicFormResponseSchema>;
+
+// ---- signed generic webhook (M2-T3) ----
+
+/** Header carrying `t=<unix seconds>,v1=<hex HMAC-SHA256(secret, "<t>.<raw body>")>`. */
+export const WEBHOOK_SIGNATURE_HEADER = 'x-revops-signature';
+/** Simple-token mode (opt-in per source): the webhook secret itself, compared in constant time. */
+export const WEBHOOK_TOKEN_HEADER = 'x-webhook-token';
+/** Deliveries signed more than this many seconds before/after our clock are rejected. */
+export const WEBHOOK_TOLERANCE_SECONDS = 300;
+
+/**
+ * Body of `POST /v1/public/webhooks/:publicKey` (Zapier, website backends). `id` is the sender's
+ * unique id for this event: the same id twice is one lead. Values are mapped like the form's.
+ */
+export const webhookLeadPayloadSchema = z.object({
+  id: z.string().trim().min(1).max(200),
+  name: z.string().max(200).optional(),
+  phone: z.string().max(40).optional(),
+  email: z.string().max(254).optional(),
+  city: z.string().max(100).optional(),
+  /** Other form fields, mapped via the source's fieldMapping (lead.<key> for lead fields). */
+  fields: z
+    .record(z.string().min(1).max(64), formValue)
+    .refine((v) => Object.keys(v).length <= 50, 'at most 50 fields')
+    .optional(),
+  attribution: z.record(z.string().max(64), z.unknown()).optional(),
+});
+export type WebhookLeadPayload = z.infer<typeof webhookLeadPayloadSchema>;
+
+export const webhookAcceptedSchema = z.object({
+  ok: z.literal(true),
+  /** True when this event id was already received (nothing new happens). */
+  duplicate: z.boolean(),
+});
+export type WebhookAccepted = z.infer<typeof webhookAcceptedSchema>;
+
+/**
+ * Recent rejected deliveries of a source (owners/admins, for debugging an integration). The
+ * payload is unauthenticated: the first 16 KB as text, never interpreted.
+ */
+export const rejectedDeliverySchema = z.object({
+  id: z.uuid(),
+  receivedAt: z.iso.datetime(),
+  /** signature_missing | signature_malformed | signature_stale | signature_mismatch | token_… */
+  reason: z.string(),
+  raw: z.string(),
+  truncated: z.boolean(),
+});
+export type RejectedDelivery = z.infer<typeof rejectedDeliverySchema>;
+export const rejectedDeliveryListSchema = z.object({ items: z.array(rejectedDeliverySchema) });
+export type RejectedDeliveryList = z.infer<typeof rejectedDeliveryListSchema>;

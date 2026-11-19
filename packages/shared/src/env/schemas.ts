@@ -117,6 +117,12 @@ export const apiEnvSchema = commonEnvSchema.extend(databaseEnvSchema.shape).exte
    */
   CAPTCHA_DRIVER: z.preprocess(blankAsUndefined, z.enum(['fake', 'turnstile']).default('fake')),
   TURNSTILE_SECRET: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  /**
+   * Object storage (M2-T5 CSV uploads): `local` = files under STORAGE_DIR (dev), `memory` =
+   * in-process (tests). S3 arrives in M8.
+   */
+  STORAGE_DRIVER: z.preprocess(blankAsUndefined, z.enum(['local', 'memory']).default('local')),
+  STORAGE_DIR: z.preprocess(blankAsUndefined, z.string().min(1).default('.data/storage')),
   DATA_ENCRYPTION_KEY: z.preprocess(
     blankAsUndefined,
     z
@@ -144,6 +150,9 @@ export function productionEnvProblems(env: ApiEnv): string[] {
   if (!env.COOKIE_SECURE) problems.push('COOKIE_SECURE: must be true in production');
   if (!env.METRICS_TOKEN) problems.push('METRICS_TOKEN: is required in production');
   if (!env.DATA_ENCRYPTION_KEY) problems.push('DATA_ENCRYPTION_KEY: is required in production');
+  if (env.STORAGE_DRIVER === 'memory') {
+    problems.push('STORAGE_DRIVER: "memory" is not allowed in production');
+  }
   if (env.CAPTCHA_DRIVER === 'fake')
     problems.push('CAPTCHA_DRIVER: "fake" is not allowed in production');
   if (env.CAPTCHA_DRIVER === 'turnstile' && !env.TURNSTILE_SECRET) {

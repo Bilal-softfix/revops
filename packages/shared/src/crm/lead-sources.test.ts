@@ -33,7 +33,13 @@ describe('leadSourceConfigSchema', () => {
       pipelineId: null,
       stageId: null,
       assignment: { strategy: 'round_robin' },
+      webhookAuth: 'hmac',
     });
+  });
+
+  it('webhookAuth: hmac (default) or token; nothing else', () => {
+    expect(leadSourceConfigSchema.parse({ webhookAuth: 'token' }).webhookAuth).toBe('token');
+    expect(leadSourceConfigSchema.safeParse({ webhookAuth: 'url' }).success).toBe(false);
   });
 
   it('dedupes origins after normalising', () => {

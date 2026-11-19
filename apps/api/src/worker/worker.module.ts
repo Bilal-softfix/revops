@@ -1,11 +1,14 @@
 import { type DynamicModule, Module } from '@nestjs/common';
 import type { WorkerEnv } from '@revops/shared/env';
+import { CaptureModule } from '../modules/capture';
 import { IdentityModule } from '../modules/identity';
 import { TenancyModule } from '../modules/tenancy';
 import { DemoEventLogConsumer } from '../platform/outbox/demo-event-log.consumer';
 import { OUTBOX_RELAY_OPTIONS, OutboxRelay } from '../platform/outbox/outbox-relay';
 import { PlatformModule } from '../platform/platform.module';
 import { JobRunner } from '../platform/queue/job-runner';
+import { CaptchaModule } from '../providers/captcha';
+import { StorageModule } from '../providers/storage';
 import { EmailModule } from '../providers/email';
 import { WorkerHttpServer } from './worker-http-server';
 
@@ -27,8 +30,12 @@ export class WorkerModule {
       imports: [
         PlatformModule.register(env, 'worker'),
         EmailModule.register(env),
+        CaptchaModule.register(env),
+        StorageModule.register(env),
         IdentityModule,
         TenancyModule,
+        // M2-T3: webhook processing and retention purge jobs.
+        CaptureModule,
       ],
       providers: [
         {
