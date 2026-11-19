@@ -12,7 +12,7 @@ Three pipelines to compare (`VOICE_COMBO`):
 
 | Combo | STT | LLM | TTS | Keys needed |
 |---|---|---|---|---|
-| A | Deepgram Nova-3, `multi` (LiveKit Inference) | Gemma 4 31B (Inference) | Cartesia Sonic-3, Hindi (Inference) | LiveKit only |
+| A | Speechmatics Oak-1, `multi` (LiveKit Inference) | Gemma 4 31B (Inference) | Cartesia Sonic-3, Hindi (Inference) | LiveKit only |
 | B | Sarvam Saaras v4, `codemix` | Gemma 4 31B (Inference) | Sarvam Bulbul v4 flash | LiveKit + Sarvam |
 | C | OpenAI GPT-Live Transcribe, `multi` (Inference) | Gemini 3.5 flash-lite (Inference) | Gemini 3.8 flash TTS (Inference) | LiveKit only |
 
@@ -27,3 +27,7 @@ Every turn's latency (end of caller speech → first audio byte) is logged to
    `uv run python agent.py dev` and open the Agents Playground for your LiveKit project.
 4. Switch pipelines with `VOICE_COMBO=B` (in `.env.local`) and repeat.
 5. `uv run python summarize.py` — latency table per combo.
+
+No-microphone benchmarks: `bench_llm.py` (scripted Hinglish caller vs 3 LLMs) and
+`bench_speech.py` (TTS time-to-first-audio + WAVs in `results/audio/`, STT on that audio).
+Findings so far: [FINDINGS.md](FINDINGS.md).

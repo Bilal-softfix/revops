@@ -44,9 +44,10 @@ LLM_MODEL = os.getenv("LLM_MODEL", "google/gemma-4-31b-it")
 
 # Each combo: (stt, llm, tts) factories. Model ids are LiveKit Inference ids unless noted.
 COMBOS: dict[str, Callable[[], dict[str, Any]]] = {
-    # A — Inference only: Deepgram Nova-3 multilingual (Hindi/English code-switching) + Cartesia.
+    # A — Inference only: Speechmatics Oak-1 multi (best Hinglish in bench_speech; Deepgram
+    # Nova-3 multi decoded Hinglish as Indonesian/Malay) + Gemma 4 + Cartesia Sonic-3 Hindi.
     "A": lambda: {
-        "stt": inference.STT(model="deepgram/nova-3", language="multi"),
+        "stt": inference.STT(model="speechmatics/oak-1", language="multi"),
         "llm": inference.LLM(model=LLM_MODEL),
         "tts": inference.TTS(
             model="cartesia/sonic-3",
