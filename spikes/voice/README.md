@@ -23,7 +23,9 @@ Every turn's latency (end of caller speech → first audio byte) is logged to
 1. `cp .env.example .env.local` and fill in the LiveKit Cloud keys (and `SARVAM_API_KEY` for B,
    `CARTESIA_VOICE` for A). `.env.local` is gitignored.
 2. `uv sync` then `uv run python agent.py download-files` (turn-detector model, once).
-3. `uv run python agent.py console` — talk from this machine's mic, or
+3. `uv run python agent.py console --input-device <id>` — talk from this machine's mic
+   (`--list-devices` shows ids; on the dev laptop the built-in "Microphone Array" is 2, the
+   default jack input is silent — symptom: greeting plays, your speech gets no reply), or
    `uv run python agent.py dev` and open the Agents Playground for your LiveKit project.
 4. Switch pipelines with `VOICE_COMBO=B` (in `.env.local`) and repeat.
 5. `uv run python summarize.py` — latency table per combo.

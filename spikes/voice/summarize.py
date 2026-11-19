@@ -33,11 +33,11 @@ def turns(path: Path) -> list[dict[str, float]]:
             continue
         kind = row.get("type")
         turn = by_speech[speech]
-        if kind == "EOUMetrics":
+        if kind in ("eou_metrics", "EOUMetrics"):
             turn["eou"] = row["end_of_utterance_delay"]
-        elif kind == "LLMMetrics" and "llm" not in turn:  # first LLM call of the turn
+        elif kind in ("llm_metrics", "LLMMetrics") and "llm" not in turn:  # first LLM call of the turn
             turn["llm"] = row["ttft"]
-        elif kind == "TTSMetrics" and "tts" not in turn:
+        elif kind in ("tts_metrics", "TTSMetrics") and "tts" not in turn:
             turn["tts"] = row["ttfb"]
     complete = [t for t in by_speech.values() if {"eou", "llm", "tts"} <= t.keys()]
     for t in complete:
